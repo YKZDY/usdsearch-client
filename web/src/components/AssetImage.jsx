@@ -100,4 +100,4 @@ const AssetImage = ({
   );
 };
 
-export default AssetImage;
+export default React.memo(AssetImage);

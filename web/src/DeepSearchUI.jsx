@@ -73,15 +73,16 @@ import {
 } from "@chakra-ui/react";
 import { CloseIcon, LockIcon, UnlockIcon, CopyIcon, InfoIcon, RepeatIcon, ChevronDownIcon } from "@chakra-ui/icons";
 import GraphVisualization from "./Graph";
-import { apiUrl, IMAGE_SIZE, AUTH_CONFIG, DUPLICATE_REMOVAL_THRESHOLD } from "./config";
+import { apiUrl, IMAGE_SIZE, AUTH_CONFIG, DUPLICATE_REMOVAL_THRESHOLD, SEARCH_DEFAULTS } from "./config";
 import FilterByPropertiesInput from "./propertiesInput";
+import { useTranslation } from "./i18n/LanguageContext";
 
 // Shared utility function for status color mapping
 const getStatusColor = (status) => {
   if (!status) return "white";
   const lowerStatus = status.toLowerCase();
   if (lowerStatus === "ok" || lowerStatus === "completed" || lowerStatus === "success") {
-    return "green.400";
+    return "#52C41A";
   } else if (lowerStatus === "processing" || lowerStatus === "pending" || lowerStatus === "running") {
     return "blue.400";
   } else if (lowerStatus === "queued") {
@@ -118,7 +119,7 @@ const calculateOverallIndexStatus = (pluginStatuses) => {
   if (hasError) {
     return { status: "Error", color: "red.400" };
   } else if (allCompleted) {
-    return { status: "Ok", color: "green.400" };
+    return { status: "Ok", color: "#52C41A" };
   } else if (hasProcessing) {
     return { status: "Partial", color: "yellow.400" };
   } else {
@@ -697,13 +698,13 @@ const ItemDetailsModal = ({
                     </Td>
                   </Tr>
                   <Tr>
-                    <Th>Created By</Th>
+                    <Th>{t('createdBy')}</Th>
                     <Td style={{ wordBreak: "break-all" }}>
                       {selectedItem.metadata.created_by}
                     </Td>
                   </Tr>
                   <Tr>
-                    <Th>Modified</Th>
+                    <Th>{t('modified')}</Th>
                     <Td style={{ wordBreak: "break-all" }}>
                       {selectedItem.metadata.modified}
                     </Td>
@@ -805,33 +806,13 @@ const ItemDetailsModal = ({
 };
 
 function SearchApp() {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useState({
     description: "",
-    file_name: "",
-    exclude_file_name: "",
-    file_extension_include: "usd*",
-    file_extension_exclude: "",
-    created_before: "",
-    created_after: "",
-    modified_before: "",
-    modified_after: "",
-    file_size_greater_than: "",
-    file_size_less_than: "",
-    created_by: "",
-    exclude_created_by: "",
-    modified_by: "",
-    exclude_modified_by: "",
-    search_path: "",
-    search_in_scene: "",
+    ...DEFAULT_SEARCH_PARAMS,
     cutoff_threshold: 0.0,
-    similarity_threshold: "",
-    limit: 50,
     image_similarity_search: null,
-    vision_metadata: "",
     filter_url_regexp: null,
-    filter_by_properties: "",
-    filter_by_tags: "",
-    embedding_knn_search_method: "exact",
   });
 
   const [removeDuplicates, setRemoveDuplicates] = useState(false);
@@ -1054,10 +1035,10 @@ function SearchApp() {
         console.log("Unauthorized");
         setError("Unauthorized");
         toast({
-          title: "Error",
-          description: "Unauthorized. Please enter a valid API Key",
-          status: "error",
-          duration: 9000,
+          title: t('loginRequired'),
+          description: t('loginRequiredDescription'),
+          status: "warning",
+          duration: 8000,
           isClosable: true,
         });
       }
@@ -1118,10 +1099,10 @@ function SearchApp() {
         console.log("Unauthorized");
         setError("Unauthorized");
         toast({
-          title: "Error",
-          description: "Unauthorized. Please enter a valid API Key",
-          status: "error",
-          duration: 9000,
+          title: t('loginRequired'),
+          description: t('loginRequiredDescription'),
+          status: "warning",
+          duration: 8000,
           isClosable: true,
         });
       } else {
@@ -1159,10 +1140,10 @@ function SearchApp() {
         console.log("Unauthorized");
         setError("Unauthorized");
         toast({
-          title: "Error",
-          description: "Unauthorized. Please enter a valid API Key",
-          status: "error",
-          duration: 9000,
+          title: t('loginRequired'),
+          description: t('loginRequiredDescription'),
+          status: "warning",
+          duration: 8000,
           isClosable: true,
         });
       } else {
@@ -1621,6 +1602,41 @@ function SearchApp() {
     e.preventDefault();
   };
 
+  // Paste image from clipboard (triggered by right-click context menu)
+  const handlePaste = async (e) => {
+    e.preventDefault();
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      for (const item of clipboardItems) {
+        const imageType = item.types.find(type => type.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const reader = new FileReader();
+          reader.onload = async (event) => {
+            const resizedImage = await downscaleImage(event.target.result);
+            setImageBase64(resizedImage);
+          };
+          reader.readAsDataURL(blob);
+          return;
+        }
+      }
+      // No image found in clipboard
+      toast({
+        title: t('pasteNoImage'),
+        status: "warning",
+        duration: 3000,
+      });
+    } catch (err) {
+      console.error("Failed to read clipboard:", err);
+      toast({
+        title: t('pasteFailed'),
+        description: t('pasteFailedDescription'),
+        status: "error",
+        duration: 3000,
+      });
+    }
+  };
+
   const downscaleImage = (base64String) => {
     return new Promise((resolve) => {
       const img = new window.Image();
@@ -1711,7 +1727,7 @@ function SearchApp() {
   const minScore = 1.1;
 
   const [show, setShow] = React.useState(false);
-  const [showScores, setShowScores] = React.useState(false);
+  const [showScores, setShowScores] = React.useState(SEARCH_DEFAULTS.showScores);
   const handleToggle = () => {
     setShow(!show);
     setModalExpanded(!modalExpanded);
@@ -1852,31 +1868,34 @@ function SearchApp() {
             >
               OR
             </Heading>
-            <Button
-              variant="outline"
-              size="lg"
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              minWidth={"400px"}
-              style={{ color: "rgba(255,255,255,0.24)" }}
-            >
-              <p>Drag and drop image here or click to upload</p>
-              <input
-                id="fileInput"
-                type="file"
-                accept="image/*"
-                onChange={handleFileChange}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: "100%",
-                  opacity: 0,
-                  cursor: "pointer",
-                }}
-              />
-            </Button>
+            <Tooltip label={t('rightClickToPaste')} placement="bottom">
+              <Button
+                variant="outline"
+                size="lg"
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                minWidth={"400px"}
+                style={{ color: "rgba(255,255,255,0.24)" }}
+              >
+                <p>Drag and drop image here or click to upload</p>
+                <input
+                  id="fileInput"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  onContextMenu={handlePaste}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: "100%",
+                    opacity: 0,
+                    cursor: "pointer",
+                  }}
+                />
+              </Button>
+            </Tooltip>
             <Button
               ml={15}
               minWidth={200}
@@ -2016,7 +2035,7 @@ function SearchApp() {
                           {/* Active Plugins */}
                           {plugins.active && plugins.active.length > 0 && (
                             <Box mb={3}>
-                              <Text fontWeight="semibold" color="green.400" mb={2}>Active Plugins ({plugins.active.length})</Text>
+                              <Text fontWeight="semibold" color="#FFD230" mb={2}>Active Plugins ({plugins.active.length})</Text>
                               {plugins.active.map((plugin, index) => (
                                 <Box key={index} mb={2}>
                                   <Text fontSize="sm" color="white" fontWeight="medium">
@@ -2166,7 +2185,7 @@ function SearchApp() {
                   name="modified_by"
                   value={searchParams.modified_by}
                   onChange={handleChange}
-                  placeholder="Modified By"
+                  placeholder={t('modifiedBy')}
                 />
               </GridItem>
               <GridItem width="260px" flexGrow={1}>
@@ -2184,7 +2203,7 @@ function SearchApp() {
               </GridItem>
               <GridItem width="260px" flexGrow={1}>
                 <InputGroup size="sm">
-                  <InputLeftAddon width="50%">Created After</InputLeftAddon>
+                  <InputLeftAddon width="50%">{t('createdAfter')}</InputLeftAddon>
                   <Input
                     autoComplete="off"
                     id="created_after"
@@ -2430,7 +2449,7 @@ function SearchApp() {
                   ((item.score - minScore) / (maxScore - minScore)) * 100,
                   0,
                 )}
-                color="#76B900"
+                color="#FFD230"
                 size="36px"
                 position="absolute"
                 top="1"

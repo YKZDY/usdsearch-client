@@ -45,10 +45,43 @@ export const useSmartImageLoader = (
 ) => {
   const loadingStates = useRef(new Map()); // id -> { loading, error, data }
   const loadPromises = useRef(new Map()); // Track ongoing loads to prevent duplicates
-  const [registerElement, visibilityMap] = useMultipleIntersectionObserver({
+  const prevResultsRef = useRef(results); // Track previous results to detect changes
+  const [registerElement, visibilityMap, clearObserver] = useMultipleIntersectionObserver({
     rootMargin,
     threshold: 0.1
   });
+
+  // Clean up stale entries when results change (new search)
+  useEffect(() => {
+    if (prevResultsRef.current !== results) {
+      prevResultsRef.current = results;
+      
+      // Build a set of current result IDs
+      const currentIds = new Set();
+      results.forEach((result, index) => {
+        currentIds.add(result.id || `result-${index}`);
+      });
+
+      // Remove entries from loadingStates that are no longer in current results
+      for (const key of loadingStates.current.keys()) {
+        if (!currentIds.has(key)) {
+          loadingStates.current.delete(key);
+        }
+      }
+
+      // Remove entries from loadPromises that are no longer in current results
+      for (const key of loadPromises.current.keys()) {
+        if (!currentIds.has(key)) {
+          loadPromises.current.delete(key);
+        }
+      }
+
+      // Clear observer entries for removed elements
+      if (clearObserver) {
+        clearObserver(currentIds);
+      }
+    }
+  }, [results, clearObserver]);
 
 
   // Load image for a specific item

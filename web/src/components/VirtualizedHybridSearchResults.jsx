@@ -52,12 +52,21 @@ import SearchExplanations from "../SearchExplanations";
 import NavigableAssetImage from "./NavigableAssetImage";
 import { useSmartImageLoader } from "../hooks/useSmartImageLoader";
 import { formatFileSize, formatDate } from "../utils/formatUtils";
+import { SEARCH_DEFAULTS } from "../config";
 
 // Memoized components for better performance
-const HighlightedText = memo(({ text, matchedTerms = [], isValue = false }) => {
+const HighlightedText = memo(({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
+  const truncateProps = {};
+  if (noOfLines) {
+    truncateProps.noOfLines = noOfLines;
+  }
+  if (isTruncated) {
+    truncateProps.isTruncated = true;
+  }
+
   if (!matchedTerms || matchedTerms.length === 0 || !text) {
     return (
-      <Text fontSize="xs" wordBreak="break-word" color={isValue ? "gray.200" : "inherit"}>
+      <Text fontSize="xs" wordBreak="break-word" color={isValue ? "gray.200" : "inherit"} {...truncateProps} title={text}>
         {text}
       </Text>
     );
@@ -70,7 +79,7 @@ const HighlightedText = memo(({ text, matchedTerms = [], isValue = false }) => {
   const parts = text.split(pattern);
   
   return (
-    <Text fontSize="xs" wordBreak="break-word">
+    <Text fontSize="xs" wordBreak="break-word" {...truncateProps} title={text}>
       {parts.map((part, index) => {
         const isMatch = matchedTerms.some(term => 
           part.toLowerCase() === term.toLowerCase()
@@ -89,7 +98,7 @@ const HighlightedText = memo(({ text, matchedTerms = [], isValue = false }) => {
   );
 });
 
-const QueryMatchBadges = memo(({ explanations = [], showScores = false }) => {
+const QueryMatchBadges = memo(({ explanations = [], showScores = SEARCH_DEFAULTS.showScores }) => {
   if (!explanations || explanations.length === 0) {
     return null;
   }
@@ -128,7 +137,7 @@ const QueryMatchBadges = memo(({ explanations = [], showScores = false }) => {
               </Badge>
               {matched_terms.slice(0, 5).map((term, termIndex) => (
                 <Tooltip key={termIndex} label={term} placement="top">
-                  <Badge colorScheme="green" size="sm" variant="outline" maxW="150px">
+                  <Badge colorScheme="yellow" size="sm" variant="outline" maxW="150px">
                     <Text fontSize="xs" noOfLines={1}>
                       {truncateText(term, 20)}
                     </Text>
@@ -266,19 +275,25 @@ const SmartHighlightedContent = memo(({ result, searchQuery = "" }) => {
 const VirtualizedResultGridItem = memo(({ 
   result, 
   index,
-  onItemClick, 
+  onSelectionChange, 
+  onItemClick,
   copyToClipboard, 
   onFindSimilar,
-  showScores = false,
-  gridSize = "L",
+  showScores = SEARCH_DEFAULTS.showScores,
+  gridSize = SEARCH_DEFAULTS.gridSize,
   searchQuery = "",
   getHeaders,
-  apiUrl
+  apiUrl,
+  isSelected = false
 }) => {
   const baseKey = result.source?.base_key || result.source?.url || result.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
-  const handleItemClick = useCallback(() => {
+  const handleToggleSelect = useCallback(() => {
+    onSelectionChange?.(result);
+  }, [onSelectionChange, result]);
+
+  const handleViewDetails = useCallback(() => {
     onItemClick?.(result);
   }, [onItemClick, result]);
 
@@ -294,14 +309,35 @@ const VirtualizedResultGridItem = memo(({
 
   return (
     <Card 
-      bg="gray.800" 
-      borderColor="gray.600" 
-      _hover={{ borderColor: "green.500", shadow: "lg" }}
-      transition="all 0.2s"
+      bg={isSelected ? "#2a2b1e" : "#1C1D20"} 
+      borderColor={isSelected ? "#FFD230" : "#383838"} 
+      _hover={{ borderColor: "#FFD230", shadow: "0 0 20px rgba(255,210,48,0.08)" }}
+      transition="all 0.25s"
       cursor="pointer"
-      onClick={handleItemClick}
+      onClick={handleToggleSelect}
       h="100%"
+      position="relative"
     >
+      {/* Selection indicator */}
+      {isSelected && (
+        <Box
+          position="absolute"
+          top={2}
+          left={2}
+          zIndex={10}
+          bg="#FFD230"
+          color="black"
+          borderRadius="full"
+          boxSize="20px"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          fontSize="xs"
+          fontWeight="bold"
+        >
+          &#10003;
+        </Box>
+      )}
       <CardBody p={gridSize === "S" ? 2 : 3}>
         <VStack spacing={gridSize === "S" ? 2 : 3} align="stretch" h="100%">
           <NavigableAssetImage
@@ -328,7 +364,7 @@ const VirtualizedResultGridItem = memo(({
 
             {showScores && (
               <HStack spacing={1} wrap="wrap">
-                <Badge colorScheme="green" size="xs">
+                <Badge colorScheme="yellow" size="xs">
                   {result.score.toFixed(2)}
                 </Badge>
                 <Badge colorScheme="blue" size="xs">
@@ -362,7 +398,7 @@ const VirtualizedResultGridItem = memo(({
                     size="xs"
                     variant="ghost"
                     icon={<ExternalLinkIcon />}
-                    onClick={handleItemClick}
+                    onClick={handleViewDetails}
                     aria-label="View details"
                   />
                 </Tooltip>
@@ -396,7 +432,7 @@ const VirtualizedResultGridItem = memo(({
                       size="xs"
                       variant="ghost"
                       icon={<ExternalLinkIcon />}
-                      onClick={handleItemClick}
+                      onClick={handleViewDetails}
                       aria-label="View details"
                     />
                   </Tooltip>
@@ -413,15 +449,17 @@ const VirtualizedResultGridItem = memo(({
 const VirtualizedResultListItem = memo(({ 
   result, 
   index,
-  onItemClick, 
+  onSelectionChange, 
+  onItemClick,
   copyToClipboard, 
   onFindSimilar,
-  showScores = false,
+  showScores = SEARCH_DEFAULTS.showScores,
   maxScore = 1,
   minScore = 0,
   searchQuery = "",
   getHeaders,
-  apiUrl
+  apiUrl,
+  isSelected = false
 }) => {
   const { isOpen, onToggle } = useDisclosure();
   
@@ -432,7 +470,11 @@ const VirtualizedResultListItem = memo(({
   const baseKey = result.source?.base_key || result.source?.url || result.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
-  const handleItemClick = useCallback(() => {
+  const handleToggleSelect = useCallback(() => {
+    onSelectionChange?.(result);
+  }, [onSelectionChange, result]);
+
+  const handleViewDetails = useCallback(() => {
     onItemClick?.(result);
   }, [onItemClick, result]);
 
@@ -453,13 +495,34 @@ const VirtualizedResultListItem = memo(({
 
   return (
     <Card 
-      bg="gray.800" 
-      borderColor="gray.600" 
-      _hover={{ borderColor: "green.500", shadow: "lg" }}
-      transition="all 0.2s"
+      bg={isSelected ? "#2a2b1e" : "#1C1D20"} 
+      borderColor={isSelected ? "#FFD230" : "#383838"} 
+      _hover={{ borderColor: "#FFD230", shadow: "0 0 20px rgba(255,210,48,0.08)" }}
+      transition="all 0.25s"
       cursor="pointer"
-      onClick={handleItemClick}
+      onClick={handleToggleSelect}
+      position="relative"
     >
+      {/* Selection indicator */}
+      {isSelected && (
+        <Box
+          position="absolute"
+          top={2}
+          left={2}
+          zIndex={10}
+          bg="#FFD230"
+          color="black"
+          borderRadius="full"
+          boxSize="20px"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          fontSize="xs"
+          fontWeight="bold"
+        >
+          &#10003;
+        </Box>
+      )}
       <CardBody p={4}>
         <Grid templateColumns="200px 1fr auto" gap={4} alignItems="start">
           <GridItem>
@@ -482,11 +545,12 @@ const VirtualizedResultListItem = memo(({
                     <HighlightedText 
                       text={filename}
                       matchedTerms={allMatchedTerms}
+                      noOfLines={1}
                     />
                   </Tooltip>
                   {showScores && (
                     <HStack>
-                      <Badge colorScheme="green" size="sm">
+                      <Badge colorScheme="yellow" size="sm">
                         Score: {result.score.toFixed(3)}
                       </Badge>
                       <Badge colorScheme="blue" size="sm">
@@ -528,7 +592,7 @@ const VirtualizedResultListItem = memo(({
                       size="sm"
                       variant="ghost"
                       icon={<ExternalLinkIcon />}
-                      onClick={handleItemClick}
+                      onClick={handleViewDetails}
                       aria-label="View details"
                     />
                   </Tooltip>
@@ -588,14 +652,17 @@ const VirtualizedHybridSearchResults = ({
   onItemClick, 
   copyToClipboard, 
   onFindSimilar,
-  showScores = false,
-  viewMode = "list",
-  gridSize = "L",
+  showScores = SEARCH_DEFAULTS.showScores,
+  viewMode = SEARCH_DEFAULTS.viewMode,
+  gridSize = SEARCH_DEFAULTS.gridSize,
   isLoading = false,
   isEmpty = false,
   searchQuery = "",
   getHeaders,
-  apiUrl
+  apiUrl,
+  selectedItems,
+  onSelectionChange,
+  onCopySelectedUrls
 }) => {
   // Calculate score range for normalization
   const { maxScore, minScore } = useMemo(() => {
@@ -612,6 +679,7 @@ const VirtualizedHybridSearchResults = ({
     <VirtualizedResultGridItem
       result={result}
       index={index}
+      onSelectionChange={onSelectionChange}
       onItemClick={onItemClick}
       copyToClipboard={copyToClipboard}
       onFindSimilar={onFindSimilar}
@@ -620,14 +688,16 @@ const VirtualizedHybridSearchResults = ({
       searchQuery={searchQuery}
       getHeaders={getHeaders}
       apiUrl={apiUrl}
+      isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
     />
-  ), [onItemClick, copyToClipboard, onFindSimilar, showScores, gridSize, searchQuery, getHeaders, apiUrl]);
+  ), [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, gridSize, searchQuery, getHeaders, apiUrl, selectedItems]);
 
   // List item renderer
   const renderListItem = useCallback((result, index) => (
     <VirtualizedResultListItem
       result={result}
       index={index}
+      onSelectionChange={onSelectionChange}
       onItemClick={onItemClick}
       copyToClipboard={copyToClipboard}
       onFindSimilar={onFindSimilar}
@@ -637,8 +707,9 @@ const VirtualizedHybridSearchResults = ({
       searchQuery={searchQuery}
       getHeaders={getHeaders}
       apiUrl={apiUrl}
+      isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
     />
-  ), [onItemClick, copyToClipboard, onFindSimilar, showScores, maxScore, minScore, searchQuery, getHeaders, apiUrl]);
+  ), [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, maxScore, minScore, searchQuery, getHeaders, apiUrl, selectedItems]);
 
   const handleCopyAllUrls = useCallback(() => {
     const allUrls = results.map((result) => 
@@ -650,7 +721,7 @@ const VirtualizedHybridSearchResults = ({
   if (isLoading) {
     return (
       <Box textAlign="center" py={8}>
-        <CircularProgress isIndeterminate color="green.400" />
+        <CircularProgress isIndeterminate color="#FFD230" />
         <Text mt={4} color="gray.300">Searching...</Text>
       </Box>
     );
@@ -678,11 +749,12 @@ const VirtualizedHybridSearchResults = ({
             <Button
               size="sm"
               leftIcon={<CopyIcon />}
-              onClick={handleCopyAllUrls}
+              onClick={onCopySelectedUrls}
               variant="outline"
               colorScheme="blue"
+              isDisabled={!selectedItems || selectedItems.size === 0}
             >
-              Copy All URLs
+              Copy Selected URLs
             </Button>
           )}
         </HStack>

@@ -21,15 +21,21 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+/* LightArt-inspired global styles */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+
 body {
   margin: 0;
   font-family:
+    "Noto Sans SC",
     "NVIDIA Sans",
     -apple-system,
     BlinkMacSystemFont,
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #141517;
+  color: #FFFFFF;
 }
 
 code {
@@ -50,3 +56,49 @@ code {
     local("NVIDIA Sans Bold"),
     url(./fonts/NVIDIASans_Bd.ttf) format("truetype");
 }
+
+/* LightArt scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #383838;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(255, 210, 48, 0.3);
+  color: #FFFFFF;
+}
+
+/* Focus-visible for accessibility */
+*:focus-visible {
+  outline: 2px solid #FFD230;
+  outline-offset: 2px;
+}
+
+/* Smooth transitions globally */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: 0.15s;
+  transition-timing-function: ease;
+}
+
+/* Override Chakra popover option colors */
+option {
+  background-color: #232428;
+  color: #FFFFFF;
+}
+
+/* ===== Login prompt animations are handled by framer-motion in index.js ===== */

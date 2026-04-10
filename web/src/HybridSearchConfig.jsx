@@ -42,7 +42,6 @@ import {
   Divider,
   Badge,
   Tooltip,
-  IconButton,
   Select,
   FormControl,
   FormLabel,
@@ -50,10 +49,11 @@ import {
   SliderTrack,
   SliderFilledTrack,
   SliderThumb,
-  Collapse,
-  useDisclosure,
+  Card,
+  CardBody,
 } from "@chakra-ui/react";
-import { InfoIcon, SettingsIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui/icons";
+import { InfoIcon } from "@chakra-ui/icons";
+import { useTranslation } from "./i18n/LanguageContext";
 
 // Field display name mapping
 const getFieldDisplayName = (fieldName) => {
@@ -108,8 +108,8 @@ const DEFAULT_HYBRID_CONFIG = {
 };
 
 const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollapsed = true, embeddingConfig = defaultEmbeddingConfig }) => {
+  const { t } = useTranslation();
   const [config, setConfig] = useState(value);
-  const { isOpen, onToggle } = useDisclosure({ defaultIsOpen: !isCollapsed });
 
   // Sync internal state with prop value when it changes
   useEffect(() => {
@@ -210,49 +210,26 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
   };
 
   return (
-    <Box 
-      bg="gray.800" 
-      pt={0}
-      px={4}
-      pb={0}
-      borderRadius="md" 
-      border="1px solid"
-      borderColor="gray.600"
-    >
-      <HStack justify="space-between" mb={4} cursor="pointer" onClick={onToggle} opacity={0.8}>
-        <HStack>
-          <SettingsIcon color="gray.400" />
-          <Text fontSize="md" fontWeight="bold" color="gray.300">
-            Advanced Hybrid Search Configuration
-          </Text>
-          <Badge colorScheme="gray" size="sm">
-            {config.hybrid_text.enabled ? 'Text' : ''}
-            {config.hybrid_text.enabled && Object.values(config.vector_fields).some(v => v.enabled) ? ' + ' : ''}
-            {Object.values(config.vector_fields).some(v => v.enabled) ? 'Vector' : ''}
-          </Badge>
-        </HStack>
-        <IconButton
-          size="sm"
-          variant="ghost"
-          icon={isOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-          onClick={onToggle}
-          aria-label="Toggle configuration"
-        />
-      </HStack>
+    <Card bg="gray.800" borderColor="gray.600" h="fit-content" minW="360px">
+      <CardBody p={4}>
+      <VStack spacing={4} align="stretch">
+        <Text fontSize="lg" fontWeight="bold">
+          {t('advancedHybridConfig')}
+        </Text>
 
-      <Collapse in={isOpen} animateOpacity>
+        <Divider borderColor="gray.600" />
 
-      <Accordion allowMultiple defaultIndex={[0]}>
+        <Accordion allowMultiple defaultIndex={isCollapsed ? [] : [0]}>
         {/* Hybrid Text Configuration */}
         <AccordionItem>
           <AccordionButton>
             <Box flex="1" textAlign="left">
               <HStack>
-                <Text fontWeight="semibold">Text Search Fields</Text>
+                <Text fontWeight="semibold">{t('textSearchFields')}</Text>
                 <Switch
                   isChecked={config.hybrid_text.enabled}
                   onChange={(e) => updateHybridText('enabled', e.target.checked)}
-                  colorScheme="green"
+                  colorScheme="yellow"
                 />
               </HStack>
             </Box>
@@ -261,7 +238,7 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
           <AccordionPanel pb={4}>
             <VStack spacing={4} align="stretch">
               <FormControl>
-                <FormLabel fontSize="sm">Text Search Weight</FormLabel>
+                <FormLabel fontSize="sm">{t('textSearchWeight')}</FormLabel>
                 <HStack>
                   <Slider
                     value={config.hybrid_text.weight}
@@ -270,7 +247,7 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
                     max={10}
                     step={0.1}
                     flex={1}
-                    colorScheme="green"
+                    colorScheme="yellow"
                   >
                     <SliderTrack>
                       <SliderFilledTrack />
@@ -286,20 +263,20 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
               <Divider />
 
               <FormControl>
-                <FormLabel fontSize="sm">Cross-Field Operator</FormLabel>
+                <FormLabel fontSize="sm">{t('crossFieldOperator')}</FormLabel>
                 <Select
                   size="sm"
                   value={config.hybrid_text.cross_field_operator || "or"}
                   onChange={(e) => updateHybridText('cross_field_operator', e.target.value)}
                 >
-                  <option value="or">OR - Match any field</option>
-                  <option value="and">AND - Match all fields</option>
+                  <option value="or">{t('orMatchAnyField')}</option>
+                  <option value="and">{t('andMatchAllFields')}</option>
                 </Select>
               </FormControl>
 
               <Divider />
 
-              <Text fontSize="sm" fontWeight="semibold">Search Fields:</Text>
+              <Text fontSize="sm" fontWeight="semibold">{t('searchFieldsLabel')}</Text>
               {config.hybrid_text.fields.map((field, index) => (
                 <Box key={index} p={3} bg="gray.700" borderRadius="md">
                   <HStack justify="space-between" mb={2}>
@@ -308,20 +285,20 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
                         {getFieldDisplayName(field.field)}
                       </Text>
                       {field.nested && (
-                        <Badge size="sm" colorScheme="blue">Nested</Badge>
+                        <Badge size="sm" colorScheme="blue">{t('nested')}</Badge>
                       )}
                     </HStack>
                     <Switch
                       size="sm"
                       isChecked={field.enabled}
                       onChange={(e) => updateHybridTextField(index, 'enabled', e.target.checked)}
-                      colorScheme="green"
+                      colorScheme="yellow"
                     />
                   </HStack>
                   {field.enabled && (
                     <VStack spacing={2} align="stretch">
                       <HStack>
-                        <Text fontSize="xs" color="gray.300">Weight:</Text>
+                        <Text fontSize="xs" color="gray.300">{t('weight')}</Text>
                         <Slider
                           value={field.weight}
                           onChange={(value) => updateHybridTextField(index, 'weight', value)}
@@ -330,7 +307,7 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
                           step={0.1}
                           flex={1}
                           size="sm"
-                          colorScheme="green"
+                          colorScheme="yellow"
                         >
                           <SliderTrack>
                             <SliderFilledTrack />
@@ -343,8 +320,8 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
                       </HStack>
                       <HStack justify="space-between">
                         <HStack spacing={1}>
-                          <Text fontSize="xs" color="gray.300">Match Type:</Text>
-                          <Tooltip label="Exact matches require perfect spelling, fuzzy matches allow character differences and are more flexible">
+                          <Text fontSize="xs" color="gray.300">{t('matchType')}</Text>
+                          <Tooltip label={t('matchTypeHelp')}>
                             <InfoIcon boxSize={3} color="gray.400" />
                           </Tooltip>
                         </HStack>
@@ -355,14 +332,14 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
                           colorScheme="orange"
                         />
                         <Text fontSize="xs" color="gray.300">
-                          {field.match_type === "fuzzy" ? "Fuzzy" : "Exact"}
+                          {field.match_type === "fuzzy" ? t('fuzzy') : t('exact')}
                         </Text>
                       </HStack>
                       {field.match_type === "fuzzy" && (
                         <HStack>
                           <HStack spacing={1}>
-                            <Text fontSize="xs" color="gray.300">Fuzziness:</Text>
-                            <Tooltip label="0 = Exact match only, 1 = Allow 1 character difference, 2 = Allow 2 character differences, etc. Higher values make search more flexible but less precise.">
+                            <Text fontSize="xs" color="gray.300">{t('fuzziness')}</Text>
+                            <Tooltip label={t('fuzzinessHelp')}>
                               <InfoIcon boxSize={3} color="gray.400" />
                             </Tooltip>
                           </HStack>
@@ -388,8 +365,8 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
                       )}
                       <HStack justify="space-between">
                         <HStack spacing={1}>
-                          <Text fontSize="xs" color="gray.300">Wildcard Search:</Text>
-                          <Tooltip label="Enable wildcard matching with * and ? characters. Allows partial matches like 'car*' to match 'car', 'cars', 'carbon', etc.">
+                          <Text fontSize="xs" color="gray.300">{t('wildcardSearch')}</Text>
+                          <Tooltip label={t('wildcardHelp')}>
                             <InfoIcon boxSize={3} color="gray.400" />
                           </Tooltip>
                         </HStack>
@@ -413,12 +390,12 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
           <AccordionButton>
             <Box flex="1" textAlign="left">
               <HStack>
-                <Text fontWeight="semibold">Vector Text Search Expansion</Text>
+                <Text fontWeight="semibold">{t('vectorTextSearchExpansion')}</Text>
                 <Badge colorScheme="orange" variant="outline">
-                  EXPERIMENTAL
+                  {t('experimental')}
                 </Badge>
-                <Badge colorScheme={config.vector_text_expansion?.enabled ? "green" : "gray"}>
-                  {config.vector_text_expansion?.enabled ? "Enabled" : "Disabled"}
+                <Badge colorScheme={config.vector_text_expansion?.enabled ? "yellow" : "gray"}>
+                  {config.vector_text_expansion?.enabled ? t('enabled') : t('disabled')}
                 </Badge>
               </HStack>
             </Box>
@@ -429,10 +406,10 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
               <HStack justify="space-between">
                 <VStack align="start" spacing={1}>
                   <Text fontSize="sm" fontWeight="medium">
-                    Enable Vector Text Expansion
+                    {t('enableVectorTextExpansion')}
                   </Text>
                   <Text fontSize="xs" color="gray.300">
-                    Send vector queries for the full text query and each individual word
+                    {t('vectorTextExpansionDesc')}
                   </Text>
                 </VStack>
                 <Switch
@@ -446,7 +423,7 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
                     };
                     updateConfig(newConfig);
                   }}
-                  colorScheme="green"
+                  colorScheme="yellow"
                 />
               </HStack>
             </VStack>
@@ -458,9 +435,9 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
           <AccordionButton>
             <Box flex="1" textAlign="left">
               <HStack>
-                <Text fontWeight="semibold">Vector Search Fields</Text>
+                <Text fontWeight="semibold">{t('vectorSearchFields')}</Text>
                 <Badge colorScheme="purple">
-                  {Object.values(config.vector_fields).filter(v => v.enabled).length} active
+                  {Object.values(config.vector_fields).filter(v => v.enabled).length} {t('active')}
                 </Badge>
               </HStack>
             </Box>
@@ -488,7 +465,7 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
                   </HStack>
                   {fieldConfig.enabled && (
                     <HStack>
-                      <Text fontSize="xs" color="gray.300">Weight:</Text>
+                      <Text fontSize="xs" color="gray.300">{t('weight')}</Text>
                       <Slider
                         value={fieldConfig.weight}
                         onChange={(value) => updateVectorField(fieldName, 'weight', value)}
@@ -520,8 +497,8 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
           <AccordionButton>
             <Box flex="1" textAlign="left">
               <HStack>
-                <Text fontWeight="semibold">Ranking Configuration</Text>
-                <Tooltip label="Reciprocal Rank Fusion (RRF) combines results from different search methods">
+                <Text fontWeight="semibold">{t('rankingConfiguration')}</Text>
+                <Tooltip label={t('rrfTooltip')}>
                   <InfoIcon boxSize={3} color="gray.400" />
                 </Tooltip>
               </HStack>
@@ -532,18 +509,16 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
             <VStack spacing={4} align="stretch">
               <Box p={3} bg="gray.700" borderRadius="md">
                 <Text fontSize="sm" fontWeight="semibold" color="blue.300" mb={2}>
-                  About Reciprocal Rank Fusion (RRF)
+                  {t('aboutRRF')}
                 </Text>
                 <Text fontSize="xs" color="gray.300" lineHeight="1.4">
-                  RRF combines results from different search methods (text search, vector search) by converting scores to ranks, 
-                  then computing a weighted average. Lower ranks get higher fusion scores. The rank constant controls how much 
-                  weight to give to lower-ranked results - higher values make the fusion more democratic across all results.
+                  {t('rrfDescription')}
                 </Text>
               </Box>
               <FormControl>
                 <FormLabel fontSize="sm">
-                  Rank Constant
-                  <Tooltip label="Higher values give more weight to lower-ranked results">
+                  {t('rankConstant')}
+                  <Tooltip label={t('rankConstantHelp')}>
                     <InfoIcon boxSize={3} color="gray.400" ml={1} />
                   </Tooltip>
                 </FormLabel>
@@ -564,8 +539,8 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
               
               <FormControl>
                 <FormLabel fontSize="sm">
-                  Window Size
-                  <Tooltip label="Number of top results to consider for ranking (leave empty for default (2x page size))">
+                  {t('windowSize')}
+                  <Tooltip label={t('windowSizeHelp')}>
                     <InfoIcon boxSize={3} color="gray.400" ml={1} />
                   </Tooltip>
                 </FormLabel>
@@ -587,10 +562,11 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
           </AccordionPanel>
         </AccordionItem>
       </Accordion>
-      </Collapse>
-    </Box>
+      </VStack>
+      </CardBody>
+    </Card>
   );
 };
 
-export default HybridSearchConfig;
+export default React.memo(HybridSearchConfig);
 export { DEFAULT_HYBRID_CONFIG };

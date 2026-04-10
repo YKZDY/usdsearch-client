@@ -49,11 +49,12 @@ import {
   SearchIcon,
   ViewIcon,
 } from "@chakra-ui/icons";
+import { useTranslation } from "./i18n/LanguageContext";
 
 const getSearchTypeColor = (searchType) => {
   const colors = {
     'text': 'blue',
-    'hybrid': 'green',
+    'hybrid': 'yellow',
     'vector': 'purple',
     'image_similarity': 'orange',
     'filter_only': 'gray',
@@ -75,6 +76,7 @@ const getSearchTypeIcon = (searchType) => {
 };
 
 const SearchExplanationItem = ({ explanation, maxScore = 1 }) => {
+  const { t } = useTranslation();
   const { isOpen, onToggle } = useDisclosure();
   const colorScheme = getSearchTypeColor(explanation.search_type);
   const Icon = getSearchTypeIcon(explanation.search_type);
@@ -124,7 +126,7 @@ const SearchExplanationItem = ({ explanation, maxScore = 1 }) => {
           {explanation.rrf_score && (
             <HStack justify="space-between">
               <Text fontSize="xs" color="gray.400">
-                RRF Score:
+                {t('rrfScoreLabel')}
               </Text>
               <Text fontSize="xs" fontWeight="semibold">
                 {explanation.rrf_score.toFixed(3)}
@@ -136,7 +138,7 @@ const SearchExplanationItem = ({ explanation, maxScore = 1 }) => {
           {explanation.matched_terms && explanation.matched_terms.length > 0 && (
             <Box>
               <Text fontSize="xs" color="gray.400" mb={1}>
-                Matched terms:
+                {t('matchedTerms')}
               </Text>
               <Wrap spacing={1}>
                 {explanation.matched_terms.map((term, index) => (
@@ -159,7 +161,7 @@ const SearchExplanationItem = ({ explanation, maxScore = 1 }) => {
           {explanation.vector_similarity && (
             <HStack justify="space-between">
               <Text fontSize="xs" color="gray.400">
-                Vector Similarity:
+                {t('vectorSimilarity')}
               </Text>
               <Text fontSize="xs" fontWeight="semibold" color="purple.300">
                 {(explanation.vector_similarity * 100).toFixed(1)}%
@@ -187,7 +189,7 @@ const SearchExplanationItem = ({ explanation, maxScore = 1 }) => {
               {explanation.matched_vectors && explanation.matched_vectors.length > 0 && (
                 <Box>
                   <Text fontSize="xs" color="gray.400" mb={1}>
-                    Vector matches:
+                    {t('vectorMatches')}
                   </Text>
                   <VStack spacing={1} align="stretch">
                     {explanation.matched_vectors.map((vectorScore, index) => (
@@ -208,7 +210,7 @@ const SearchExplanationItem = ({ explanation, maxScore = 1 }) => {
               {explanation.details && (
                 <Box>
                   <Text fontSize="xs" color="gray.400" mb={1}>
-                    Details:
+                    {t('detailsLabel')}
                   </Text>
                   <Box 
                     fontSize="xs" 
@@ -243,6 +245,7 @@ const SearchExplanations = ({
   showSummary = true,
   maxItems = 5 
 }) => {
+  const { t } = useTranslation();
   const [showAll, setShowAll] = useState(false);
   
   if (!explanations || explanations.length === 0) {
@@ -265,7 +268,7 @@ const SearchExplanations = ({
           {/* Summary Header */}
           <HStack justify="space-between">
             <Text fontSize="sm" fontWeight="bold" color="gray.300">
-              Search Explanations
+              {t('searchExplanations')}
             </Text>
             <HStack>
               {rrfRank && (
@@ -275,8 +278,8 @@ const SearchExplanations = ({
                   </Badge>
                 </Tooltip>
               )}
-              <Text fontSize="sm" fontWeight="bold" color="green.300">
-                Total: {totalScore.toFixed(3)}
+              <Text fontSize="sm" fontWeight="bold" color="#FFD230">
+                {t('total')} {totalScore.toFixed(3)}
               </Text>
             </HStack>
           </HStack>
@@ -302,7 +305,7 @@ const SearchExplanations = ({
           {Object.keys(originalRanks).length > 0 && (
             <Box>
               <Text fontSize="xs" color="gray.400" mb={1}>
-                Original rankings:
+                {t('originalRankings')}
               </Text>
               <Wrap spacing={2}>
                 {Object.entries(originalRanks).map(([method, rank]) => (
@@ -340,7 +343,7 @@ const SearchExplanations = ({
             aria-label={showAll ? "Show less" : "Show more"}
           />
           <Text fontSize="xs" color="gray.400">
-            {showAll ? "Show less" : `Show ${explanations.length - maxItems} more`}
+            {showAll ? t('showLess') : t('showMore', { count: explanations.length - maxItems })}
           </Text>
         </HStack>
       )}

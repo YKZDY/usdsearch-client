@@ -52,6 +52,8 @@ import {
 } from "@chakra-ui/react";
 import { InfoIcon, CloseIcon } from "@chakra-ui/icons";
 import FilterByPropertiesInput from "./propertiesInput";
+import { useTranslation } from "./i18n/LanguageContext";
+import { DEFAULT_SEARCH_PARAMS } from "./config";
 
 const RangeSliderWithInput = ({ 
   label, 
@@ -89,7 +91,7 @@ const RangeSliderWithInput = ({
         min={min}
         max={max}
         step={step}
-        colorScheme="green"
+        colorScheme="yellow"
         onChange={([newMin, newMax]) => {
           onMinChange(newMin.toString());
           onMaxChange(newMax.toString());
@@ -105,7 +107,9 @@ const RangeSliderWithInput = ({
   );
 };
 
-const FilterSection = ({ title, children, defaultOpen = false, badge = null, onClear = null }) => (
+const FilterSection = ({ title, children, defaultOpen = false, badge = null, onClear = null }) => {
+  const { t } = useTranslation();
+  return (
   <AccordionItem border="none">
     <AccordionButton px={0} _hover={{ bg: "transparent" }}>
       <HStack flex="1" textAlign="left" justify="space-between">
@@ -114,7 +118,7 @@ const FilterSection = ({ title, children, defaultOpen = false, badge = null, onC
             {title}
           </Text>
           {badge && (
-            <Badge size="sm" colorScheme="green">
+            <Badge size="sm" colorScheme="yellow">
               {badge}
             </Badge>
           )}
@@ -130,7 +134,7 @@ const FilterSection = ({ title, children, defaultOpen = false, badge = null, onC
                 e.stopPropagation();
                 onClear();
               }}
-              aria-label="Clear filters"
+              aria-label={t('searchFiltersTitle')}
             />
           )}
           <AccordionIcon />
@@ -143,7 +147,8 @@ const FilterSection = ({ title, children, defaultOpen = false, badge = null, onC
       </VStack>
     </AccordionPanel>
   </AccordionItem>
-);
+  );
+};
 
 const SearchFilters = ({ 
   searchParams, 
@@ -152,6 +157,7 @@ const SearchFilters = ({
   propertiesData,
   onClearAll 
 }) => {
+  const { t } = useTranslation();
   const hasActiveFilters = Object.entries(searchParams).some(([key, value]) => {
     if (key === 'limit' || key === 'embedding_knn_search_method') return false;
     return value !== "" && value !== null && value !== undefined;
@@ -160,60 +166,60 @@ const SearchFilters = ({
   const clearFileFilters = () => {
     setSearchParams({
       ...searchParams,
-      file_name: "",
-      exclude_file_name: "",
-      file_extension_include: "usd*",
-      file_extension_exclude: ""
+      file_name: DEFAULT_SEARCH_PARAMS.file_name,
+      exclude_file_name: DEFAULT_SEARCH_PARAMS.exclude_file_name,
+      file_extension_include: DEFAULT_SEARCH_PARAMS.file_extension_include,
+      file_extension_exclude: DEFAULT_SEARCH_PARAMS.file_extension_exclude,
     });
   };
 
   const clearPathFilters = () => {
     setSearchParams({
       ...searchParams,
-      search_path: "",
-      exclude_search_path: "",
-      search_in_scene: "",
-      filter_url_regexp: ""
+      search_path: DEFAULT_SEARCH_PARAMS.search_path,
+      exclude_search_path: DEFAULT_SEARCH_PARAMS.exclude_search_path,
+      search_in_scene: DEFAULT_SEARCH_PARAMS.search_in_scene,
+      filter_url_regexp: DEFAULT_SEARCH_PARAMS.filter_url_regexp,
     });
   };
 
   const clearPropertyFilters = () => {
     setSearchParams({
       ...searchParams,
-      filter_by_properties: "",
-      vision_metadata: "",
-      filter_by_tags: "",
+      filter_by_properties: DEFAULT_SEARCH_PARAMS.filter_by_properties,
+      vision_metadata: DEFAULT_SEARCH_PARAMS.vision_metadata,
+      filter_by_tags: DEFAULT_SEARCH_PARAMS.filter_by_tags,
     });
   };
 
   const clearFileSizeFilters = () => {
     setSearchParams({
       ...searchParams,
-      file_size_greater_than: "",
-      file_size_less_than: ""
+      file_size_greater_than: DEFAULT_SEARCH_PARAMS.file_size_greater_than,
+      file_size_less_than: DEFAULT_SEARCH_PARAMS.file_size_less_than,
     });
   };
 
   const clearDimensionFilters = () => {
     setSearchParams({
       ...searchParams,
-      min_bbox_x: "",
-      min_bbox_y: "",
-      min_bbox_z: "",
-      max_bbox_x: "",
-      max_bbox_y: "",
-      max_bbox_z: "",
-      bbox_use_scaled_dimensions: true
+      min_bbox_x: DEFAULT_SEARCH_PARAMS.min_bbox_x,
+      min_bbox_y: DEFAULT_SEARCH_PARAMS.min_bbox_y,
+      min_bbox_z: DEFAULT_SEARCH_PARAMS.min_bbox_z,
+      max_bbox_x: DEFAULT_SEARCH_PARAMS.max_bbox_x,
+      max_bbox_y: DEFAULT_SEARCH_PARAMS.max_bbox_y,
+      max_bbox_z: DEFAULT_SEARCH_PARAMS.max_bbox_z,
+      bbox_use_scaled_dimensions: DEFAULT_SEARCH_PARAMS.bbox_use_scaled_dimensions,
     });
   };
 
   const clearDateFilters = () => {
     setSearchParams({
       ...searchParams,
-      created_before: "",
-      created_after: "",
-      modified_before: "",
-      modified_after: ""
+      created_before: DEFAULT_SEARCH_PARAMS.created_before,
+      created_after: DEFAULT_SEARCH_PARAMS.created_after,
+      modified_before: DEFAULT_SEARCH_PARAMS.modified_before,
+      modified_after: DEFAULT_SEARCH_PARAMS.modified_after,
     });
   };
 
@@ -243,13 +249,13 @@ const SearchFilters = ({
   };
 
   return (
-    <Card bg="gray.800" borderColor="gray.600" h="fit-content" minW="320px">
+    <Card bg="gray.800" borderColor="gray.600" h="fit-content" minW="360px">
       <CardBody p={4}>
         <VStack spacing={4} align="stretch">
           {/* Header */}
           <HStack justify="space-between">
             <Text fontSize="lg" fontWeight="bold">
-              Search Filters
+              {t('searchFiltersTitle')}
             </Text>
             {hasActiveFilters && (
               <IconButton
@@ -257,7 +263,7 @@ const SearchFilters = ({
                 variant="ghost"
                 icon={<CloseIcon />}
                 onClick={onClearAll}
-                aria-label="Clear all filters"
+                aria-label={t('searchFiltersTitle')}
                 colorScheme="red"
               />
             )}
@@ -269,55 +275,55 @@ const SearchFilters = ({
           <Accordion allowMultiple defaultIndex={[]}>
             {/* File & Name Filters (Most Common - First) */}
             <FilterSection
-              title="File & Name Filters"
+              title={t('fileNameFilters')}
               badge={getActiveFilterCount(['file_name', 'exclude_file_name', 'file_extension_include', 'file_extension_exclude']) || null}
               onClear={clearFileFilters}
             >
               <FormControl>
-                <FormLabel fontSize="sm">File Name</FormLabel>
+                <FormLabel fontSize="sm">{t('fileName')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="file_name"
                   value={searchParams.file_name}
                   onChange={handleChange}
-                  placeholder="Supports wildcards (*,?)"
+                  placeholder={t('fileNamePlaceholder')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Exclude File Names</FormLabel>
+                <FormLabel fontSize="sm">{t('excludeFileNames')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="exclude_file_name"
                   value={searchParams.exclude_file_name}
                   onChange={handleChange}
-                  placeholder="Exclude patterns"
+                  placeholder={t('excludePatternsPlaceholder')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Include Extensions</FormLabel>
+                <FormLabel fontSize="sm">{t('includeExtensions')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="file_extension_include"
                   value={searchParams.file_extension_include}
                   onChange={handleChange}
-                  placeholder="e.g., usd*,jpg,png"
+                  placeholder={t('includeExtensionsPlaceholder')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Exclude Extensions</FormLabel>
+                <FormLabel fontSize="sm">{t('excludeExtensions')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="file_extension_exclude"
                   value={searchParams.file_extension_exclude}
                   onChange={handleChange}
-                  placeholder="e.g., tmp,bak"
+                  placeholder={t('excludeExtensionsPlaceholder')}
                 />
               </FormControl>
 
@@ -325,50 +331,50 @@ const SearchFilters = ({
 
             {/* Path & Location Filters (Second) */}
             <FilterSection
-              title="Path & Location Filters"
+              title={t('pathLocationFilters')}
               badge={getActiveFilterCount(['search_path', 'exclude_search_path', 'search_in_scene', 'filter_url_regexp']) || null}
               onClear={clearPathFilters}
             >
               <FormControl>
-                <FormLabel fontSize="sm">Search Path</FormLabel>
+                <FormLabel fontSize="sm">{t('searchPath')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="search_path"
                   value={searchParams.search_path}
                   onChange={handleChange}
-                  placeholder="Include path (e.g., /Projects)"
+                  placeholder={t('searchPathPlaceholder')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Exclude Search Path</FormLabel>
+                <FormLabel fontSize="sm">{t('excludeSearchPath')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="exclude_search_path"
                   value={searchParams.exclude_search_path}
                   onChange={handleChange}
-                  placeholder="Exclude paths"
+                  placeholder={t('excludePathsPlaceholder')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Search in Scene</FormLabel>
+                <FormLabel fontSize="sm">{t('searchInScene')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="search_in_scene"
                   value={searchParams.search_in_scene}
                   onChange={handleChange}
-                  placeholder="Full scene URL"
+                  placeholder={t('fullSceneUrl')}
                 />
               </FormControl>
 
               <FormControl>
                 <FormLabel fontSize="sm">
-                  URL Regex Filter
-                  <Tooltip label="Lucene regex format for URL filtering">
+                  {t('urlRegexFilter')}
+                  <Tooltip label={t('luceneRegexTooltip')}>
                     <InfoIcon boxSize={3} ml={1} />
                   </Tooltip>
                 </FormLabel>
@@ -378,19 +384,19 @@ const SearchFilters = ({
                   name="filter_url_regexp"
                   value={searchParams.filter_url_regexp}
                   onChange={handleChange}
-                  placeholder="Regex pattern"
+                  placeholder={t('regexPattern')}
                 />
               </FormControl>
             </FilterSection>
 
             {/* Content & Properties Filters (Third) */}
             <FilterSection
-              title="Content & Properties Filters"
+              title={t('contentPropertiesFilters')}
               badge={getActiveFilterCount(['filter_by_properties', 'vision_metadata']) || null}
               onClear={clearPropertyFilters}
             >
               <FormControl>
-                <FormLabel fontSize="sm">USD Properties</FormLabel>
+                <FormLabel fontSize="sm">{t('usdProperties')}</FormLabel>
                 <FilterByPropertiesInput
                   value={searchParams.filter_by_properties}
                   onChange={handleChange}
@@ -401,70 +407,70 @@ const SearchFilters = ({
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Vision Metadata</FormLabel>
+                <FormLabel fontSize="sm">{t('visionMetadata')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="vision_metadata"
                   value={searchParams.vision_metadata}
                   onChange={handleChange}
-                  placeholder="AI-generated tags"
+                  placeholder={t('aiGeneratedTags')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Tags</FormLabel>
+                <FormLabel fontSize="sm">{t('tags')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="filter_by_tags"
                   value={searchParams.filter_by_tags}
                   onChange={handleChange}
-                  placeholder="Tags"
+                  placeholder={t('tagsPlaceholder')}
                 />
               </FormControl>
             </FilterSection>
 
             {/* File Size Filters (Fourth) */}
             <FilterSection
-              title="File Size Filters"
+              title={t('fileSizeFilters')}
               badge={getActiveFilterCount(['file_size_greater_than', 'file_size_less_than']) || null}
               onClear={clearFileSizeFilters}
             >
               <FormControl>
-                <FormLabel fontSize="sm">Minimum Size</FormLabel>
+                <FormLabel fontSize="sm">{t('minimumSize')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="file_size_greater_than"
                   value={searchParams.file_size_greater_than}
                   onChange={handleChange}
-                  placeholder="e.g., 5MB, 1GB"
+                  placeholder={t('minimumSizePlaceholder')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Maximum Size</FormLabel>
+                <FormLabel fontSize="sm">{t('maximumSize')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="file_size_less_than"
                   value={searchParams.file_size_less_than}
                   onChange={handleChange}
-                  placeholder="e.g., 100MB, 2GB"
+                  placeholder={t('maximumSizePlaceholder')}
                 />
               </FormControl>
             </FilterSection>
 
             {/* Object Dimension Filters (Fifth) */}
             <FilterSection
-              title="Object Dimension Filters"
+              title={t('objectDimensionFilters')}
               badge={getActiveFilterCount(['min_bbox_x', 'min_bbox_y', 'min_bbox_z', 'max_bbox_x', 'max_bbox_y', 'max_bbox_z']) || null}
               onClear={clearDimensionFilters}
             >
               <FormControl>
                 <HStack justify="space-between" align="center">
-                  <FormLabel fontSize="sm" mb={0}>Use Scaled Dimensions</FormLabel>
+                  <FormLabel fontSize="sm" mb={0}>{t('useScaledDimensions')}</FormLabel>
                   <Switch
                     size="sm"
                     isChecked={searchParams.bbox_use_scaled_dimensions}
@@ -476,8 +482,8 @@ const SearchFilters = ({
                 </HStack>
                 <Text fontSize="xs" color="gray.400" mt={1}>
                   {searchParams.bbox_use_scaled_dimensions 
-                    ? "Search using transformed object dimensions (includes scaling, rotation)" 
-                    : "Search using original object dimensions (raw geometry size)"}
+                    ? t('scaledDimensionsOn')
+                    : t('scaledDimensionsOff')}
                 </Text>
               </FormControl>
 
@@ -485,7 +491,7 @@ const SearchFilters = ({
 
               {/* X Dimension */}
               <FormControl>
-                <FormLabel fontSize="sm">X Dimension Range (units)</FormLabel>
+                <FormLabel fontSize="sm">{t('xDimensionRange')}</FormLabel>
                 <HStack spacing={2}>
                   <Box flex={1}>
                     <Input
@@ -495,10 +501,10 @@ const SearchFilters = ({
                       name="min_bbox_x"
                       value={searchParams.min_bbox_x}
                       onChange={handleChange}
-                      placeholder="Min X"
+                      placeholder={t('minX')}
                     />
                   </Box>
-                  <Text fontSize="sm" color="gray.400">to</Text>
+                  <Text fontSize="sm" color="gray.400">{t('to')}</Text>
                   <Box flex={1}>
                     <Input
                       size="sm"
@@ -507,7 +513,7 @@ const SearchFilters = ({
                       name="max_bbox_x"
                       value={searchParams.max_bbox_x}
                       onChange={handleChange}
-                      placeholder="Max X"
+                      placeholder={t('to')}
                     />
                   </Box>
                 </HStack>
@@ -515,7 +521,7 @@ const SearchFilters = ({
 
               {/* Y Dimension */}
               <FormControl>
-                <FormLabel fontSize="sm">Y Dimension Range (units)</FormLabel>
+                <FormLabel fontSize="sm">{t('yDimensionRange')}</FormLabel>
                 <HStack spacing={2}>
                   <Box flex={1}>
                     <Input
@@ -525,10 +531,10 @@ const SearchFilters = ({
                       name="min_bbox_y"
                       value={searchParams.min_bbox_y}
                       onChange={handleChange}
-                      placeholder="Min Y"
+                      placeholder={t('minY')}
                     />
                   </Box>
-                  <Text fontSize="sm" color="gray.400">to</Text>
+                  <Text fontSize="sm" color="gray.400">{t('to')}</Text>
                   <Box flex={1}>
                     <Input
                       size="sm"
@@ -537,7 +543,7 @@ const SearchFilters = ({
                       name="max_bbox_y"
                       value={searchParams.max_bbox_y}
                       onChange={handleChange}
-                      placeholder="Max Y"
+                      placeholder={t('to')}
                     />
                   </Box>
                 </HStack>
@@ -545,7 +551,7 @@ const SearchFilters = ({
 
               {/* Z Dimension */}
               <FormControl>
-                <FormLabel fontSize="sm">Z Dimension Range (units)</FormLabel>
+                <FormLabel fontSize="sm">{t('zDimensionRange')}</FormLabel>
                 <HStack spacing={2}>
                   <Box flex={1}>
                     <Input
@@ -555,10 +561,10 @@ const SearchFilters = ({
                       name="min_bbox_z"
                       value={searchParams.min_bbox_z}
                       onChange={handleChange}
-                      placeholder="Min Z"
+                      placeholder={t('minZ')}
                     />
                   </Box>
-                  <Text fontSize="sm" color="gray.400">to</Text>
+                  <Text fontSize="sm" color="gray.400">{t('to')}</Text>
                   <Box flex={1}>
                     <Input
                       size="sm"
@@ -567,7 +573,7 @@ const SearchFilters = ({
                       name="max_bbox_z"
                       value={searchParams.max_bbox_z}
                       onChange={handleChange}
-                      placeholder="Max Z"
+                      placeholder={t('to')}
                     />
                   </Box>
                 </HStack>
@@ -576,12 +582,12 @@ const SearchFilters = ({
 
             {/* Date Filters (Sixth) */}
             <FilterSection
-              title="Date Filters"
+              title={t('dateFilters')}
               badge={getActiveFilterCount(['created_before', 'created_after', 'modified_before', 'modified_after']) || null}
               onClear={clearDateFilters}
             >
               <FormControl>
-                <FormLabel fontSize="sm">Created After</FormLabel>
+                <FormLabel fontSize="sm">{t('createdAfter')}</FormLabel>
                 <Input
                   size="sm"
                   type="date"
@@ -592,7 +598,7 @@ const SearchFilters = ({
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Created Before</FormLabel>
+                <FormLabel fontSize="sm">{t('createdBefore')}</FormLabel>
                 <Input
                   size="sm"
                   type="date"
@@ -603,7 +609,7 @@ const SearchFilters = ({
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Modified After</FormLabel>
+                <FormLabel fontSize="sm">{t('modifiedAfter')}</FormLabel>
                 <Input
                   size="sm"
                   type="date"
@@ -614,7 +620,7 @@ const SearchFilters = ({
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Modified Before</FormLabel>
+                <FormLabel fontSize="sm">{t('modifiedBefore')}</FormLabel>
                 <Input
                   size="sm"
                   type="date"
@@ -628,69 +634,69 @@ const SearchFilters = ({
 
             {/* User Filters (Seventh) */}
             <FilterSection
-              title="User Filters"
+              title={t('userFilters')}
               badge={getActiveFilterCount(['created_by', 'exclude_created_by', 'modified_by', 'exclude_modified_by']) || null}
               onClear={clearUserFilters}
             >
               <FormControl>
-                <FormLabel fontSize="sm">Created By</FormLabel>
+                <FormLabel fontSize="sm">{t('createdBy')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="created_by"
                   value={searchParams.created_by}
                   onChange={handleChange}
-                  placeholder="Username or email"
+                  placeholder={t('usernameOrEmail')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Exclude Created By</FormLabel>
+                <FormLabel fontSize="sm">{t('excludeCreatedBy')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="exclude_created_by"
                   value={searchParams.exclude_created_by}
                   onChange={handleChange}
-                  placeholder="Username or email to exclude"
+                  placeholder={t('excludeUsernameOrEmail')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Modified By</FormLabel>
+                <FormLabel fontSize="sm">{t('modifiedBy')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="modified_by"
                   value={searchParams.modified_by}
                   onChange={handleChange}
-                  placeholder="Username or email"
+                  placeholder={t('usernameOrEmail')}
                 />
               </FormControl>
 
               <FormControl>
-                <FormLabel fontSize="sm">Exclude Modified By</FormLabel>
+                <FormLabel fontSize="sm">{t('excludeModifiedBy')}</FormLabel>
                 <Input
                   size="sm"
                   autoComplete="off"
                   name="exclude_modified_by"
                   value={searchParams.exclude_modified_by}
                   onChange={handleChange}
-                  placeholder="Username or email to exclude"
+                  placeholder={t('excludeUsernameOrEmail')}
                 />
               </FormControl>
             </FilterSection>
 
             {/* Advanced Filters (Eighth) */}
             <FilterSection
-              title="Advanced Filters"
+              title={t('advancedFilters')}
               badge={getActiveFilterCount(['similarity_threshold', 'cutoff_threshold']) || null}
               onClear={clearAdvancedFilters}
             >
               <FormControl>
                 <FormLabel fontSize="sm">
-                  Similarity Threshold
-                  <Tooltip label="Filter duplicates by cosine distance (0-2 range)">
+                  {t('similarityThreshold')}
+                  <Tooltip label={t('similarityThresholdHelp')}>
                     <InfoIcon boxSize={3} ml={1} />
                   </Tooltip>
                 </FormLabel>
@@ -709,8 +715,8 @@ const SearchFilters = ({
 
               <FormControl>
                 <FormLabel fontSize="sm">
-                  Cutoff Threshold
-                  <Tooltip label="Set minimum similarity score for results">
+                  {t('cutoffThreshold')}
+                  <Tooltip label={t('cutoffThresholdHelp')}>
                     <InfoIcon boxSize={3} ml={1} />
                   </Tooltip>
                 </FormLabel>
@@ -728,9 +734,9 @@ const SearchFilters = ({
             </FilterSection>
 
             {/* Search Settings */}
-            <FilterSection title="Search Settings">
+            <FilterSection title={t('searchSettings')}>
               <FormControl>
-                <FormLabel fontSize="sm">Results Per Page</FormLabel>
+                <FormLabel fontSize="sm">{t('resultsPerPage')}</FormLabel>
                 <Select
                   size="sm"
                   name="limit"
@@ -748,8 +754,8 @@ const SearchFilters = ({
 
               <FormControl>
                 <FormLabel fontSize="sm">
-                  Search Method
-                  <Tooltip label="Approximate is faster but less accurate">
+                  {t('searchMethod')}
+                  <Tooltip label={t('searchMethodHelp')}>
                     <InfoIcon boxSize={3} ml={1} />
                   </Tooltip>
                 </FormLabel>
@@ -764,10 +770,10 @@ const SearchFilters = ({
                 >
                   <VStack align="start" spacing={2}>
                     <Radio value="exact" size="sm">
-                      Exact
+                      {t('exact')}
                     </Radio>
                     <Radio value="approximate" size="sm">
-                      Approximate
+                      {t('approximate')}
                     </Radio>
                   </VStack>
                 </RadioGroup>
@@ -780,4 +786,4 @@ const SearchFilters = ({
   );
 };
 
-export default SearchFilters;
+export default React.memo(SearchFilters);

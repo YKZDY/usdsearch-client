@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React from "react";
+import React, { memo, useMemo } from "react";
 import {
   Box,
   VStack,
@@ -52,11 +52,21 @@ import SmartAssetImage from "./components/SmartAssetImage";
 import NavigableAssetImage from "./components/NavigableAssetImage";
 import { useSmartImageLoader } from "./hooks/useSmartImageLoader";
 import { formatFileSize, formatDate } from "./utils/formatUtils";
+import { useTranslation } from "./i18n/LanguageContext";
+import { SEARCH_DEFAULTS } from "./config";
 
-const HighlightedText = ({ text, matchedTerms = [], isValue = false }) => {
+const HighlightedText = ({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
+  const truncateProps = {};
+  if (noOfLines) {
+    truncateProps.noOfLines = noOfLines;
+  }
+  if (isTruncated) {
+    truncateProps.isTruncated = true;
+  }
+
   if (!matchedTerms || matchedTerms.length === 0 || !text) {
     return (
-      <Text fontSize="xs" wordBreak="break-word" color={isValue ? "gray.200" : "inherit"}>
+      <Text fontSize="xs" wordBreak="break-word" color={isValue ? "gray.200" : "inherit"} {...truncateProps} title={text}>
         {text}
       </Text>
     );
@@ -70,7 +80,7 @@ const HighlightedText = ({ text, matchedTerms = [], isValue = false }) => {
   const parts = text.split(pattern);
   
   return (
-    <Text fontSize="xs" wordBreak="break-word">
+    <Text fontSize="xs" wordBreak="break-word" {...truncateProps} title={text}>
       {parts.map((part, index) => {
         const isMatch = matchedTerms.some(term => 
           part.toLowerCase() === term.toLowerCase()
@@ -89,7 +99,8 @@ const HighlightedText = ({ text, matchedTerms = [], isValue = false }) => {
   );
 };
 
-const QueryMatchBadges = ({ explanations = [], showScores = false }) => {
+const QueryMatchBadges = memo(({ explanations = [], showScores = SEARCH_DEFAULTS.showScores }) => {
+  const { t } = useTranslation();
   if (!explanations || explanations.length === 0) {
     return null;
   }
@@ -110,7 +121,7 @@ const QueryMatchBadges = ({ explanations = [], showScores = false }) => {
           return (
             <HStack key={index} spacing={2}>
               <Badge colorScheme="purple" size="sm">
-                Vector Match
+                {t('vectorMatch')}
               </Badge>
               {showScores && (
                 <Text fontSize="xs" color="gray.300">
@@ -130,7 +141,7 @@ const QueryMatchBadges = ({ explanations = [], showScores = false }) => {
               </Badge>
               {matched_terms.slice(0, 5).map((term, termIndex) => (
                 <Tooltip key={termIndex} label={term} placement="top">
-                  <Badge colorScheme="green" size="sm" variant="outline" maxW="150px">
+                  <Badge colorScheme="yellow" size="sm" variant="outline" maxW="150px">
                     <Text fontSize="xs" noOfLines={1}>
                       {truncateText(term, 20)}
                     </Text>
@@ -139,7 +150,7 @@ const QueryMatchBadges = ({ explanations = [], showScores = false }) => {
               ))}
               {matched_terms.length > 5 && (
                 <Badge colorScheme="gray" size="sm" variant="outline">
-                  +{matched_terms.length - 5} more
+                  +{matched_terms.length - 5} {t('more')}
                 </Badge>
               )}
             </HStack>
@@ -150,9 +161,11 @@ const QueryMatchBadges = ({ explanations = [], showScores = false }) => {
       })}
     </VStack>
   );
-};
+});
 
-const SmartHighlightedContent = ({ result, searchQuery = "" }) => {
+const SmartHighlightedContent = memo(({ result, searchQuery = "" }) => {
+  const { t } = useTranslation();
+  
   if (!result.source) {
     return null;
   }
@@ -195,7 +208,7 @@ const SmartHighlightedContent = ({ result, searchQuery = "" }) => {
   // Add path if matched
   if (matchedFields.has('path') && result.source.path) {
     highlightableContent.push({
-      label: "Path",
+      label: t('pathLabel'),
       content: result.source.path,
       color: "cyan"
     });
@@ -204,7 +217,7 @@ const SmartHighlightedContent = ({ result, searchQuery = "" }) => {
   // Add name if matched
   if (matchedFields.has('name') && result.source.name) {
     highlightableContent.push({
-      label: "Name", 
+      label: t('nameLabel'), 
       content: result.source.name,
       color: "orange"
     });
@@ -217,7 +230,7 @@ const SmartHighlightedContent = ({ result, searchQuery = "" }) => {
         prop.value.toLowerCase().includes(term.toLowerCase())
       )) {
         highlightableContent.push({
-          label: "Property",
+          label: t('propertyLabel'),
           content: `${prop.name}: ${prop.value}`,
           color: "teal"
         });
@@ -232,7 +245,7 @@ const SmartHighlightedContent = ({ result, searchQuery = "" }) => {
         value.toLowerCase().includes(term.toLowerCase())
       )) {
         highlightableContent.push({
-          label: "AI Tag",
+          label: t('aiTagLabel'),
           content: `${key.replace('vision_generated_', '').replace('_', ' ')}: ${value}`,
           color: "purple"
         });
@@ -254,7 +267,7 @@ const SmartHighlightedContent = ({ result, searchQuery = "" }) => {
               itemValue.toLowerCase().includes(term.toLowerCase())
             )) {
               highlightableContent.push({
-                label: "VLM",
+                label: t('vlmLabel'),
                 content: `${item.name}: ${itemValue}`,
                 color: "pink"
               });
@@ -296,22 +309,25 @@ const SmartHighlightedContent = ({ result, searchQuery = "" }) => {
       ))}
     </HStack>
   );
-};
+});
 
-const HybridSearchResultGridItem = ({ 
-  result, 
+const HybridSearchResultGridItem = memo(({
+  result,
   index,
-  onItemClick, 
-  copyToClipboard, 
+  onSelectionChange,
+  onItemClick,
+  copyToClipboard,
   onFindSimilar,
-  showScores = false,
-  gridSize = "L",
+  showScores = SEARCH_DEFAULTS.showScores,
+  gridSize = SEARCH_DEFAULTS.gridSize,
   searchQuery = "",
   getLoadingState,
   registerImageElement,
   getHeaders,
-  apiUrl
+  apiUrl,
+  isSelected = false
 }) => {
+  const { t } = useTranslation();
   
   // Get the filename from base_key or URL
   const baseKey = result.source?.base_key || result.source?.url || result.id;
@@ -319,14 +335,36 @@ const HybridSearchResultGridItem = ({
 
   return (
     <Card 
-      bg="gray.800" 
-      borderColor="gray.600" 
-      _hover={{ borderColor: "green.500", shadow: "lg" }}
-      transition="all 0.2s"
+      bg={isSelected ? "#2a2b1e" : "#1C1D20"} 
+      borderColor={isSelected ? "#FFD230" : "#383838"} 
+      _hover={{ borderColor: "#FFD230", shadow: "0 0 20px rgba(255,210,48,0.08)" }}
+      transition="all 0.25s"
       cursor="pointer"
-      onClick={() => onItemClick?.(result)}
+      onClick={() => onSelectionChange?.(result)}
       h="100%"
+      borderRadius="12px"
+      position="relative"
     >
+      {/* Selection indicator */}
+      {isSelected && (
+        <Box
+          position="absolute"
+          top={2}
+          left={2}
+          zIndex={10}
+          bg="#FFD230"
+          color="black"
+          borderRadius="full"
+          boxSize="20px"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          fontSize="xs"
+          fontWeight="bold"
+        >
+          &#10003;
+        </Box>
+      )}
       <CardBody p={gridSize === "S" ? 2 : 3}>
         <VStack spacing={gridSize === "S" ? 2 : 3} align="stretch" h="100%">
           {/* Image */}
@@ -348,7 +386,8 @@ const HybridSearchResultGridItem = ({
                 fontSize={gridSize === "S" ? "xs" : "sm"}
                 fontWeight="semibold" 
                 noOfLines={gridSize === "S" ? 1 : 2}
-                lineHeight="1.2"
+                lineHeight="1.4"
+                title={filename}
               >
                 {filename}
               </Text>
@@ -357,7 +396,7 @@ const HybridSearchResultGridItem = ({
             {/* Score Badges */}
             {showScores && (
               <HStack spacing={1} wrap="wrap">
-                <Badge colorScheme="green" size="xs">
+                <Badge colorScheme="yellow" size="xs">
                   {result.score.toFixed(2)}
                 </Badge>
                 <Badge colorScheme="blue" size="xs">
@@ -377,64 +416,48 @@ const HybridSearchResultGridItem = ({
             )}
 
             {/* Metadata */}
-            <VStack spacing={1} align="stretch" fontSize="2xs" color="gray.300" flex={1}>
+            <VStack spacing={1} align={gridSize === "S" ? "end" : "stretch"} fontSize="2xs" color="gray.300" flex={1}>
               {result.source?.size && (
-                <Text>Size: {formatFileSize(result.source.size)}</Text>
+                <Text textAlign={gridSize === "S" ? "right" : "left"}>{t('size')} {formatFileSize(result.source.size)}</Text>
               )}
               {gridSize !== "S" && result.source?.modified_timestamp && (
-                <Text>Modified: {new Date(result.source.modified_timestamp).toLocaleDateString()}</Text>
+                <Text>{t('modified')} {new Date(result.source.modified_timestamp).toLocaleDateString()}</Text>
               )}
             </VStack>
 
             {/* Actions */}
             <HStack justify={gridSize === "S" ? "center" : "space-between"} pt={gridSize === "S" ? 1 : 2}>
               {gridSize === "S" ? (
-                // Compact view - only view details button
-                <Tooltip label="View details">
-                  <IconButton
-                    size="xs"
-                    variant="ghost"
-                    icon={<ExternalLinkIcon />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onItemClick?.(result);
-                    }}
-                    aria-label="View details"
-                  />
-                </Tooltip>
-              ) : (
-                // Full view - all actions
-                <>
-                  <HStack spacing={1}>
-                    {copyToClipboard && (
-                      <Tooltip label="Copy URL">
-                        <IconButton
-                          size="xs"
-                          variant="ghost"
-                          icon={<CopyIcon />}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            copyToClipboard?.(baseKey);
-                          }}
-                          aria-label="Copy URL"
-                        />
-                      </Tooltip>
-                    )}
-                    <Tooltip label="Find similar assets">
+                // Compact view - copy + find similar + view details
+                <HStack spacing={1}>
+                  {copyToClipboard && (
+                    <Tooltip label={t('copyUrl')}>
                       <IconButton
                         size="xs"
                         variant="ghost"
-                        icon={<SearchIcon />}
+                        icon={<CopyIcon />}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onFindSimilar?.(baseKey);
+                          copyToClipboard?.(baseKey);
                         }}
-                        aria-label="Find similar assets"
-                        colorScheme="purple"
+                        aria-label={t('copyUrl')}
                       />
                     </Tooltip>
-                  </HStack>
-                  <Tooltip label="View details">
+                  )}
+                  <Tooltip label={t('findSimilarAssets')}>
+                    <IconButton
+                      size="xs"
+                      variant="ghost"
+                      icon={<SearchIcon />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onFindSimilar?.(baseKey);
+                      }}
+                      aria-label={t('findSimilarAssets')}
+                      colorScheme="purple"
+                    />
+                  </Tooltip>
+                  <Tooltip label={t('viewDetails')}>
                     <IconButton
                       size="xs"
                       variant="ghost"
@@ -443,7 +466,52 @@ const HybridSearchResultGridItem = ({
                         e.stopPropagation();
                         onItemClick?.(result);
                       }}
-                      aria-label="View details"
+                      aria-label={t('viewDetails')}
+                    />
+                  </Tooltip>
+                </HStack>
+              ) : (
+                // Full view - all actions
+                <>
+                  <HStack spacing={1}>
+                    {copyToClipboard && (
+                      <Tooltip label={t('copyUrl')}>
+                        <IconButton
+                          size="xs"
+                          variant="ghost"
+                          icon={<CopyIcon />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyToClipboard?.(baseKey);
+                          }}
+                          aria-label={t('copyUrl')}
+                        />
+                      </Tooltip>
+                    )}
+                    <Tooltip label={t('findSimilarAssets')}>
+                      <IconButton
+                        size="xs"
+                        variant="ghost"
+                        icon={<SearchIcon />}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onFindSimilar?.(baseKey);
+                        }}
+                        aria-label={t('findSimilarAssets')}
+                        colorScheme="purple"
+                      />
+                    </Tooltip>
+                  </HStack>
+                  <Tooltip label={t('viewDetails')}>
+                    <IconButton
+                      size="xs"
+                      variant="ghost"
+                      icon={<ExternalLinkIcon />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onItemClick?.(result);
+                      }}
+                      aria-label={t('viewDetails')}
                     />
                   </Tooltip>
                 </>
@@ -454,23 +522,26 @@ const HybridSearchResultGridItem = ({
       </CardBody>
     </Card>
   );
-};
+});
 
-const HybridSearchResultItem = ({ 
-  result, 
+const HybridSearchResultItem = memo(({
+  result,
   index,
-  onItemClick, 
-  copyToClipboard, 
+  onSelectionChange,
+  onItemClick,
+  copyToClipboard,
   onFindSimilar,
-  showScores = false,
+  showScores = SEARCH_DEFAULTS.showScores,
   maxScore = 1,
   minScore = 0,
   searchQuery = "",
   getLoadingState,
   registerImageElement,
   getHeaders,
-  apiUrl
+  apiUrl,
+  isSelected = false
 }) => {
+  const { t } = useTranslation();
   const { isOpen, onToggle } = useDisclosure();
   
   // Extract all matched terms from explanations
@@ -484,13 +555,35 @@ const HybridSearchResultItem = ({
 
   return (
     <Card 
-      bg="gray.800" 
-      borderColor="gray.600" 
-      _hover={{ borderColor: "green.500", shadow: "lg" }}
-      transition="all 0.2s"
+      bg={isSelected ? "#2a2b1e" : "#1C1D20"} 
+      borderColor={isSelected ? "#FFD230" : "#383838"} 
+      _hover={{ borderColor: "#FFD230", shadow: "0 0 20px rgba(255,210,48,0.08)" }}
+      transition="all 0.25s"
       cursor="pointer"
-      onClick={() => onItemClick?.(result)}
+      onClick={() => onSelectionChange?.(result)}
+      borderRadius="12px"
+      position="relative"
     >
+      {/* Selection indicator */}
+      {isSelected && (
+        <Box
+          position="absolute"
+          top={2}
+          left={2}
+          zIndex={10}
+          bg="#FFD230"
+          color="black"
+          borderRadius="full"
+          boxSize="20px"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          fontSize="xs"
+          fontWeight="bold"
+        >
+          &#10003;
+        </Box>
+      )}
       <CardBody p={4}>
         <Grid templateColumns="200px 1fr auto" gap={4} alignItems="start">
           {/* Image Thumbnail */}
@@ -516,19 +609,20 @@ const HybridSearchResultItem = ({
                     <HighlightedText 
                       text={filename}
                       matchedTerms={allMatchedTerms}
+                      noOfLines={1}
                     />
                   </Tooltip>
                   {showScores && (
                     <HStack>
-                      <Badge colorScheme="green" size="sm">
-                        Score: {result.score.toFixed(3)}
+                      <Badge colorScheme="yellow" size="sm">
+                        {t('scoreLabel')} {result.score.toFixed(3)}
                       </Badge>
                       <Badge colorScheme="blue" size="sm">
                         RRF: {result.rrf_score.toFixed(3)}
                       </Badge>
                       {result.metadata?.rrf_rank && (
                         <Badge colorScheme="yellow" size="sm">
-                          Rank #{result.metadata.rrf_rank}
+                          #{t('rank')} {result.metadata.rrf_rank}
                         </Badge>
                       )}
                     </HStack>
@@ -537,7 +631,7 @@ const HybridSearchResultItem = ({
                 
                 <HStack>
                   {copyToClipboard && (
-                    <Tooltip label="Copy URL">
+                    <Tooltip label={t('copyUrl')}>
                       <IconButton
                         size="sm"
                         variant="ghost"
@@ -546,11 +640,11 @@ const HybridSearchResultItem = ({
                           e.stopPropagation();
                           copyToClipboard?.(baseKey);
                         }}
-                        aria-label="Copy URL"
+                        aria-label={t('copyUrl')}
                       />
                     </Tooltip>
                   )}
-                  <Tooltip label="Find similar assets">
+                  <Tooltip label={t('findSimilarAssets')}>
                     <IconButton
                       size="sm"
                       variant="ghost"
@@ -559,11 +653,11 @@ const HybridSearchResultItem = ({
                         e.stopPropagation();
                         onFindSimilar?.(baseKey);
                       }}
-                      aria-label="Find similar assets"
+                      aria-label={t('findSimilarAssets')}
                       colorScheme="purple"
                     />
                   </Tooltip>
-                  <Tooltip label="View details">
+                  <Tooltip label={t('viewDetails')}>
                     <IconButton
                       size="sm"
                       variant="ghost"
@@ -572,7 +666,7 @@ const HybridSearchResultItem = ({
                         e.stopPropagation();
                         onItemClick?.(result);
                       }}
-                      aria-label="View details"
+                      aria-label={t('viewDetails')}
                     />
                   </Tooltip>
                 </HStack>
@@ -591,10 +685,10 @@ const HybridSearchResultItem = ({
               {result.source && (
                 <VStack spacing={1} align="stretch" fontSize="sm" color="gray.300">
                   {result.source.size && (
-                    <Text>Size: {formatFileSize(result.source.size)}</Text>
+                    <Text>{t('size')} {formatFileSize(result.source.size)}</Text>
                   )}
                   {result.source.modified_timestamp && (
-                    <Text>Modified: {new Date(result.source.modified_timestamp).toLocaleDateString()}</Text>
+                    <Text>{t('modified')} {new Date(result.source.modified_timestamp).toLocaleDateString()}</Text>
                   )}
                 </VStack>
               )}
@@ -616,7 +710,7 @@ const HybridSearchResultItem = ({
                 aria-label="Toggle explanations"
               />
               <Text fontSize="xs" color="gray.300" textAlign="center">
-                Why this matched
+                {t('whyThisMatched')}
               </Text>
             </VStack>
           </GridItem>
@@ -637,22 +731,26 @@ const HybridSearchResultItem = ({
       </CardBody>
     </Card>
   );
-};
+});
 
 const HybridSearchResults = ({ 
   results = [], 
   onItemClick, 
   copyToClipboard, 
   onFindSimilar,
-  showScores = false,
-  viewMode = "list",
-  gridSize = "L",
+  showScores = SEARCH_DEFAULTS.showScores,
+  viewMode = SEARCH_DEFAULTS.viewMode,
+  gridSize = SEARCH_DEFAULTS.gridSize,
   isLoading = false,
   isEmpty = false,
   searchQuery = "",
   getHeaders,
-  apiUrl
+  apiUrl,
+  selectedItems,
+  onSelectionChange,
+  onCopySelectedUrls
 }) => {
+  const { t } = useTranslation();
   // Smart image loading for visible + buffer items
   const { getLoadingState, registerImageElement } = useSmartImageLoader(
     results,
@@ -664,10 +762,22 @@ const HybridSearchResults = ({
       enabled: !isLoading && !isEmpty
     }
   );
+
+  // Calculate score range for normalization (memoized)
+  // Must be before early returns to satisfy React Hooks rules
+  const { maxScore, minScore } = useMemo(() => {
+    if (!results || results.length === 0) return { maxScore: 0, minScore: 0 };
+    const scores = results.map(r => r.score);
+    return {
+      maxScore: Math.max(...scores),
+      minScore: Math.min(...scores)
+    };
+  }, [results]);
+
   if (isLoading) {
     return (
       <Box textAlign="center" py={8}>
-        <CircularProgress isIndeterminate color="green.400" />
+        <CircularProgress isIndeterminate color="#FFD230" />
         <Text mt={4} color="gray.300">Searching...</Text>
       </Box>
     );
@@ -677,16 +787,11 @@ const HybridSearchResults = ({
     return (
       <Box textAlign="center" py={8}>
         <Text fontSize="md" color="gray.300">
-          No results found. Try adjusting your search terms or configuration.
+          {t('noResultsMessage')}
         </Text>
       </Box>
     );
   }
-
-  // Calculate score range for normalization
-  const scores = results.map(r => r.score);
-  const maxScore = Math.max(...scores);
-  const minScore = Math.min(...scores);
 
   return (
     <VStack spacing={4} align="stretch">
@@ -694,29 +799,24 @@ const HybridSearchResults = ({
       <HStack justify="space-between" wrap="wrap">
         <HStack spacing={4}>
           <Text fontSize="sm" color="gray.300">
-            {results.length} results found
+            {t('resultsFound', { count: results.length })}
           </Text>
           {copyToClipboard && (
             <Button
               size="sm"
               leftIcon={<CopyIcon />}
-              onClick={() => {
-                // Copy all URLs as newline-separated
-                const allUrls = results.map((result) => 
-                  result.source?.base_key || result.source?.url || result.id
-                ).filter(Boolean).join("\n");
-                copyToClipboard?.(allUrls);
-              }}
+              onClick={onCopySelectedUrls}
               variant="outline"
               colorScheme="blue"
+              isDisabled={!selectedItems || selectedItems.size === 0}
             >
-              Copy All URLs
+              {t('copySelectedUrls')}
             </Button>
           )}
         </HStack>
         <HStack>
-          <Text fontSize="xs" color="gray.500">
-            Score range: {minScore.toFixed(3)} - {maxScore.toFixed(3)}
+          <Text fontSize="xs" color="gray.400">
+            {t('scoreRange', { min: minScore.toFixed(3), max: maxScore.toFixed(3) })}
           </Text>
         </HStack>
       </HStack>
@@ -733,6 +833,7 @@ const HybridSearchResults = ({
               <HybridSearchResultGridItem
                 result={result}
                 index={index}
+                onSelectionChange={onSelectionChange}
                 onItemClick={onItemClick}
                 copyToClipboard={copyToClipboard}
                 onFindSimilar={onFindSimilar}
@@ -743,6 +844,7 @@ const HybridSearchResults = ({
                 registerImageElement={registerImageElement}
                 getHeaders={getHeaders}
                 apiUrl={apiUrl}
+                isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
               />
             </GridItem>
           ))}
@@ -754,6 +856,7 @@ const HybridSearchResults = ({
               key={result.id || index}
               result={result}
               index={index}
+              onSelectionChange={onSelectionChange}
               onItemClick={onItemClick}
               copyToClipboard={copyToClipboard}
               onFindSimilar={onFindSimilar}
@@ -765,6 +868,7 @@ const HybridSearchResults = ({
               registerImageElement={registerImageElement}
               getHeaders={getHeaders}
               apiUrl={apiUrl}
+              isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
             />
           ))}
         </VStack>
@@ -773,4 +877,4 @@ const HybridSearchResults = ({
   );
 };
 
-export default HybridSearchResults;
+export default memo(HybridSearchResults);

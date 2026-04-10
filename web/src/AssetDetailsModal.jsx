@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   VStack,
@@ -56,6 +56,7 @@ import {
   PopoverBody,
   PopoverArrow,
   PopoverCloseButton,
+  useToast,
 } from "@chakra-ui/react";
 import {
   CopyIcon,
@@ -66,15 +67,16 @@ import {
 import SearchExplanations from "./SearchExplanations";
 import NavigableAssetImage from "./components/NavigableAssetImage";
 import GraphVisualization from "./Graph";
-import { apiUrl, IS_HTTPS } from "./config";
+import { apiUrl, SEARCH_DEFAULTS } from "./config";
 import { formatFileSize, formatDate } from "./utils/formatUtils";
+import { useTranslation } from "./i18n/LanguageContext";
 
 // Status utility functions
 const getStatusColor = (status) => {
   if (!status) return "white";
   const lowerStatus = status.toLowerCase();
   if (lowerStatus === "ok" || lowerStatus === "completed" || lowerStatus === "success") {
-    return "green.400";
+    return "#52C41A";
   } else if (lowerStatus === "processing" || lowerStatus === "pending" || lowerStatus === "running") {
     return "blue.400";
   } else if (lowerStatus === "queued") {
@@ -110,7 +112,7 @@ const calculateOverallIndexStatus = (pluginStatuses) => {
   if (hasError) {
     return { status: "Error", color: "red.400" };
   } else if (allCompleted) {
-    return { status: "Ok", color: "green.400" };
+    return { status: "Ok", color: "#52C41A" };
   } else if (hasProcessing) {
     return { status: "Partial", color: "yellow.400" };
   } else {
@@ -119,6 +121,7 @@ const calculateOverallIndexStatus = (pluginStatuses) => {
 };
 
 const PluginStatusTable = ({ url, plugins, triggerReindexIndividualPlugin, getHeaders, onStatusChange }) => {
+  const { t } = useTranslation();
   const [pluginStatuses, setPluginStatuses] = useState({});
   const [pluginStatusDetails, setPluginStatusDetails] = useState({});
   const [isLoading, setIsLoading] = useState(false);
@@ -215,7 +218,7 @@ const PluginStatusTable = ({ url, plugins, triggerReindexIndividualPlugin, getHe
     return (
       <Box textAlign="center" p={4}>
         <CircularProgress isIndeterminate size="40px" />
-        <Text mt={2} fontSize="sm" color="gray.400">Loading plugin statuses...</Text>
+        <Text mt={2} fontSize="sm" color="gray.400">{t('loadingPluginStatuses')}</Text>
       </Box>
     );
   }
@@ -224,9 +227,9 @@ const PluginStatusTable = ({ url, plugins, triggerReindexIndividualPlugin, getHe
     <Box>
       <HStack justify="space-between" align="center" mb={2}>
         <Text fontSize="sm" color="gray.400">
-          Plugin Status & Re-indexing:
+          {t('pluginStatusReindexing')}
         </Text>
-        <Tooltip label="Refresh plugin statuses">
+        <Tooltip label={t('refreshPluginStatuses')}>
           <IconButton
             size="xs"
             variant="ghost"
@@ -258,7 +261,7 @@ const PluginStatusTable = ({ url, plugins, triggerReindexIndividualPlugin, getHe
                 colorScheme="blue"
                 onClick={() => triggerReindexIndividualPlugin?.(url, plugin.name)}
               >
-                Re-index
+                {t('reindex')}
               </Button>
             </HStack>
           );
@@ -268,14 +271,14 @@ const PluginStatusTable = ({ url, plugins, triggerReindexIndividualPlugin, getHe
           <HStack key={plugin.name} justify="space-between" p={2} bg="gray.700" borderRadius="md">
             <VStack align="start" spacing={0} flex={1}>
               <Text fontSize="sm" fontWeight="semibold">{plugin.name}</Text>
-              <Text fontSize="xs" color="gray.400">No status available</Text>
+              <Text fontSize="xs" color="gray.400">{t('noStatusAvailable')}</Text>
             </VStack>
             <Button
               size="xs"
               colorScheme="blue"
               onClick={() => triggerReindexIndividualPlugin?.(url, plugin.name)}
             >
-              Re-index
+              {t('reindex')}
             </Button>
           </HStack>
         ))}
@@ -285,10 +288,11 @@ const PluginStatusTable = ({ url, plugins, triggerReindexIndividualPlugin, getHe
 };
 
 const USDPropertiesTable = ({ usdProperties, expandedGroups, setExpandedGroups }) => {
+  const { t } = useTranslation();
   if (!usdProperties || Object.keys(usdProperties).length === 0) {
     return (
       <Box p={4} textAlign="center" color="gray.400">
-        <Text>No USD properties found</Text>
+        <Text>{t('noUsdProperties')}</Text>
       </Box>
     );
   }
@@ -327,7 +331,7 @@ const USDPropertiesTable = ({ usdProperties, expandedGroups, setExpandedGroups }
                     icon={isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
                     aria-label="Toggle group"
                   />
-                  <Text fontWeight="semibold" color="green.300">
+                  <Text fontWeight="semibold" color="#FFD230">
                     {group} ({properties.length})
                   </Text>
                 </HStack>
@@ -352,7 +356,7 @@ const USDPropertiesTable = ({ usdProperties, expandedGroups, setExpandedGroups }
               </>
             ) : (
               <Box>
-                <Text fontWeight="semibold" color="green.300" mb={2} fontSize="sm">
+                <Text fontWeight="semibold" color="#FFD230" mb={2} fontSize="sm">
                   {group}
                 </Text>
                 <Table size="sm" variant="simple">
@@ -383,7 +387,7 @@ const AssetDetailsModal = ({
   onClose, 
   selectedItem, 
   copyToClipboard, 
-  showScores = false,
+  showScores = SEARCH_DEFAULTS.showScores,
   plugins,
   getHeaders,
   apiUrl,
@@ -391,6 +395,8 @@ const AssetDetailsModal = ({
   triggerReindexIndividualPlugin
 }) => {
   const [pluginStatuses, setPluginStatuses] = useState({});
+  const { t } = useTranslation();
+  const toast = useToast();
   const [assetDependencies, setAssetDependencies] = useState(null);
   const [assetInverseDependencies, setAssetInverseDependencies] = useState(null);
   const [usdProperties, setUsdProperties] = useState(null);
@@ -407,6 +413,7 @@ const AssetDetailsModal = ({
   const { isOpen: isInverseDepsOpen, onToggle: toggleInverseDeps } = useDisclosure();
   const { isOpen: isTechnicalOpen, onToggle: toggleTechnical } = useDisclosure();
   const { isOpen: isTagsOpen, onToggle: toggleTags } = useDisclosure();
+  const { isOpen: isIndexMgmtOpen, onToggle: toggleIndexMgmt } = useDisclosure({ defaultIsOpen: false });
   
   const overallStatus = calculateOverallIndexStatus(pluginStatuses);
 
@@ -522,7 +529,7 @@ const AssetDetailsModal = ({
       
       // If collapse sections are already open, reload their data for the new asset
       // Use setTimeout to ensure state is cleared first
-      setTimeout(() => {
+      const timerId = setTimeout(() => {
         if (isDepsOpen) {
           loadDependencies(true);
         }
@@ -533,6 +540,8 @@ const AssetDetailsModal = ({
           loadUSDProperties(true);
         }
       }, 0);
+      
+      return () => clearTimeout(timerId);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedItem]);
@@ -577,7 +586,7 @@ const AssetDetailsModal = ({
           <HStack>
             <Text isTruncated flex={1}>{filename}</Text>
             {showScores && (
-              <Badge colorScheme="green">Score: {selectedItem.score?.toFixed(3)}</Badge>
+              <Badge colorScheme="yellow">{t('scoreLabel')}{selectedItem.score?.toFixed(3)}</Badge>
             )}
           </HStack>
         </ModalHeader>
@@ -603,13 +612,13 @@ const AssetDetailsModal = ({
                 {/* Basic Asset Information */}
                 <VStack spacing={4} align="stretch">
                   <Box>
-                    <Text fontSize="lg" fontWeight="semibold" color="green.400" mb={2}>
-                      Asset Information
+                    <Text fontSize="lg" fontWeight="semibold" color="#FFD230" mb={2}>
+                      {t('assetInformation')}
                     </Text>
                     <VStack spacing={2} align="stretch">
                       {/* Base Key / URL */}
                       <HStack>
-                        <Text fontWeight="semibold" minW="100px">URL:</Text>
+                        <Text fontWeight="semibold" minW="100px">{t('url')}</Text>
                         <Text 
                           fontSize="sm" 
                           wordBreak="break-all" 
@@ -618,15 +627,6 @@ const AssetDetailsModal = ({
                         >
                           {baseKey}
                         </Text>
-                        {IS_HTTPS && (
-                          <IconButton
-                            size="sm"
-                            icon={<CopyIcon />}
-                            onClick={() => copyToClipboard?.(baseKey)}
-                            aria-label="Copy URL"
-                            variant="ghost"
-                          />
-                        )}
                       </HStack>
 
                       {/* Essential Information */}
@@ -634,43 +634,43 @@ const AssetDetailsModal = ({
                         <>
                           {selectedItem.source.name && (
                             <HStack>
-                              <Text fontWeight="semibold" minW="100px">Name:</Text>
+                              <Text fontWeight="semibold" minW="100px">{t('name')}</Text>
                               <Text>{selectedItem.source.name}</Text>
                             </HStack>
                           )}
                           {selectedItem.source.ext && (
                             <HStack>
-                              <Text fontWeight="semibold" minW="100px">Type:</Text>
+                              <Text fontWeight="semibold" minW="100px">{t('type')}</Text>
                               <Badge colorScheme="blue">{selectedItem.source.ext.toUpperCase()}</Badge>
                             </HStack>
                           )}
                           {selectedItem.source.size && (
                             <HStack>
-                              <Text fontWeight="semibold" minW="100px">Size:</Text>
+                              <Text fontWeight="semibold" minW="100px">{t('size')}</Text>
                               <Text>{formatFileSize(selectedItem.source.size)}</Text>
                             </HStack>
                           )}
                           {selectedItem.source.created_timestamp && (
                             <HStack>
-                              <Text fontWeight="semibold" minW="100px">Created:</Text>
+                              <Text fontWeight="semibold" minW="100px">{t('created')}</Text>
                               <Text fontSize="sm">{formatDate(selectedItem.source.created_timestamp)}</Text>
                             </HStack>
                           )}
                           {selectedItem.source.modified_timestamp && (
                             <HStack>
-                              <Text fontWeight="semibold" minW="100px">Modified:</Text>
+                              <Text fontWeight="semibold" minW="100px">{t('modified')}</Text>
                               <Text fontSize="sm">{formatDate(selectedItem.source.modified_timestamp)}</Text>
                             </HStack>
                           )}
                           {selectedItem.source.pathType && (
                             <HStack>
-                              <Text fontWeight="semibold" minW="100px">Path Type:</Text>
-                              <Badge colorScheme="green" size="sm">{selectedItem.source.pathType}</Badge>
+                              <Text fontWeight="semibold" minW="100px">{t('pathType')}</Text>
+                              <Badge colorScheme="yellow" size="sm">{selectedItem.source.pathType}</Badge>
                             </HStack>
                           )}
                           {selectedItem.source.status && (
                             <HStack>
-                              <Text fontWeight="semibold" minW="100px">Status:</Text>
+                              <Text fontWeight="semibold" minW="100px">{t('status')}</Text>
                               <Badge 
                                 colorScheme={selectedItem.source.status === 'None' ? 'gray' : 'yellow'} 
                                 size="sm"
@@ -687,19 +687,19 @@ const AssetDetailsModal = ({
                   {/* Search Scores */}
                   {showScores && (
                     <Box>
-                      <Text fontSize="lg" fontWeight="semibold" color="green.400" mb={2}>
-                        Search Scores
+                      <Text fontSize="lg" fontWeight="semibold" color="#FFD230" mb={2}>
+                        {t('searchScores')}
                       </Text>
                       <HStack spacing={4}>
-                        <Badge colorScheme="green" p={2}>
-                          Total Score: {selectedItem.score?.toFixed(3)}
+                        <Badge colorScheme="yellow" p={2}>
+                          {t('totalScore')}{selectedItem.score?.toFixed(3)}
                         </Badge>
                         <Badge colorScheme="blue" p={2}>
-                          RRF Score: {selectedItem.rrf_score?.toFixed(3)}
+                          {t('rrfScoreLabel')}{selectedItem.rrf_score?.toFixed(3)}
                         </Badge>
                         {selectedItem.metadata?.rrf_rank && (
                           <Badge colorScheme="yellow" p={2}>
-                            Rank #{selectedItem.metadata.rrf_rank}
+                            {t('rank')} #{selectedItem.metadata.rrf_rank}
                           </Badge>
                         )}
                       </HStack>
@@ -711,14 +711,30 @@ const AssetDetailsModal = ({
 
             {/* Re-indexing Controls */}
             <Box>
-              <Text fontSize="lg" fontWeight="semibold" color="green.400" mb={3}>
-                Index Management
-              </Text>
-              
+              <HStack justify="space-between" mb={2}>
+                <Text 
+                  fontSize="lg" 
+                  fontWeight="semibold" 
+                  color="#FFD230"
+                  cursor="pointer"
+                  onClick={toggleIndexMgmt}
+                >
+                  {t('indexManagement')}
+                </Text>
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  icon={isIndexMgmtOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                  onClick={toggleIndexMgmt}
+                  aria-label="Toggle index management"
+                />
+              </HStack>
+              <Collapse in={isIndexMgmtOpen} animateOpacity>
+                <Box bg="gray.750" p={4} borderRadius="md">
               {/* Overall Status Display */}
               <HStack justify="center" spacing={4} mb={4}>
                 <HStack spacing={2} align="center">
-                  <Text fontSize="sm" fontWeight="bold">Index Status:</Text>
+                  <Text fontSize="sm" fontWeight="bold">{t('indexStatus')}</Text>
                   <Text fontSize="sm" color={overallStatus.color} fontWeight="bold">
                     {overallStatus.status}
                   </Text>
@@ -729,7 +745,7 @@ const AssetDetailsModal = ({
                 <IconButton
                   size="sm"
                   icon={<RepeatIcon />}
-                  aria-label="Refresh all data"
+                  aria-label={t('refreshAllData')}
                   onClick={() => {
                     // Force reload all data sections
                     loadDependencies(true);
@@ -747,7 +763,7 @@ const AssetDetailsModal = ({
                     }
                   }}
                 >
-                  Re-index All
+                  {t('reindexAll')}
                 </Button>
                 <Popover>
                   <PopoverTrigger>
@@ -756,13 +772,13 @@ const AssetDetailsModal = ({
                       variant="outline"
                       rightIcon={<ChevronDownIcon />}
                     >
-                      Individual Plugins
+                      {t('individualPlugins')}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent>
                     <PopoverArrow />
                     <PopoverCloseButton />
-                    <PopoverHeader>Re-index Individual Plugins</PopoverHeader>
+                    <PopoverHeader>{t('reindexIndividualPlugins')}</PopoverHeader>
                     <PopoverBody>
                       <PluginStatusTable 
                         url={baseKey}
@@ -775,6 +791,8 @@ const AssetDetailsModal = ({
                   </PopoverContent>
                 </Popover>
               </HStack>
+                </Box>
+              </Collapse>
             </Box>
 
             {/* Search Explanations */}
@@ -784,11 +802,11 @@ const AssetDetailsModal = ({
                   <Text 
                     fontSize="lg" 
                     fontWeight="semibold" 
-                    color="green.400"
+                    color="#FFD230"
                     cursor="pointer"
                     onClick={toggleExplanations}
                   >
-                    Search Match Explanations
+                    {t('searchMatchExplanations')}
                   </Text>
                   <IconButton
                     size="sm"
@@ -820,11 +838,11 @@ const AssetDetailsModal = ({
                   <Text 
                     fontSize="lg" 
                     fontWeight="semibold" 
-                    color="green.400"
+                    color="#FFD230"
                     cursor="pointer"
                     onClick={toggleMetadata}
                   >
-                    AI-Generated Metadata
+                    {t('aiGeneratedMetadata')}
                   </Text>
                   <IconButton
                     size="sm"
@@ -839,8 +857,8 @@ const AssetDetailsModal = ({
                     <Table size="sm" variant="simple">
                       <Thead>
                         <Tr>
-                          <Th color="gray.300">Field</Th>
-                          <Th color="gray.300">Value</Th>
+                          <Th color="gray.300">{t('field')}</Th>
+                          <Th color="gray.300">{t('value')}</Th>
                         </Tr>
                       </Thead>
                       <Tbody>
@@ -866,11 +884,11 @@ const AssetDetailsModal = ({
                   <Text 
                     fontSize="lg" 
                     fontWeight="semibold" 
-                    color="green.400"
+                    color="#FFD230"
                     cursor="pointer"
                     onClick={toggleVlmMetadata}
                   >
-                    VLM Metadata
+                    {t('vlmMetadata')}
                   </Text>
                   <IconButton
                     size="sm"
@@ -885,8 +903,8 @@ const AssetDetailsModal = ({
                     <Table size="sm" variant="simple">
                       <Thead>
                         <Tr>
-                          <Th color="gray.300">Field</Th>
-                          <Th color="gray.300">Value</Th>
+                          <Th color="gray.300">{t('field')}</Th>
+                          <Th color="gray.300">{t('value')}</Th>
                         </Tr>
                       </Thead>
                       <Tbody>
@@ -918,8 +936,8 @@ const AssetDetailsModal = ({
             {selectedItem.ags_data?.root_prims && 
              selectedItem.ags_data.root_prims.length > 0 && (
               <Box>
-                <Text fontSize="lg" fontWeight="semibold" color="green.400" mb={3}>
-                  USD Scene Data
+                <Text fontSize="lg" fontWeight="semibold" color="#FFD230" mb={3}>
+                  {t('usdSceneData')}
                 </Text>
                 <Box bg="gray.750" p={4} borderRadius="md">
                   <VStack spacing={3} align="stretch">
@@ -936,7 +954,7 @@ const AssetDetailsModal = ({
                         {prim.properties && Object.keys(prim.properties).length > 0 && (
                           <Box ml={4}>
                             <Text fontSize="sm" fontWeight="semibold" color="gray.300" mb={2}>
-                              Properties:
+                              {t('properties')}
                             </Text>
                             <Table size="sm" variant="simple">
                               <Tbody>
@@ -967,11 +985,11 @@ const AssetDetailsModal = ({
                 <Text 
                   fontSize="lg" 
                   fontWeight="semibold" 
-                  color="green.400"
+                  color="#FFD230"
                   cursor="pointer"
                   onClick={handleToggleUsdProps}
                 >
-                  USD Properties
+                  {t('usdProperties')}
                 </Text>
                 <IconButton
                   size="sm"
@@ -986,7 +1004,7 @@ const AssetDetailsModal = ({
                   {loadingUsdProps ? (
                     <Box textAlign="center" py={8}>
                       <CircularProgress isIndeterminate size="40px" />
-                      <Text mt={2} fontSize="sm" color="gray.400">Loading USD properties...</Text>
+                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingUsdProperties')}</Text>
                     </Box>
                   ) : (
                     <USDPropertiesTable
@@ -1005,11 +1023,11 @@ const AssetDetailsModal = ({
                 <Text 
                   fontSize="lg" 
                   fontWeight="semibold" 
-                  color="green.400"
+                  color="#FFD230"
                   cursor="pointer"
                   onClick={handleToggleDeps}
                 >
-                  Dependencies
+                  {t('dependencies')}
                 </Text>
                 <IconButton
                   size="sm"
@@ -1024,13 +1042,13 @@ const AssetDetailsModal = ({
                   {loadingDeps ? (
                     <Box textAlign="center" py={8}>
                       <CircularProgress isIndeterminate size="40px" />
-                      <Text mt={2} fontSize="sm" color="gray.400">Loading dependencies...</Text>
+                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingDependencies')}</Text>
                     </Box>
                   ) : assetDependencies && (assetDependencies.nodes?.length > 0 || assetDependencies.edges?.length > 0) ? (
                     <GraphVisualization data={assetDependencies} />
                   ) : (
                     <Box textAlign="center" py={8} color="gray.400">
-                      <Text>No dependencies found</Text>
+                      <Text>{t('noDependencies')}</Text>
                     </Box>
                   )}
                 </Box>
@@ -1043,11 +1061,11 @@ const AssetDetailsModal = ({
                 <Text 
                   fontSize="lg" 
                   fontWeight="semibold" 
-                  color="green.400"
+                  color="#FFD230"
                   cursor="pointer"
                   onClick={handleToggleInverseDeps}
                 >
-                  Inverse Dependencies
+                  {t('inverseDependencies')}
                 </Text>
                 <IconButton
                   size="sm"
@@ -1062,13 +1080,13 @@ const AssetDetailsModal = ({
                   {loadingInverseDeps ? (
                     <Box textAlign="center" py={8}>
                       <CircularProgress isIndeterminate size="40px" />
-                      <Text mt={2} fontSize="sm" color="gray.400">Loading inverse dependencies...</Text>
+                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingInverseDependencies')}</Text>
                     </Box>
                   ) : assetInverseDependencies && (assetInverseDependencies.nodes?.length > 0 || assetInverseDependencies.edges?.length > 0) ? (
                     <GraphVisualization data={assetInverseDependencies} isInverse={true} />
                   ) : (
                     <Box textAlign="center" py={8} color="gray.400">
-                      <Text>No inverse dependencies found</Text>
+                      <Text>{t('noInverseDependencies')}</Text>
                     </Box>
                   )}
                 </Box>
@@ -1081,11 +1099,11 @@ const AssetDetailsModal = ({
                 <Text 
                   fontSize="lg" 
                   fontWeight="semibold" 
-                  color="green.400"
+                  color="#FFD230"
                   cursor="pointer"
                   onClick={toggleTags}
                 >
-                  Tags
+                  {t('tagsSection')}
                 </Text>
                 <IconButton
                   size="sm"
@@ -1101,8 +1119,8 @@ const AssetDetailsModal = ({
                     <Table size="sm" variant="simple">
                     <Thead>
                       <Tr>
-                        <Th color="gray.300">Tag</Th>
-                        <Th color="gray.300">Value</Th>
+                        <Th color="gray.300">{t('tag')}</Th>
+                        <Th color="gray.300">{t('value')}</Th>
                       </Tr>
                     </Thead>
                     <Tbody>
@@ -1116,7 +1134,7 @@ const AssetDetailsModal = ({
                     </Table>
                   ) : (
                     <Box textAlign="center" py={8} color="gray.400">
-                      <Text>No tags found</Text>
+                      <Text>{t('noTagsFound')}</Text>
                     </Box>
                   )}
                   </Box>
@@ -1130,11 +1148,11 @@ const AssetDetailsModal = ({
                   <Text 
                     fontSize="lg" 
                     fontWeight="semibold" 
-                    color="green.400"
+                    color="#FFD230"
                     cursor="pointer"
                     onClick={toggleTechnical}
                   >
-                    Details
+                    {t('details')}
                   </Text>
                   <IconButton
                     size="sm"
@@ -1149,81 +1167,81 @@ const AssetDetailsModal = ({
                     <Table size="sm" variant="simple">
                       <Thead>
                         <Tr>
-                          <Th color="gray.300">Property</Th>
-                          <Th color="gray.300">Value</Th>
+                          <Th color="gray.300">{t('property')}</Th>
+                          <Th color="gray.300">{t('value')}</Th>
                         </Tr>
                       </Thead>
                       <Tbody>
                         {/* Technical metadata fields */}
                         {selectedItem.source.etag && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">ETag</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('etag')}</Td>
                             <Td fontSize="sm" fontFamily="mono">{selectedItem.source.etag}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.hash_value && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Hash Value</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('hashValue')}</Td>
                             <Td fontSize="sm" fontFamily="mono">{selectedItem.source.hash_value}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.empty !== undefined && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Empty</Td>
-                            <Td fontSize="sm">{selectedItem.source.empty ? 'Yes' : 'No'}</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('empty')}</Td>
+                            <Td fontSize="sm">{selectedItem.source.empty ? t('yes') : t('no')}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.on_mount !== undefined && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">On Mount</Td>
-                            <Td fontSize="sm">{selectedItem.source.on_mount ? 'Yes' : 'No'}</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('onMount')}</Td>
+                            <Td fontSize="sm">{selectedItem.source.on_mount ? t('yes') : t('no')}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.created_by && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Created By</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('createdBy')}</Td>
                             <Td fontSize="sm">{selectedItem.source.created_by}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.modified_by && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Modified By</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('modifiedBy')}</Td>
                             <Td fontSize="sm">{selectedItem.source.modified_by}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.content_type && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Content Type</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('contentType')}</Td>
                             <Td fontSize="sm">{selectedItem.source.content_type}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.mime_type && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">MIME Type</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('mimeType')}</Td>
                             <Td fontSize="sm">{selectedItem.source.mime_type}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.is_directory !== undefined && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Is Directory</Td>
-                            <Td fontSize="sm">{selectedItem.source.is_directory ? 'Yes' : 'No'}</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('isDirectory')}</Td>
+                            <Td fontSize="sm">{selectedItem.source.is_directory ? t('yes') : t('no')}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.permissions && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Permissions</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('permissions')}</Td>
                             <Td fontSize="sm">{selectedItem.source.permissions}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.checksum && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Checksum</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('checksum')}</Td>
                             <Td fontSize="sm" fontFamily="mono">{selectedItem.source.checksum}</Td>
                           </Tr>
                         )}
                         {selectedItem.source.version && (
                           <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">Version</Td>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('version')}</Td>
                             <Td fontSize="sm">{selectedItem.source.version}</Td>
                           </Tr>
                         )}
@@ -1242,11 +1260,31 @@ const AssetDetailsModal = ({
                           if (skipFields.includes(key) || value === null || value === undefined || value === '') {
                             return null;
                           }
+
+                          // Translate common field names
+                          const fieldNamesMap = {
+                            'type': t('type'),
+                            'created': t('created'),
+                            'modified': t('modified'),
+                            'created_timestamp': t('created'),
+                            'modified_timestamp': t('modified'),
+                            'created_by': t('createdBy'),
+                            'modified_by': t('modifiedBy'),
+                            'ext': t('type'),
+                            'pathType': t('pathType'),
+                            'status': t('status'),
+                            'size': t('size'),
+                            'hash_value': t('hashValue'),
+                            'hash': t('hashValue'),
+                            'hash_type': t('hashType'),
+                            'checksum': t('checksum'),
+                          };
+                          const displayName = fieldNamesMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                           
                           return (
                             <Tr key={key}>
                               <Td fontWeight="semibold" color="gray.300" width="30%">
-                                {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                {displayName}
                               </Td>
                               <Td fontSize="sm">
                                 {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
@@ -1265,15 +1303,13 @@ const AssetDetailsModal = ({
 
         <ModalFooter borderTopWidth="1px" borderColor="gray.600">
           <HStack>
-            {IS_HTTPS && (
-              <Button 
-                colorScheme="green" 
-                leftIcon={<CopyIcon />}
-                onClick={() => copyToClipboard?.(baseKey)}
-              >
-                Copy URL
-              </Button>
-            )}
+            <Button 
+              colorScheme="yellow" 
+              leftIcon={<CopyIcon />}
+              onClick={() => copyToClipboard?.(baseKey)}
+            >
+              {t('copyUrl')}
+            </Button>
           </HStack>
         </ModalFooter>
       </ModalContent>
@@ -1281,4 +1317,4 @@ const AssetDetailsModal = ({
   );
 };
 
-export default AssetDetailsModal;
+export default React.memo(AssetDetailsModal);

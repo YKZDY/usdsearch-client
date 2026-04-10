@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 /**
  * Hook to observe element intersection with viewport
@@ -106,7 +106,7 @@ export const useMultipleIntersectionObserver = ({
     };
   }, [rootMargin, threshold, root]);
 
-  const registerElement = (id, element) => {
+  const registerElement = useCallback((id, element) => {
     if (!element || !observerRef.current) return;
 
     // Unobserve previous element with same id
@@ -121,7 +121,34 @@ export const useMultipleIntersectionObserver = ({
     // Store and observe new element
     elementsRef.current.set(id, element);
     observerRef.current.observe(element);
-  };
+  }, []);
 
-  return [registerElement, visibilityMap];
+  // Clear stale entries that are no longer in the current result set
+  const clearStaleEntries = useCallback((currentIds) => {
+    if (!observerRef.current) return;
+    
+    // Remove elements that are no longer in the current results
+    for (const [id, element] of elementsRef.current.entries()) {
+      if (!currentIds.has(id)) {
+        observerRef.current.unobserve(element);
+        elementsRef.current.delete(id);
+      }
+    }
+
+    // Clean visibilityMap of stale IDs
+    setVisibilityMap(prev => {
+      let changed = false;
+      const newMap = new Map();
+      for (const [id, visible] of prev.entries()) {
+        if (currentIds.has(id)) {
+          newMap.set(id, visible);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? newMap : prev;
+    });
+  }, []);
+
+  return [registerElement, visibilityMap, clearStaleEntries];
 };

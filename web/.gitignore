@@ -1,0 +1,4 @@
+# 本地开发环境变量（不应提交到版本库）
+.env.development.local
+.env.local
+.env.*.local

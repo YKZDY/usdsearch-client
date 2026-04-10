@@ -73,3 +73,69 @@ export const AUTH_CONFIG = {
   DEFAULT_USERNAME: process.env.REACT_APP_DEFAULT_USERNAME || "",
   DEFAULT_PASSWORD: process.env.REACT_APP_DEFAULT_PASSWORD || "",
 };
+
+// ============================================================
+// Unified Search UI Defaults
+// Change these values in ONE place to update defaults everywhere.
+// ============================================================
+export const SEARCH_DEFAULTS = {
+  // View / display settings
+  viewMode: "grid",            // "list" or "grid"
+  gridSize: "L",               // "L" (large) or "S" (small/compact)
+  showScores: false,           // whether to show relevance scores
+  showOnlyWithPreviews: true,  // only show results that have preview thumbnails
+  filtersCollapsed: true,      // whether the filter panel starts collapsed
+  configCollapsed: true,       // whether the config panel starts collapsed
+};
+
+// Default search filter parameters
+export const DEFAULT_SEARCH_PARAMS = {
+  // File & Name Filters (Most Common)
+  file_name: "",
+  exclude_file_name: "",
+  file_extension_include: "",
+  file_extension_exclude: "usd*,jpg,png",
+
+  // Path & Location Filters
+  search_path: "",
+  exclude_search_path: "",
+  search_in_scene: "",
+  filter_url_regexp: "",
+
+  // Content & Properties Filters
+  filter_by_properties: "",
+  filter_by_tags: "",
+  vision_metadata: "",
+
+  // Size & Dimension Filters
+  file_size_greater_than: "",
+  file_size_less_than: "",
+  min_bbox_x: "",
+  min_bbox_y: "",
+  min_bbox_z: "",
+  max_bbox_x: "",
+  max_bbox_y: "",
+  max_bbox_z: "",
+  bbox_use_scaled_dimensions: true,
+
+  // Date Filters
+  created_after: "",
+  created_before: "",
+  modified_after: "",
+  modified_before: "",
+
+  // User Filters
+  created_by: "",
+  exclude_created_by: "",
+  modified_by: "",
+  exclude_modified_by: "",
+
+  // Advanced Filters
+  similarity_threshold: "",
+  cutoff_threshold: "",
+  deduplicate_by_hash: false,
+
+  // Search Settings
+  limit: 50,
+  embedding_knn_search_method: "exact",
+};

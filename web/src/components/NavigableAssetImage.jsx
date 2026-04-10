@@ -340,4 +340,4 @@ const NavigableAssetImage = ({
   );
 };
 
-export default NavigableAssetImage;
+export default React.memo(NavigableAssetImage);

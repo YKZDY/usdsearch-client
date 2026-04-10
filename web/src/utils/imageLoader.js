@@ -32,9 +32,70 @@ import persistentCache from './persistentImageCache';
 
 // Global configuration
 const MAX_CONCURRENT_DOWNLOADS = 20;
+const MAX_MEMORY_CACHE_SIZE = 150; // Max images in memory cache (LRU eviction)
+const MAX_FAILED_URLS_SIZE = 500; // Max entries in failedUrls set
+
+/**
+ * LRU Cache for in-memory images.
+ * Uses Map insertion order: newest entries are at the end.
+ * When the cache exceeds MAX_MEMORY_CACHE_SIZE, the oldest entries are evicted.
+ */
+class LRUImageCache {
+  constructor(maxSize = MAX_MEMORY_CACHE_SIZE) {
+    this.maxSize = maxSize;
+    this._map = new Map();
+  }
+
+  get(key) {
+    const value = this._map.get(key);
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this._map.delete(key);
+      this._map.set(key, value);
+    }
+    return value;
+  }
+
+  set(key, value) {
+    // If key already exists, delete first so re-insert puts it at end
+    if (this._map.has(key)) {
+      this._map.delete(key);
+    }
+    this._map.set(key, value);
+    // Evict oldest entries if over limit
+    while (this._map.size > this.maxSize) {
+      const oldestKey = this._map.keys().next().value;
+      this._map.delete(oldestKey);
+    }
+  }
+
+  has(key) {
+    return this._map.has(key);
+  }
+
+  delete(key) {
+    return this._map.delete(key);
+  }
+
+  clear() {
+    this._map.clear();
+  }
+
+  get size() {
+    return this._map.size;
+  }
+
+  entries() {
+    return this._map.entries();
+  }
+
+  keys() {
+    return this._map.keys();
+  }
+}
 
 // Global state
-const imageCache = new Map();
+const imageCache = new LRUImageCache(MAX_MEMORY_CACHE_SIZE);
 const activeRequests = new Map(); // Track in-flight requests to prevent duplicates
 const failedUrls = new Set(); // Track URLs that have failed in this session to prevent retries
 
@@ -174,6 +235,11 @@ const fetchImageFromAPI = async (url, getHeaders) => {
   if (!response.ok) {
     // Mark this URL as failed to prevent future retries in this session
     failedUrls.add(url);
+    // Prevent failedUrls from growing unbounded
+    if (failedUrls.size > MAX_FAILED_URLS_SIZE) {
+      const oldest = failedUrls.values().next().value;
+      failedUrls.delete(oldest);
+    }
     
     const error = new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
     error.status = response.status;

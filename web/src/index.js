@@ -42,70 +42,252 @@ import {
     ModalCloseButton,
     useDisclosure, Heading, Flex, HStack, IconButton, Popover,
     PopoverTrigger, PopoverContent, PopoverArrow, PopoverCloseButton,
-    PopoverHeader, PopoverBody, Divider, Select, Link
+    PopoverHeader, PopoverBody, Divider, Select, Link, Tooltip
 } from '@chakra-ui/react';
-import { LockIcon, UnlockIcon, InfoIcon, ExternalLinkIcon, ChevronDownIcon } from '@chakra-ui/icons';
+import { LockIcon, UnlockIcon, InfoIcon, ExternalLinkIcon, ChevronDownIcon, LinkIcon } from '@chakra-ui/icons';
+import { motion } from 'framer-motion';
+import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 
 import {extendTheme, ColorModeScript} from '@chakra-ui/react';
 import {mode} from '@chakra-ui/theme-tools';
 import SearchApp from "./HybridDeepSearchUI";
 import {StyleFunctionProps} from "@chakra-ui/react";
-import logo from "./img/nvidia_logo.png";
+import logo from "./img/lm_logo.png";
 import { apiUrl as defaultApiUrl, SERVER_MAPPING, defaultEmbeddingConfig } from "./config";
 import GraphVisualization from "./Graph";
 import persistentCache from "./utils/persistentImageCache";
 import { useDeviceFlowAuth, getServerHttpsUrl, AuthStatus, createApiToken } from "./nucleus";
 
+// LightArt-inspired dark theme color tokens
+const LA = {
+    primary: '#FFD230',       // Golden yellow primary
+    primaryHover: '#F6C80F',  // Darker gold for hover
+    primaryDim: 'rgba(246,200,15,0.15)', // Subtle gold bg
+    bg: '#141517',            // Near-black background
+    bgCard: '#1C1D20',       // Card background
+    bgElevated: '#232428',   // Elevated surfaces (popover, dropdown)
+    bgInput: '#1C1D20',      // Input background
+    border: '#383838',       // Border color
+    borderHover: '#FFD230',  // Border hover = gold
+    text: '#FFFFFF',         // Primary text
+    textSecondary: '#E5E5E5',// Secondary text
+    textTertiary: '#D8D8D8', // Tertiary text
+    textMuted: '#ABABAB',    // Muted text
+    textDim: '#6B6B6B',      // Very dim text
+    success: '#52C41A',      // Green for success
+    danger: '#FF4D4F',       // Red for danger
+    info: '#1890FF',         // Blue for info
+    purple: '#B37FEB',       // Purple accent
+};
+
 const theme = extendTheme({
     colors: {
         brand: {
-            50: '#76B900',
-            100: '#76B900',
-            200: '#76B900',
-            300: '#76B900',
-            400: '#76B900',
-            500: '#76B900',
-            600: '#76B900',
-            700: '#76B900',
-            800: '#76B900',
-            900: '#76B900',
+            50: '#FFF9E0',
+            100: '#FFECB3',
+            200: '#FFE082',
+            300: '#FFD54F',
+            400: '#FFD230',
+            500: '#F6C80F',
+            600: '#E8B800',
+            700: '#C49A00',
+            800: '#9C7B00',
+            900: '#745C00',
         },
         gray: {
-            900: "#000000",
-            800: "#000000",
-            700: "#000000",
-            600: "#000000",
-            500: "#222222",
-            400: "#444444",
-            300: "#666666",
-            200: "#888888",
-            100: "#AAAAAA",
-            50: "#CCCCCC",
+            900: LA.bg,
+            800: LA.bgCard,
+            700: LA.bgElevated,
+            600: LA.border,
+            500: '#3A3A3A',
+            400: '#6B6B6B',
+            300: LA.textMuted,
+            200: LA.textTertiary,
+            100: LA.textSecondary,
+            50: LA.text,
         }
     },
     fonts: {
-        heading: `'NVIDIA Sans Bold',`,
-        body: `'NVIDIA Sans'`,
+        heading: `'Noto Sans SC', 'NVIDIA Sans Bold', -apple-system, BlinkMacSystemFont, sans-serif`,
+        body: `'Noto Sans SC', 'NVIDIA Sans', -apple-system, BlinkMacSystemFont, sans-serif`,
     },
     components: {
         Input: {
             defaultProps: {
-                focusBorderColor: '#76B900',
+                focusBorderColor: LA.primary,
+            },
+            baseStyle: {
+                field: {
+                    bg: LA.bgInput,
+                    borderColor: LA.border,
+                    _hover: { borderColor: LA.primary },
+                    _focus: { borderColor: LA.primary, boxShadow: `0 0 0 1px ${LA.primary}` },
+                }
             }
-        }
+        },
+        Select: {
+            defaultProps: {
+                focusBorderColor: LA.primary,
+            }
+        },
+        Button: {
+            variants: {
+                solid: (props) => {
+                    if (props.colorScheme === 'green' || props.colorScheme === 'brand') {
+                        return {
+                            bg: LA.primary,
+                            color: '#000000',
+                            fontWeight: '600',
+                            _hover: { bg: LA.primaryHover, transform: 'translateY(-1px)', boxShadow: `0 4px 12px rgba(255,210,48,0.3)` },
+                            _active: { bg: '#D4A800', transform: 'translateY(0)' },
+                        };
+                    }
+                    return {};
+                },
+                outline: (props) => {
+                    if (props.colorScheme === 'green' || props.colorScheme === 'brand') {
+                        return {
+                            borderColor: LA.primary,
+                            color: LA.primary,
+                            _hover: { bg: LA.primaryDim },
+                        };
+                    }
+                    return {};
+                },
+                ghost: {
+                    _hover: { bg: 'rgba(255,255,255,0.06)' },
+                },
+            }
+        },
+        Card: {
+            baseStyle: {
+                container: {
+                    bg: LA.bgCard,
+                    borderColor: LA.border,
+                    borderWidth: '1px',
+                    borderRadius: '12px',
+                    transition: 'all 0.25s ease',
+                    _hover: {
+                        borderColor: LA.primary,
+                        boxShadow: `0 0 20px rgba(255,210,48,0.08)`,
+                    },
+                },
+            },
+        },
+        Modal: {
+            baseStyle: {
+                dialog: {
+                    bg: LA.bgCard,
+                    borderColor: LA.border,
+                    borderWidth: '1px',
+                    borderRadius: '16px',
+                },
+                header: {
+                    color: LA.text,
+                    borderBottomColor: LA.border,
+                },
+                closeButton: {
+                    color: LA.textMuted,
+                    _hover: { color: LA.text },
+                },
+            },
+        },
+        Popover: {
+            baseStyle: {
+                content: {
+                    bg: LA.bgElevated,
+                    borderColor: LA.border,
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                },
+                header: {
+                    borderBottomColor: LA.border,
+                    color: LA.text,
+                },
+            },
+        },
+        Tooltip: {
+            baseStyle: {
+                bg: LA.bgElevated,
+                color: LA.text,
+                borderRadius: '8px',
+                px: 3,
+                py: 2,
+                fontSize: 'sm',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            },
+        },
+        Switch: {
+            defaultProps: {
+                colorScheme: 'yellow',
+            },
+        },
+        Badge: {
+            baseStyle: {
+                borderRadius: '6px',
+                fontWeight: '500',
+                px: 2,
+                py: 0.5,
+            },
+        },
+        Accordion: {
+            baseStyle: {
+                container: {
+                    borderColor: LA.border,
+                },
+                button: {
+                    _hover: { bg: 'rgba(255,255,255,0.04)' },
+                },
+            },
+        },
+        Divider: {
+            baseStyle: {
+                borderColor: LA.border,
+            },
+        },
+        Table: {
+            variants: {
+                simple: {
+                    th: {
+                        borderColor: LA.border,
+                        color: LA.textMuted,
+                    },
+                    td: {
+                        borderColor: LA.border,
+                    },
+                },
+            },
+        },
     },
-    shadows: {outline: '0 0 0 3px #76B900'},
+    shadows: {outline: `0 0 0 3px rgba(255,210,48,0.4)`},
     config: {
-        initialColorMode: 'dark',  // Set the initial color mode to dark
-        useSystemColorMode: false, // Disables the color mode switching based on the system preference
+        initialColorMode: 'dark',
+        useSystemColorMode: false,
     },
     styles: {
         global: (props) => ({
             body: {
                 fontFamily: 'body',
-                color: mode('gray.800', 'whiteAlpha.900')(props),
-                bg: 'black',
+                color: LA.text,
+                bg: LA.bg,
                 lineHeight: 'base',
+            },
+            // Custom scrollbar styling
+            '::-webkit-scrollbar': {
+                width: '6px',
+                height: '6px',
+            },
+            '::-webkit-scrollbar-track': {
+                bg: 'transparent',
+            },
+            '::-webkit-scrollbar-thumb': {
+                bg: LA.border,
+                borderRadius: '3px',
+                _hover: { bg: '#555' },
+            },
+            // Selection color
+            '::selection': {
+                bg: 'rgba(255,210,48,0.3)',
+                color: LA.text,
             },
         }),
     },
@@ -113,6 +295,7 @@ const theme = extendTheme({
 
 // Authentication Form Component
 const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
+    const { t } = useTranslation();
     const [authMethod, setAuthMethod] = useState(() => {
         if (auth.username) return 'basic';
         if (auth.api_key) return 'api_key';
@@ -201,12 +384,17 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
 
     // Set default username based on backend type when server changes or backend info updates
     const setDefaultUsername = () => {
-        console.log("backend", backend);
         // console.log("currentServer", currentServer);
         if (backend) {
-            // Check if we have a server-specific username stored
+            // Don't auto-fill if user explicitly cleared credentials for this server
+            const authCleared = localStorage.getItem(getServerStorageKey("auth_cleared"));
+            if (authCleared === "true") {
+                return;
+            }
+            
+            // Check if we have a server-specific username stored (null means never set)
             const serverUsername = localStorage.getItem(getServerStorageKey("username"));
-            if (!serverUsername) {
+            if (serverUsername === null) {
                 // Store the current auth state to check if we need to update
                 const currentAuth = auth;
                 let newUsername = null;
@@ -214,6 +402,7 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                 
                 if (isNucleusBackend(backend)) {
                     newUsername = '$omni-api-token';
+                    newPassword = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYWx2aW5ndSIsInByb2ZpbGUiOnsiZmlyc3RfbmFtZSI6bnVsbCwibGFzdF9uYW1lIjpudWxsLCJlbWFpbCI6ImNhbHZpbmd1IiwiYWRtaW4iOnRydWUsIm51Y2xldXNfcm8iOmZhbHNlLCJyZWFkb25seSI6ZmFsc2UsInByb3ZpZGVyIjoiU0FNTCIsImVuYWJsZWQiOnRydWUsImFjdGl2YXRlZCI6dHJ1ZX0sImp0aSI6IjVmOWE1OTBmNDExMjQ3N2ViZWJlYzAwNzcwOGYwNDg5IiwiaWF0IjoxNzY1MTg4Nzg1fQ.oX_9THuHT7B3tukN6MznyDO1FGFRZzDlDt8x5rBDyWbQLYug45KFMWBdFT1U6bfnjjaGtQaryDpS_621u76i77P0EsuPmwzrv0motvNySejXPrOZTgbJqJ21FatLhpTHSMNdazzFojGypXi8rpbUfxwZtf-Shc71LD3mTlYEY794z6l3rjAbL4ckzhhOWn3n4x8IQWigkD1zPgwm7_ErThEH6bCbNRMq3pcIDMa4P9ohREqsZTHCYnP0hQHNkv6gBd5uKae1i62TLvxQjnqymh-byXSxo3TV3OwC3PkmiWMRAqbj6xsCdD-eG4ZFTuwNiJbqC_ncmja7xxHtx4QogYRGboA3rY0pUIslbGeASGahd_aIOf_YQ0z2_-QmCLULiPw17XoqNVuJ7jW4ZX4K8iOYT6DcmPnZjNytX1YevQ9HHyRBcYbbQlHO2mFCZFz63l6vsZxcbGGrxUJ4L9ZJQtSv563Yjf1trPCt8QPlAPg24wa6QzpvawyURC7nQgTKvLICYG2KjUev-qKd9rfRNYiZGKBnguH4aPPy9FJbSpJogThwO8aKg9C2cNOs4NeBf9RF-_xF5coXoXCVrJ25w8udge-kd8LxQCxjZFPIie0W7o2EUL7x9chpeHhHvgv6eQU8TApPi5LfWlcISuLeJnAl4Wx1uP2C-YbX62ruh5g'
                 } else if (isS3Backend(backend)) {
                     newUsername = '';
                     newPassword = 'dummy';
@@ -241,6 +430,8 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
         localStorage.setItem(getServerStorageKey("api_key"), auth.api_key || "");
         localStorage.setItem(getServerStorageKey("username"), auth.username || "");
         localStorage.setItem(getServerStorageKey("password"), auth.password || "");
+        // Clear the auth_cleared flag since user is re-saving credentials
+        localStorage.removeItem(getServerStorageKey("auth_cleared"));
         
         // Trigger storage event for other components
         const storageEvent = new StorageEvent('storage', {
@@ -257,20 +448,23 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
         localStorage.removeItem(getServerStorageKey("api_key"));
         localStorage.removeItem(getServerStorageKey("username"));
         localStorage.removeItem(getServerStorageKey("password"));
+        // Mark that the user explicitly cleared credentials for this server
+        localStorage.setItem(getServerStorageKey("auth_cleared"), "true");
         setAuth({
             api_key: "",
             username: "",
             password: "",
         });
         window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('auth-updated'));
     };
 
     // Start Nucleus device flow authentication
     const handleStartDeviceFlow = async () => {
         if (!backend) {
             toast({
-                title: "No server detected",
-                description: "Please wait for backend information to load",
+                title: t('noServerDetected'),
+                description: t('waitForBackend'),
                 status: "warning",
                 duration: 3000,
             });
@@ -285,7 +479,7 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
             deviceFlowAuth.startPolling(backend, result.device_code, result.interval);
         } catch (error) {
             toast({
-                title: "Failed to start authentication",
+                title: t('failedToStartAuth'),
                 description: error.message,
                 status: "error",
                 duration: 5000,
@@ -303,11 +497,9 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                     const timestamp = `${now.toISOString().split('T')[0]}_${now.getHours().toString().padStart(2, '0')}-${now.getMinutes().toString().padStart(2, '0')}-${now.getSeconds().toString().padStart(2, '0')}`;
                     const tokenName = `USD-Search-${timestamp}`;
                     
-                    console.log("Creating API token with name:", tokenName);
-                    
                     toast({
-                        title: "Creating API token...",
-                        description: "Please wait while we create a permanent API token",
+                        title: t('creatingApiToken'),
+                        description: t('pleaseWaitApiToken'),
                         status: "info",
                         duration: 3000,
                     });
@@ -331,12 +523,14 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                     // Save to localStorage
                     localStorage.setItem(getServerStorageKey("username"), '$omni-api-token');
                     localStorage.setItem(getServerStorageKey("password"), apiTokenResult.api_token);
+                    // Clear the auth_cleared flag since user just authenticated
+                    localStorage.removeItem(getServerStorageKey("auth_cleared"));
                     window.dispatchEvent(new Event('storage'));
                     window.dispatchEvent(new Event('auth-updated'));
                     
                     toast({
-                        title: "Authentication successful!",
-                        description: `Created permanent API token for ${deviceFlowAuth.authResult.username || 'user'}.`,
+                        title: t('authSuccessful'),
+                        description: t('createdApiToken', { username: deviceFlowAuth.authResult.username || 'user' }),
                         status: "success",
                         duration: 5000,
                     });
@@ -347,8 +541,8 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                     console.error("Failed to create API token:", error);
                     
                     toast({
-                        title: "Failed to create API token",
-                        description: error.message || "Unknown error occurred while creating API token",
+                        title: t('failedCreateApiToken'),
+                        description: error.message || t('unknownApiTokenError'),
                         status: "error",
                         duration: 8000,
                     });
@@ -366,7 +560,7 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
     useEffect(() => {
         if (deviceFlowAuth.error) {
             toast({
-                title: "Authentication failed",
+                title: t('authFailed'),
                 description: deviceFlowAuth.error,
                 status: "error",
                 duration: 5000,
@@ -377,16 +571,16 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
     return (
         <VStack spacing={4} align="stretch">
             <Box>
-                <FormLabel fontSize="sm" mb={2}>Authentication Method</FormLabel>
+                <FormLabel fontSize="sm" mb={2}>{t('authMethod')}</FormLabel>
                 <Select size="sm" value={authMethod} onChange={(e) => setAuthMethod(e.target.value)}>
-                    <option value="basic">Basic Auth</option>
-                    <option value="api_key">API Key</option>
+                    <option value="basic">{t('basicAuth')}</option>
+                    <option value="api_key">{t('apiKeyAuth')}</option>
                 </Select>
             </Box>
 
             {authMethod === 'api_key' && (
                 <Box>
-                    <FormLabel fontSize="sm">API Key</FormLabel>
+                    <FormLabel fontSize="sm">{t('apiKeyLabel')}</FormLabel>
                     <Input
                         size="sm"
                         type="password"
@@ -399,10 +593,10 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                             window.dispatchEvent(new Event('storage'));
                             window.dispatchEvent(new Event('auth-updated'));
                         }}
-                        placeholder="Enter your API key"
+                        placeholder={t('enterApiKey')}
                         borderColor={!auth.isAuthenticated && (!auth.api_key || auth.api_key === "") ? "red.300" : "inherit"}
                         _hover={{ borderColor: !auth.isAuthenticated && (!auth.api_key || auth.api_key === "") ? "red.400" : "inherit" }}
-                        _focus={{ borderColor: !auth.isAuthenticated && (!auth.api_key || auth.api_key === "") ? "red.500" : "green.500" }}
+                        _focus={{ borderColor: !auth.isAuthenticated && (!auth.api_key || auth.api_key === "") ? "red.500" : "#FFD230" }}
                     />
                 </Box>
             )}
@@ -414,8 +608,8 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                         <Box>
                             {auth.password ? (
                                 <VStack align="stretch" spacing={2}>
-                                    <Text fontSize="sm" color="green.400">
-                                        ✓ Authenticated with Nucleus
+                                    <Text fontSize="sm" color="#FFD230">
+                                        {t('authenticatedWithNucleus')}
                                     </Text>
                                     <Button
                                         size="sm"
@@ -424,31 +618,36 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                                         onClick={() => {
                                             const newAuth = { ...auth, username: '', password: '' };
                                             setAuth(newAuth);
-                                            localStorage.setItem(getServerStorageKey("username"), "");
-                                            localStorage.setItem(getServerStorageKey("password"), "");
+                                            localStorage.removeItem(getServerStorageKey("api_key"));
+                                            localStorage.removeItem(getServerStorageKey("username"));
+                                            localStorage.removeItem(getServerStorageKey("password"));
+                                            // Mark that the user explicitly cleared credentials for this server
+                                            localStorage.setItem(getServerStorageKey("auth_cleared"), "true");
                                             window.dispatchEvent(new Event('storage'));
                                             window.dispatchEvent(new Event('auth-updated'));
                                         }}
                                     >
-                                        Clear Token
+                                        {t('clearToken')}
                                     </Button>
                                 </VStack>
                             ) : (
                                 <Button
                                     size="sm"
-                                    colorScheme="green"
+                                    bg="#FFD230"
+                                    color="black"
+                                    _hover={{ bg: "#F6C80F" }}
                                     width="100%"
                                     onClick={handleStartDeviceFlow}
-                                    leftIcon={<Text>🔑</Text>}
+                                    leftIcon={<UnlockIcon />}
                                 >
-                                    Get token from Nucleus
+                                    {t('getTokenFromNucleus')}
                                 </Button>
                             )}
                         </Box>
                     ) : (
                         <>
                             <Box>
-                                <FormLabel fontSize="sm">Username</FormLabel>
+                                <FormLabel fontSize="sm">{t('username')}</FormLabel>
                                 <Input
                                     size="sm"
                                     value={auth.username}
@@ -460,20 +659,20 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                                         window.dispatchEvent(new Event('storage'));
                                         window.dispatchEvent(new Event('auth-updated'));
                                     }}
-                                    placeholder="Enter username"
+                                    placeholder={t('enterUsername')}
                                     borderColor={!auth.isAuthenticated && (!auth.username || auth.username === "") ? "red.300" : "inherit"}
                                     _hover={{ borderColor: !auth.isAuthenticated && (!auth.username || auth.username === "") ? "red.400" : "inherit" }}
-                                    _focus={{ borderColor: !auth.isAuthenticated && (!auth.username || auth.username === "") ? "red.500" : "green.500" }}
+                                    _focus={{ borderColor: !auth.isAuthenticated && (!auth.username || auth.username === "") ? "red.500" : "#FFD230" }}
                                 />
                                 {isS3Backend(backend) && (
                                     <Text fontSize="xs" color="gray.400" mt={1}>
-                                        Please set your username - it helps us with statistics to improve the product.
+                                        {t('usernameHelp')}
                                     </Text>
                                 )}
                             </Box>
                             {isS3Backend(backend) ? null : (
                             <Box>
-                                <FormLabel fontSize="sm">Password</FormLabel>
+                                <FormLabel fontSize="sm">{t('password')}</FormLabel>
                                 <Input
                                     size="sm"
                                     type="password"
@@ -486,10 +685,10 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                                         window.dispatchEvent(new Event('storage'));
                                         window.dispatchEvent(new Event('auth-updated'));
                                     }}
-                                    placeholder="Enter password"
+                                    placeholder={t('enterPassword')}
                                     borderColor={!auth.isAuthenticated && (!auth.password || auth.password === "") ? "red.300" : "inherit"}
                                     _hover={{ borderColor: !auth.isAuthenticated && (!auth.password || auth.password === "") ? "red.400" : "inherit" }}
-                                    _focus={{ borderColor: !auth.isAuthenticated && (!auth.password || auth.password === "") ? "red.500" : "green.500" }}
+                                    _focus={{ borderColor: !auth.isAuthenticated && (!auth.password || auth.password === "") ? "red.500" : "#FFD230" }}
                                 />
                             </Box>
                             )}
@@ -525,23 +724,23 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
             <Modal isOpen={isDeviceFlowOpen} onClose={() => { onDeviceFlowClose(); deviceFlowAuth.reset(); }} size="md">
                 <ModalOverlay />
                 <ModalContent>
-                    <ModalHeader>Authenticate with Nucleus</ModalHeader>
+                    <ModalHeader>{t('authenticateWithNucleus')}</ModalHeader>
                     <ModalCloseButton />
                     <ModalBody>
                         {deviceFlowAuth.isLoading && (
                             <VStack spacing={4} py={4}>
-                                <Text>Connecting to Nucleus server...</Text>
+                                <Text>{t('connectingToNucleus')}</Text>
                             </VStack>
                         )}
                         
                         {deviceFlowAuth.deviceFlowData && !deviceFlowAuth.authResult && (
                             <VStack spacing={4} py={4} align="stretch">
                                 <Text fontSize="sm" color="gray.300">
-                                    To authenticate, visit the Nucleus server and enter the code below:
+                                    {t('deviceFlowInstructions')}
                                 </Text>
                                 
-                                <Box bg="gray.700" p={4} borderRadius="md" textAlign="center">
-                                    <Text fontSize="2xl" fontWeight="bold" letterSpacing="0.2em" color="green.400">
+                                <Box bg="#1C1D20" p={4} borderRadius="md" textAlign="center" border="1px solid #383838">
+                                    <Text fontSize="2xl" fontWeight="bold" letterSpacing="0.2em" color="#FFD230">
                                         {deviceFlowAuth.deviceFlowData.user_code}
                                     </Text>
                                 </Box>
@@ -560,7 +759,7 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                                         isExternal 
                                         color="blue.400"
                                     >
-                                        Open Nucleus Login Page <ExternalLinkIcon mx="2px" />
+                                        {t('openNucleusLoginPage')} <ExternalLinkIcon mx="2px" />
                                     </Link>
                                 </VStack>
                                 
@@ -570,18 +769,18 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                                             as="span" 
                                             w={2} 
                                             h={2} 
-                                            bg="green.400" 
+                                            bg="#FFD230" 
                                             borderRadius="full"
                                             animation="pulse 1.5s ease-in-out infinite"
                                         />
                                         <Text fontSize="sm" color="gray.400">
-                                            Waiting for you to enter the code...
+                                            {t('waitingForCode')}
                                         </Text>
                                     </HStack>
                                 )}
                                 
-                                <Text fontSize="xs" color="gray.500" textAlign="center">
-                                    Code expires in {Math.floor((deviceFlowAuth.deviceFlowData.expires_in || 900) / 60)} minutes
+                                <Text fontSize="xs" color="gray.400" textAlign="center">
+                                    {t('codeExpiresIn', { minutes: Math.floor((deviceFlowAuth.deviceFlowData.expires_in || 900) / 60) })}
                                 </Text>
                             </VStack>
                         )}
@@ -590,14 +789,14 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                             <VStack spacing={4} py={4}>
                                 <Text color="red.400">{deviceFlowAuth.error}</Text>
                                 <Button size="sm" onClick={handleStartDeviceFlow}>
-                                    Try Again
+                                    {t('tryAgain')}
                                 </Button>
                             </VStack>
                         )}
                     </ModalBody>
                     <ModalFooter>
                         <Button variant="ghost" onClick={() => { onDeviceFlowClose(); deviceFlowAuth.reset(); }}>
-                            Cancel
+                            {t('cancel')}
                         </Button>
                     </ModalFooter>
                 </ModalContent>
@@ -608,6 +807,9 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
 
 // Header Icons Component
 const HeaderIcons = () => {
+    const { t } = useTranslation();
+    const toast = useToast();
+
     // Server selection state
     const [selectedServer, setSelectedServer] = useState(() => {
         // Check URL for server parameter first
@@ -622,7 +824,6 @@ const HeaderIcons = () => {
         // Otherwise, if we have servers in the mapping, select the first one
         const servers = Object.keys(SERVER_MAPPING);
         const defaultServer = servers.length > 0 ? servers[0] : "";
-        console.log("defaultServer", defaultServer);
         return defaultServer;
     });
 
@@ -689,11 +890,8 @@ const HeaderIcons = () => {
         }));        
     };
     
-    // Use disclosure for auth popover - open by default when no auth is set initially
-    const initialHasAuth = auth.api_key || (auth.username && auth.password);
-    const { isOpen: isAuthOpen, onOpen: onAuthOpen, onClose: onAuthClose, onToggle: onAuthToggle } = useDisclosure({ 
-        defaultIsOpen: !initialHasAuth 
-    });
+    // Use disclosure for auth popover - always starts closed
+    const { isOpen: isAuthOpen, onOpen: onAuthOpen, onClose: onAuthClose, onToggle: onAuthToggle } = useDisclosure();
         
     const [plugins, setPlugins] = useState({ active: [], inactive: [] });
     const [backend, setBackend] = useState(null);
@@ -740,16 +938,11 @@ const HeaderIcons = () => {
         };
 
         if (serverAuth.username && serverAuth.username.trim() !== "") {
-            console.log("Using basic auth with username:", serverAuth.username);
             headers["Authorization"] = `Basic ${btoa(`${serverAuth.username}:${serverAuth.password || ""}`)}`;
         } else if (serverAuth.api_key) {
-            console.log("Using API key auth");
             headers["x-api-key"] = serverAuth.api_key;
-        } else {
-            console.log("No authentication configured");
         }
         
-        console.log("Final headers:", headers);
         return headers;
     };
 
@@ -823,11 +1016,9 @@ const HeaderIcons = () => {
                 method: 'GET',
                 headers: headers 
             });
-            console.log("Backend response:", response.status, response.statusText);
             
             if (response.ok) {
                 const data = await response.json();
-                console.log("Backend data received:", data);
                 
                 // Parse the backends structure
                 if (data.backends && Object.keys(data.backends).length > 0) {
@@ -846,7 +1037,6 @@ const HeaderIcons = () => {
                 
                 // Try without auth headers if auth failed
                 if (response.status === 401 || response.status === 403) {
-                    console.log("Retrying backend without auth headers...");
                     // Keep the storage backend header but remove auth headers
                     const noAuthHeaders = { 
                         "Content-Type": "application/json",
@@ -858,7 +1048,6 @@ const HeaderIcons = () => {
                     });
                     if (noAuthResponse.ok) {
                         const data = await noAuthResponse.json();
-                        console.log("Backend data (no auth):", data);
                         
                         if (data.backends && Object.keys(data.backends).length > 0) {
                             const backendInfo = Object.entries(data.backends).map(([url, info]) => ({
@@ -879,50 +1068,70 @@ const HeaderIcons = () => {
     };
 
     useEffect(() => {
-        console.log("HeaderIcons mounted, auth state:", auth);
-        console.log("API URL:", apiUrl);
-        console.log("Embedding Config:", embeddingConfig);
         fetchPluginsInfo();
         fetchBackendInfo();
         
         // Dispatch initial server configuration so other components get the correct initial state
         if (selectedServer && SERVER_MAPPING[selectedServer]) {
             const initialEmbeddingConfig = SERVER_MAPPING[selectedServer]?.embedding_config || defaultEmbeddingConfig;
-            console.log("Dispatching initial server config:", selectedServer, initialEmbeddingConfig);
             window.dispatchEvent(new CustomEvent('server-changed', { 
                 detail: { server: selectedServer, embeddingConfig: initialEmbeddingConfig }
             }));
         }
     }, []);
     
+    const { language, toggleLanguage } = useTranslation();
+    
     return (
-        <HStack spacing={4}>
+        <HStack spacing={3} alignItems="center">
+            <Tooltip label={t('language')}>
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={toggleLanguage}
+                    color="#ABABAB"
+                    _hover={{ color: "white", bg: "rgba(255,255,255,0.06)" }}
+                    fontSize="xs"
+                    fontWeight="600"
+                    px={0}
+                    minW="32px"
+                    h="32px"
+                    lineHeight="32px"
+                    display="inline-flex"
+                    alignItems="center"
+                    justifyContent="center"
+                    pt="1px"
+                >
+                    {language === 'en' ? '中文' : 'EN'}
+                </Button>
+            </Tooltip>
             {Object.keys(SERVER_MAPPING).length > 0 && (
-                <Popover defaultIsOpen={true}>
+                <Popover>
                     <PopoverTrigger>
                         <HStack 
                             spacing={2} 
-                            bg="#76B900"
+                            bg="#FFD230"
                             px={3}
                             py={1.5}
-                            borderRadius="md"
+                            borderRadius="8px"
                             cursor="pointer"
-                            _hover={{ bg: "#86C900" }}
+                            _hover={{ bg: "#F6C80F", boxShadow: "0 2px 8px rgba(255,210,48,0.3)" }}
                             minW="100px"
+                            transition="all 0.2s"
                         >
                             <Text 
                                 color="black" 
                                 fontSize="sm" 
-                                fontWeight="medium"
+                                fontWeight="600"
                                 noOfLines={1}
                             >
-                                {SERVER_MAPPING[selectedServer]?.name || "Select Server"}
+                                {SERVER_MAPPING[selectedServer]?.name || t('selectServer')}
                             </Text>
                             <IconButton
                                 size="xs"
                                 variant="unstyled"
                                 icon={<ChevronDownIcon color="black" />}
-                                aria-label="Select server"
+                                aria-label={t('selectServer')}
                                 height="auto"
                                 minW="auto"
                                 display="inline-flex"
@@ -932,20 +1141,20 @@ const HeaderIcons = () => {
                     <PopoverContent width="400px">
                         <PopoverArrow />
                         <PopoverCloseButton />
-                        <PopoverHeader>Server Configuration</PopoverHeader>
+                        <PopoverHeader>{t('serverConfiguration')}</PopoverHeader>
                         <PopoverBody>
                             <VStack spacing={4} align="stretch">
                                 <Box>
-                                    <Text fontWeight="bold" mb={2}>Server Selection</Text>
+                                    <Text fontWeight="bold" mb={2}>{t('serverSelection')}</Text>
                                     <Select
                                         size="sm"
                                         value={selectedServer}
                                         onChange={(e) => handleServerChange(e.target.value)}
-                                        bg="gray.700"
+                                        bg="#1C1D20"
                                         color="white"
-                                        borderColor="gray.600"
-                                        _hover={{ borderColor: "green.500" }}
-                                        _focus={{ borderColor: "green.500", boxShadow: "0 0 0 1px var(--chakra-colors-green-500)" }}
+                                        borderColor="#383838"
+                                        _hover={{ borderColor: "#FFD230" }}
+                                        _focus={{ borderColor: "#FFD230", boxShadow: "0 0 0 1px #FFD230" }}
                                     >
                                         {Object.entries(SERVER_MAPPING).map(([key, config]) => (
                                             <option key={key} value={key}>{config.name}</option>
@@ -957,13 +1166,13 @@ const HeaderIcons = () => {
                                 
                                 <Box>
                                     <HStack justify="space-between" mb={2}>
-                                        <Text fontWeight="bold">Authentication</Text>
+                                        <Text fontWeight="bold">{t('authentication')}</Text>
                                         <HStack spacing={1}>
-                                            <Text fontSize="sm" color="gray.500">Status:</Text>
-                                            <Text fontSize="sm" color={auth.api_key || (auth.username && auth.password) ? "green.500" : "red.500"}>
-                                                {auth.api_key || (auth.username && auth.password) ? "Authenticated" : "Not Authenticated"}
+                                            <Text fontSize="sm" color="gray.500">{t('status')}</Text>
+                                            <Text fontSize="sm" color={auth.api_key || (auth.username && auth.password) ? "#FFD230" : "#FF4D4F"}>
+                                                {auth.api_key || (auth.username && auth.password) ? t('authenticated') : t('notAuthenticated')}
                                             </Text>
-                                            {auth.api_key || (auth.username && auth.password) ? <LockIcon color="green.500" /> : <UnlockIcon color="red.500" />}
+                                            {auth.api_key || (auth.username && auth.password) ? <LockIcon color="#FFD230" /> : <UnlockIcon color="#FF4D4F" />}
                                         </HStack>
                                     </HStack>
                                     <AuthForm auth={auth} setAuth={setAuth} getServerStorageKey={getServerStorageKey} />
@@ -973,64 +1182,224 @@ const HeaderIcons = () => {
                     </PopoverContent>
                 </Popover>
             )}
-            {!Object.keys(SERVER_MAPPING).length > 0 && (
+            {!(Object.keys(SERVER_MAPPING).length > 0) && (
                 <Popover isOpen={isAuthOpen} onClose={onAuthClose}>
                     <PopoverTrigger>
-                        <IconButton
-                            size="sm"
-                            icon={auth.api_key || auth.username ? <LockIcon /> : <UnlockIcon />}
-                            aria-label="Authentication status"
-                            bg="rgba(0,0,0,0.1)"
-                            color="black"
-                            _hover={{ bg: "rgba(0,0,0,0.2)" }}
-                            onClick={onAuthToggle}
-                        />
+                        {(auth.api_key || auth.username) ? (
+                            <IconButton
+                                size="sm"
+                                icon={<LockIcon />}
+                                aria-label={t('authenticationStatus')}
+                                variant="ghost"
+                                color="#ABABAB"
+                                _hover={{ color: "white", bg: "rgba(255,255,255,0.06)" }}
+                                onClick={onAuthToggle}
+                            />
+                        ) : (
+                            <Box position="relative" display="inline-flex" alignItems="center" justifyContent="center">
+                                {/* Ping ripple ring — framer-motion */}
+                                <motion.div
+                                    style={{
+                                        position: "absolute",
+                                        top: "50%",
+                                        left: "50%",
+                                        width: 32,
+                                        height: 32,
+                                        marginLeft: -16,
+                                        marginTop: -16,
+                                        borderRadius: "50%",
+                                        border: "2px solid rgba(255, 77, 79, 0.55)",
+                                        pointerEvents: "none",
+                                    }}
+                                    animate={{
+                                        scale: [0.8, 2.2],
+                                        opacity: [0.7, 0],
+                                    }}
+                                    transition={{
+                                        duration: 2,
+                                        ease: "easeOut",
+                                        repeat: Infinity,
+                                    }}
+                                />
+                                <Tooltip
+                                    label={t('clickToLogin')}
+                                    hasArrow
+                                    placement="bottom"
+                                    bg="#FF4D4F"
+                                    color="white"
+                                >
+                                    {/* Glow + wiggle wrapper — framer-motion */}
+                                    <motion.div
+                                        animate={{
+                                            boxShadow: [
+                                                "0 0 4px rgba(255,77,79,0.3), 0 0 8px rgba(255,77,79,0.1)",
+                                                "0 0 14px rgba(255,77,79,0.7), 0 0 28px rgba(255,77,79,0.3)",
+                                                "0 0 4px rgba(255,77,79,0.3), 0 0 8px rgba(255,77,79,0.1)",
+                                            ],
+                                        }}
+                                        transition={{
+                                            duration: 2,
+                                            ease: "easeInOut",
+                                            repeat: Infinity,
+                                        }}
+                                        style={{ borderRadius: 8, display: "inline-flex" }}
+                                        whileHover={{
+                                            boxShadow: "0 0 16px rgba(255,77,79,0.6)",
+                                        }}
+                                    >
+                                        <IconButton
+                                            size="sm"
+                                            icon={
+                                                <motion.span
+                                                    style={{ display: "inline-flex" }}
+                                                    animate={{
+                                                        rotate: [0, -14, 12, -8, 6, -2, 0, 0, 0, 0],
+                                                        scale:  [1, 1.2, 1.2, 1.15, 1.1, 1.05, 1, 1, 1, 1],
+                                                    }}
+                                                    transition={{
+                                                        duration: 3,
+                                                        ease: "easeInOut",
+                                                        repeat: Infinity,
+                                                    }}
+                                                >
+                                                    <UnlockIcon boxSize="18px" />
+                                                </motion.span>
+                                            }
+                                            aria-label={t('clickToLogin')}
+                                            variant="ghost"
+                                            color="#FF4D4F"
+                                            borderRadius="8px"
+                                            _hover={{
+                                                bg: "rgba(255,77,79,0.15)",
+                                                color: "white",
+                                            }}
+                                            onClick={onAuthToggle}
+                                        />
+                                    </motion.div>
+                                </Tooltip>
+                                {/* Red badge dot — framer-motion */}
+                                <motion.div
+                                    style={{
+                                        position: "absolute",
+                                        top: 1,
+                                        right: 1,
+                                        width: 9,
+                                        height: 9,
+                                        background: "#FF4D4F",
+                                        borderRadius: "50%",
+                                        border: "1.5px solid #141517",
+                                        pointerEvents: "none",
+                                    }}
+                                    animate={{
+                                        scale: [1, 1.5, 1],
+                                        opacity: [1, 0.6, 1],
+                                    }}
+                                    transition={{
+                                        duration: 1.5,
+                                        ease: "easeInOut",
+                                        repeat: Infinity,
+                                    }}
+                                />
+                            </Box>
+                        )}
                     </PopoverTrigger>
                     <PopoverContent>
                         <PopoverArrow />
                         <PopoverCloseButton />
-                        <PopoverHeader>Authentication Status</PopoverHeader>
+                        <PopoverHeader>{t('authenticationStatus')}</PopoverHeader>
                         <PopoverBody>
                             <AuthForm auth={auth} setAuth={setAuth} getServerStorageKey={getServerStorageKey} />
                         </PopoverBody>
                     </PopoverContent>
                 </Popover>
             )}
+            <Tooltip label={t('shareCurrentSearch')}>
+                <IconButton
+                    size="sm"
+                    variant="ghost"
+                    icon={<LinkIcon />}
+                    onClick={() => {
+                        const currentUrl = window.location.href;
+                        const doCopy = () => {
+                            if (navigator.clipboard?.writeText) {
+                                return navigator.clipboard.writeText(currentUrl).then(
+                                    () => 'success',
+                                    () => { throw new Error('clipboard-api-failed'); }
+                                );
+                            }
+                            return new Promise((resolve, reject) => {
+                                const textarea = document.createElement('textarea');
+                                textarea.value = currentUrl;
+                                textarea.style.position = 'fixed';
+                                textarea.style.left = '-9999px';
+                                textarea.style.top = '-9999px';
+                                textarea.setAttribute('readonly', '');
+                                document.body.appendChild(textarea);
+                                textarea.select();
+                                try {
+                                    const ok = document.execCommand('copy');
+                                    document.body.removeChild(textarea);
+                                    if (ok) resolve('success'); else reject(new Error('execCommand-failed'));
+                                } catch (e) {
+                                    document.body.removeChild(textarea);
+                                    reject(e);
+                                }
+                            });
+                        };
+                        doCopy().then(() => {
+                            toast({
+                                title: t('copiedToClipboard'),
+                                status: "success",
+                                duration: 2000,
+                            });
+                        }).catch(() => {
+                            toast({
+                                title: t('copyFailed'),
+                                status: "error",
+                                duration: 3000,
+                            });
+                        });
+                    }}
+                    aria-label={t('shareCurrentSearch')}
+                    color="#ABABAB"
+                    _hover={{ color: "white", bg: "rgba(255,255,255,0.06)" }}
+                />
+            </Tooltip>
             <Popover>
                 <PopoverTrigger>
                     <IconButton
                         size="sm"
                         icon={<InfoIcon />}
-                        aria-label="Instance information"
-                        bg="rgba(0,0,0,0.1)"
-                        color="black"
-                        _hover={{ bg: "rgba(0,0,0,0.2)" }}
+                        aria-label={t('instanceInformation')}
+                        variant="ghost"
+                        color="#ABABAB"
+                        _hover={{ color: "white", bg: "rgba(255,255,255,0.06)" }}
                         onClick={() => { fetchPluginsInfo(); fetchBackendInfo(); }}
                     />
                 </PopoverTrigger>
                 <PopoverContent width="600px">
                     <PopoverArrow />
-                    <PopoverCloseButton />
                     <PopoverHeader>
-                        <HStack justify="space-between">
-                            <Text>Instance Information</Text>
+                        <HStack justify="space-between" pr={6}>
+                            <Text>{t('instanceInformation')}</Text>
                             <Button size="xs" onClick={() => { fetchPluginsInfo(); fetchBackendInfo(); }}>
-                                Refresh
+                                {t('refresh')}
                             </Button>
                         </HStack>
                     </PopoverHeader>
+                    <PopoverCloseButton />
                     <PopoverBody>
                         <VStack spacing={4} align="stretch">
                             <Box>
-                                <Text fontWeight="bold" mb={2} color="white">Storage Backends</Text>
+                                <Text fontWeight="bold" mb={2} color="white">{t('storageBackends')}</Text>
                                 {loading ? (
-                                    <Text fontSize="sm" color="gray.300">Loading...</Text>
+                                    <Text fontSize="sm" color="gray.300">{t('loading')}</Text>
                                 ) : backend && Array.isArray(backend) ? (
                                     <VStack align="start" spacing={2}>
                                         {backend.map((backendItem, index) => (
                                             <Box key={index} p={2} bg="gray.700" borderRadius="md" w="100%">
                                                 <Text fontSize="sm" color="white" fontWeight="medium">
-                                                    {backendItem.type.toUpperCase()} Storage
+                                                    {backendItem.type.toUpperCase()} {t('storage')}
                                                 </Text>
                                                 <Text fontSize="xs" color="gray.300" mt={1}>
                                                     {backendItem.url}
@@ -1045,21 +1414,21 @@ const HeaderIcons = () => {
                                     </VStack>
                                 ) : (
                                     <VStack align="start" spacing={1}>
-                                        <Text fontSize="sm" color="gray.300">No backend information available</Text>
-                                        <Button size="xs" onClick={fetchBackendInfo}>Retry</Button>
+                                        <Text fontSize="sm" color="gray.300">{t('noBackendInfo')}</Text>
+                                        <Button size="xs" onClick={fetchBackendInfo}>{t('retry')}</Button>
                                     </VStack>
                                 )}
                             </Box>
                             <Divider />
                             <Box>
-                                <Text fontWeight="bold" mb={2} color="white">Supported Plugins</Text>
+                                <Text fontWeight="bold" mb={2} color="white">{t('supportedPlugins')}</Text>
                                 {loading ? (
-                                    <Text fontSize="sm" color="gray.300">Loading...</Text>
+                                    <Text fontSize="sm" color="gray.300">{t('loading')}</Text>
                                 ) : plugins && (plugins.active?.length > 0 || plugins.inactive?.length > 0) ? (
                                     <Box maxH="300px" overflowY="auto">
                                         {plugins.active && plugins.active.length > 0 && (
                                             <Box mb={3}>
-                                                <Text fontWeight="semibold" color="green.400" mb={2}>Active Plugins ({plugins.active.length})</Text>
+                                                <Text fontWeight="semibold" color="#FFD230" mb={2}>{t('activePlugins')} ({plugins.active.length})</Text>
                                                 {plugins.active.map((plugin, index) => (
                                                     <Box key={index} mb={2}>
                                                         <Text fontSize="sm" color="white" fontWeight="medium">
@@ -1076,7 +1445,7 @@ const HeaderIcons = () => {
                                         )}
                                         {plugins.inactive && plugins.inactive.length > 0 && (
                                             <Box mb={3}>
-                                                <Text fontWeight="semibold" color="gray.400" mb={2}>Inactive Plugins ({plugins.inactive.length})</Text>
+                                                <Text fontWeight="semibold" color="gray.400" mb={2}>{t('inactivePlugins')} ({plugins.inactive.length})</Text>
                                                 {plugins.inactive.map((plugin, index) => (
                                                     <Box key={index} mb={2}>
                                                         <Text fontSize="sm" color="gray.200" fontWeight="medium">
@@ -1107,6 +1476,30 @@ const HeaderIcons = () => {
     );
 };
 
+// Language Switcher Button Component
+const LanguageSwitcher = () => {
+    const { language, toggleLanguage, t } = useTranslation();
+    return (
+        <Button
+            size="sm"
+            variant="ghost"
+            onClick={toggleLanguage}
+            color="#ABABAB"
+            _hover={{ color: "white", bg: "rgba(255,255,255,0.06)" }}
+            fontSize="sm"
+            fontWeight="500"
+            px={2}
+            minW="auto"
+            display="inline-flex"
+            alignItems="center"
+            justifyContent="center"
+            pt="1px"
+        >
+            {language === 'en' ? '中文' : 'EN'}
+        </Button>
+    );
+};
+
 // App wrapper to initialize persistent cache
 const App = () => {
     useEffect(() => {
@@ -1119,14 +1512,24 @@ const App = () => {
     }, []);
 
     return (
+        <LanguageProvider>
         <ChakraProvider theme={theme}>
-            <Box w="100%" h="90px" backgroundColor="#76B900">
-                <Flex h="100%" alignItems="center" flexDir="row" justify="space-between" px={4}>
-                    <Flex alignItems="center">
-                        <Image src={logo} alt="NVIDIA" h="72px"/>
-                        <Flex alignItems={"flex-end"}>
-                            <Heading lineHeight={"0.7"} ml="1rem" fontSize="4xl" color="black">USD SEARCH EXPLORER</Heading>
-                            <Heading lineHeight={"0.7"} fontSize={"small"} color="black" ml={"0.3rem"}>v{process.env.REACT_APP_GIT_SHA ? process.env.REACT_APP_GIT_SHA : " UNKNOWN"}</Heading>
+            <Box 
+                w="100%" 
+                h="66px" 
+                bg="#141517"
+                borderBottom="1px solid #383838"
+                position="sticky"
+                top={0}
+                zIndex={1000}
+                backdropFilter="blur(12px)"
+            >
+                <Flex h="100%" alignItems="center" flexDir="row" justify="space-between" px={6}>
+                    <Flex alignItems="center" gap={3}>
+                        <Image src={logo} alt="LIGHT MARKET" h="42px" filter="brightness(1.1)"/>
+                        <Flex alignItems={"baseline"} gap={2}>
+                            <Heading fontSize="xl" fontWeight="600" color="white" letterSpacing="-0.01em">DeepSearch Explorer</Heading>
+                            <Text fontSize="xs" color="#ABABAB" fontWeight="400">v 1.3.0</Text>
                         </Flex>
                     </Flex>
                     <HeaderIcons handleSearch={() => window.dispatchEvent(new Event('trigger-search'))} />
@@ -1135,14 +1538,13 @@ const App = () => {
             <ColorModeScript initialColorMode={theme.config.initialColorMode}/>
             <SearchApp/>
         </ChakraProvider>
+        </LanguageProvider>
     );
 };
 
 const container = document.getElementById('root');
 const root = ReactDOMClient.createRoot(container);
 root.render(
-  <React.StrictMode>
       <App/>
-  </React.StrictMode>
 );
 
