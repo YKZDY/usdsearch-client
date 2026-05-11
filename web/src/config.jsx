@@ -61,6 +61,9 @@ export const FEATURE_FLAGS = {
   // 新卡片交互模式：单击=查看详情，hover checkbox=多选
   // 设为 false 可回退到旧版（整卡片点击=选中）
   NEW_CARD_INTERACTION: true,
+  // V2 批量打标签入口开关（临时隐藏，演示就绪后再开）
+  // 设 true 恢复显示 SelectionModeBar 的"批量打标签"按钮
+  BATCH_TAGGING: false,
 };
 
 // Authentication configuration

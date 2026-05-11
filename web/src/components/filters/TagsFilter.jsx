@@ -73,35 +73,25 @@ const TagsFilter = memo(function TagsFilter({
     return Array.isArray(selectedTags) ? selectedTags : [];
   }, [selectedTags]);
 
-  // 从搜索结果中提取所有出现的标签（去重、排序按频次）
+  // [TagSearchFix V3] 候选标签只从真 source.tags 聚合，不再从文件名拆词凑假 tag。
+  // 背景：历史上后端没 tag 功能时，为让 "标签筛选" UI 有候选，前端把文件名拆成伪 tag，
+  // 但这会让用户误以为 "选中 Set 就是按 tag=Set 过滤"，实际是文本搜索命中文件名。
+  // 现在 tagging 服务可用后，候选只展示真实打过的 tag，空时给明确提示引导去打标签。
   const availableTags = useMemo(() => {
     const tagMap = new Map();
     results.forEach(item => {
       const tags = item.source?.tags;
-      if (Array.isArray(tags)) {
-        tags.forEach(tagItem => {
-          const tagStr = typeof tagItem === 'string' ? tagItem : (tagItem?.tag || tagItem?.value || '');
-          if (tagStr) {
-            tagMap.set(tagStr, (tagMap.get(tagStr) || 0) + 1);
-          }
-        });
-      }
-      const name = item.source?.name || item.source?.base_key || '';
-      if (name) {
-        const baseName = name.replace(/\.\w+$/, '').replace(/^(SM|SK|T|M|BP|WBP|A)_/i, '');
-        const words = baseName
-          .replace(/([a-z])([A-Z])/g, '$1 $2')
-          .replace(/[_\-0-9]+/g, ' ')
-          .split(/\s+/)
-          .filter(w => w.length >= 3)
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-        words.forEach(word => {
-          tagMap.set(word, (tagMap.get(word) || 0) + 1);
-        });
-      }
+      if (!Array.isArray(tags)) return;
+      tags.forEach(tagItem => {
+        const tagStr = typeof tagItem === 'string'
+          ? tagItem
+          : (tagItem?.name || tagItem?.tag || tagItem?.value || '');
+        if (tagStr) {
+          tagMap.set(tagStr, (tagMap.get(tagStr) || 0) + 1);
+        }
+      });
     });
     return Array.from(tagMap.entries())
-      .filter(([, count]) => count >= 2)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20)
       .map(([tag, count]) => ({ label: tag, value: tag, count }));
@@ -319,9 +309,15 @@ const TagsFilter = memo(function TagsFilter({
           </Text>
         )}
 
-        <Text fontSize="12px" color="whiteAlpha.500" letterSpacing="0.02em" mt={1}>
-          {t?.('filterTagsHint') || '点击标签可快速移除'}
-        </Text>
+        {/* [TagSearchFix V3] 有结果但没真 tag：提示去卡片详情手动打标签 */}
+        {availableTags.length === 0 && results.length > 0 && (
+          <Text fontSize="12px" color="whiteAlpha.500" letterSpacing="0.02em" lineHeight="1.6">
+            {t?.('tagsNoRealTagsHint') || '当前结果中暂无已打标签的资产。打开任意资产详情可手动添加标签。'}
+          </Text>
+        )}
+
+        {/* [UX Polish] 底部通用兜底文案已删除——"添加/移除"措辞会让用户误以为"给所有卡片加标签"。
+            每个区块（已选标签 chip 自带 ×；推荐区有 tagsFromResults 提示）自我解释即可。 */}
       </VStack>
     </FilterPopoverButton>
   );

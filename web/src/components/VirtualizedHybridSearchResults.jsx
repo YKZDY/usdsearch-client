@@ -359,12 +359,11 @@ const VirtualizedResultGridItem = memo(({
       boxShadow={isTagHit && !isSelected ? "0 0 16px rgba(255, 210, 48, 0.25)" : undefined}
       _hover={{
         borderColor: "#FFD230",
-        transform: "translateY(-2px)",
         shadow: isTagHit && !isSelected
           ? "0 6px 24px rgba(255,210,48,0.4)"
           : "0 6px 20px rgba(255,210,48,0.12)",
       }}
-      transition="transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.1s linear, box-shadow 0.1s linear, background 0.1s linear"
+      transition="border-color 0.1s linear, box-shadow 0.1s linear, background 0.1s linear"
       cursor="pointer"
       onClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onClick : handleCardClick}
       onDoubleClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onDoubleClick : undefined}
@@ -375,8 +374,8 @@ const VirtualizedResultGridItem = memo(({
       overflow="hidden"
       position="relative"
     >
-      {/* V2 Q1-A: 命中角标 */}
-      {isTagHit && <TaggedBadge size={gridSize === 'S' ? 'sm' : 'md'} />}
+      {/* V2 Q1-A: 命中角标（已去除：与 checkbox 打勾视觉冲突） */}
+      {/* {isTagHit && <TaggedBadge size={gridSize === 'S' ? 'sm' : 'md'} />} */}
       {/* V2 U1: 失败角标 */}
       {failedReason && (
         <FailedBadge reason={failedReason} onRetry={() => onRetryFailed?.(result)} />
@@ -724,8 +723,8 @@ const VirtualizedResultListItem = memo(({
       borderRadius="12px"
       position="relative"
     >
-      {/* V2 Q1-A: 命中角标 */}
-      {isTagHit && <TaggedBadge size="sm" />}
+      {/* V2 Q1-A: 命中角标（已去除） */}
+      {/* {isTagHit && <TaggedBadge size="sm" />} */}
       {/* V2 U1: 失败角标 */}
       {failedReason && (
         <FailedBadge reason={failedReason} onRetry={() => onRetryFailed?.(result)} />
@@ -862,7 +861,7 @@ const VirtualizedResultListItem = memo(({
                 aria-label="Toggle explanations"
               />
               <Text fontSize="xs" color="gray.300" textAlign="center">
-                Why this matched
+                {t('whyThisMatched')}
               </Text>
             </VStack>
           </GridItem>
@@ -1020,7 +1019,10 @@ const VirtualizedHybridSearchResults = ({
         <VirtualizedResults
           items={results}
           renderItem={viewMode === "grid" ? renderGridItem : renderListItem}
-          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 200 : 320) : 250}
+          // List 视图卡片实际高度 ≈ 150（缩略图）+ 32（CardBody p=4 上下各 16）+ 2（border）≈ 184。
+          // 原值 250 留了 ~66px 空白 slot，每条都多出一大块空档，资产越多越夸张。
+          // 与 gap=16 组合后单 slot=200，刚好贴合卡片且行间留出微呼吸。
+          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 200 : 320) : 184}
           containerHeight="100%"
           overscan={5}
           gridMode={viewMode === "grid"}

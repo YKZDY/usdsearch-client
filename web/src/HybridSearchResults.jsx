@@ -389,15 +389,14 @@ const HybridSearchResultGridItem = memo(({
       borderWidth="1px"
       /* V2 U6: 命中态外发光仅在非选中时渲染（避免三层金色视觉过载） */
       boxShadow={tagHitInfo.isTagHit && !isSelected ? "0 0 16px rgba(255, 210, 48, 0.25)" : undefined}
-      /* 光子品牌色：hover 金色边框 + 微浮起 + 微光；命中态 hover 加强 */
+      /* 光子品牌色：hover 金色边框 + 微光；命中态 hover 加强（已去掉 translateY 上浮，避免出界遮挡） */
       _hover={{
         borderColor: "#FFD230",
-        transform: "translateY(-2px)",
         shadow: tagHitInfo.isTagHit && !isSelected
           ? "0 6px 24px rgba(255,210,48,0.4)"
           : "0 6px 20px rgba(255,210,48,0.12)",
       }}
-      transition="transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.1s linear, box-shadow 0.1s linear, background 0.1s linear"
+      transition="border-color 0.1s linear, box-shadow 0.1s linear, background 0.1s linear"
       cursor="pointer"
       {...clickHandlers}
       h="100%"
@@ -405,10 +404,10 @@ const HybridSearchResultGridItem = memo(({
       overflow="hidden"
       position="relative"
     >
-      {/* V2 Q1-A: 命中角标（左上角） */}
-      {tagHitInfo.isTagHit && (
+      {/* V2 Q1-A: 命中角标（已去除：与 checkbox 打勾视觉冲突）。保留外发光作为命中提示 */}
+      {/* {tagHitInfo.isTagHit && (
         <TaggedBadge size={gridSize === 'S' ? 'sm' : 'md'} />
-      )}
+      )} */}
       {/* V2 U1: 批量失败角标（右上角，优先级最高） */}
       {failedReason && (
         <FailedBadge
@@ -786,8 +785,8 @@ const HybridSearchResultItem = memo(({
       borderRadius="12px"
       position="relative"
     >
-      {/* V2 Q1-A: 命中角标（List 视图同样） */}
-      {listTagHit && <TaggedBadge size="sm" />}
+      {/* V2 Q1-A: 命中角标（List 视图同样，已去除） */}
+      {/* {listTagHit && <TaggedBadge size="sm" />} */}
       {/* V2 U1: 失败角标 */}
       {failedReason && (
         <FailedBadge reason={failedReason} onRetry={() => onRetryFailed?.(result)} />

@@ -16,6 +16,7 @@ import {
   PopoverTrigger,
   PopoverContent,
   PopoverBody,
+  Portal,
   FormControl,
   FormLabel,
   Text,
@@ -46,25 +47,12 @@ import TagsFilter from './filters/TagsFilter';
 import UserFilter from './filters/UserFilter';
 import PathFilter from './filters/PathFilter';
 import { FilterGroupProvider } from './filters/FilterGroupContext';
+// 复用 FilterPopoverButton 导出的 Popover 面板样式（实色 + isolation + contain，
+// 已修 framer-motion 合成层导致的 children 穿透/图层裸露 bug）。
+// 之前本地重复声明了一份半透明 + backdrop-filter 的旧版，shadow 了这个 import，
+// 导致排序/设置两个 Popover 和下方卡片互相穿透，本次删除旧声明统一视觉。
+import { popoverContentSx } from './filters/FilterPopoverButton';
 // === END LM CUSTOMIZATION ===
-
-/** Fab 实测的 Popover 面板样式 */
-const popoverContentSx = {
-  bg: 'rgba(48, 48, 52, 0.7)',
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  borderRadius: '12px',
-  backdropFilter: 'blur(50px)',
-  WebkitBackdropFilter: 'blur(50px)',
-  zIndex: 1350,
-  boxShadow: [
-    '0px 2px 1px rgba(0,0,0,0.1)',
-    '0px 4px 2px rgba(0,0,0,0.1)',
-    '0px 8px 4px rgba(0,0,0,0.1)',
-    '0px 16px 8px rgba(0,0,0,0.1)',
-    '0px 32px 16px rgba(0,0,0,0.1)',
-  ].join(', '),
-  _focus: { boxShadow: 'none' },
-};
 
 const filterButtonSx = {
   h: '32px',
@@ -101,7 +89,9 @@ const filterButtonSx = {
 
 const DEFAULT_SORT_OPTIONS = [
   { value: 'relevance', labelKey: 'sortRelevance', fallback: { en: 'Relevance', zh: '相关度' } },
-  { value: 'tagHitFirst', labelKey: 'sortModeTagHitFirst', fallback: { en: 'Tag-hit first', zh: '标签命中优先' } },
+  // 用户要求隐藏「标签命中优先」选项（排序逻辑本身在 HybridDeepSearchUI 保留，若外部以 sortBy='tagHitFirst'
+  // 传入仍会生效，只是 UI 下拉里不再暴露）。如需恢复，取消下一行注释即可。
+  // { value: 'tagHitFirst', labelKey: 'sortModeTagHitFirst', fallback: { en: 'Tag-hit first', zh: '标签命中优先' } },
   { value: 'newest',    labelKey: 'sortNewest',    fallback: { en: 'Newest',    zh: '最新' } },
   { value: 'oldest',    labelKey: 'sortOldest',    fallback: { en: 'Oldest',    zh: '最旧' } },
   { value: 'name-asc',  labelKey: 'sortNameAsc',   fallback: { en: 'Name A-Z',  zh: '名称 A-Z' } },
@@ -329,29 +319,34 @@ function FabToolbar({
                     DEFAULT_SORT_OPTIONS.find(o => o.value === sortBy)?.fallback || { en: 'Relevance', zh: '相关度' })}
               </Button>
             </PopoverTrigger>
-            <PopoverContent sx={popoverContentSx} minW="180px" maxW="220px">
-              <PopoverBody p={2}>
-                <VStack spacing={0} align="stretch">
-                  {DEFAULT_SORT_OPTIONS.map(opt => (
-                    <Box
-                      key={opt.value}
-                      px={3} py={2}
-                      fontSize="12px"
-                      color={sortBy === opt.value ? '#FFD230' : 'rgba(255,255,255,0.85)'}
-                      bg={sortBy === opt.value ? 'rgba(255, 210, 48, 0.1)' : 'transparent'}
-                      borderRadius="6px"
-                      cursor="pointer"
-                      _hover={{ bg: 'rgba(255,255,255,0.08)' }}
-                      onClick={() => onSortChange?.(opt.value)}
-                      fontWeight={sortBy === opt.value ? 600 : 400}
-                    >
-                      {tr('fabSortBy', { en: 'Sort: ', zh: '排序：' })}
-                      {tr(opt.labelKey, opt.fallback)}
-                    </Box>
-                  ))}
-                </VStack>
-              </PopoverBody>
-            </PopoverContent>
+            {/* ⚠️ Portal 必不可少：.fab-toolbar 有 position:sticky + z-index:10，会创建独立 stacking context，
+                PopoverContent 的 z-index:1350 只在 toolbar 内有效，对外部卡片列表失效。
+                用 Portal 把面板挂到 document.body，才能真正盖在卡片之上。 */}
+            <Portal>
+              <PopoverContent sx={popoverContentSx} minW="180px" maxW="220px">
+                <PopoverBody p={2}>
+                  <VStack spacing={0} align="stretch">
+                    {DEFAULT_SORT_OPTIONS.map(opt => (
+                      <Box
+                        key={opt.value}
+                        px={3} py={2}
+                        fontSize="12px"
+                        color={sortBy === opt.value ? '#FFD230' : 'rgba(255,255,255,0.85)'}
+                        bg={sortBy === opt.value ? 'rgba(255, 210, 48, 0.1)' : 'transparent'}
+                        borderRadius="6px"
+                        cursor="pointer"
+                        _hover={{ bg: 'rgba(255,255,255,0.08)' }}
+                        onClick={() => onSortChange?.(opt.value)}
+                        fontWeight={sortBy === opt.value ? 600 : 400}
+                      >
+                        {tr('fabSortBy', { en: 'Sort: ', zh: '排序：' })}
+                        {tr(opt.labelKey, opt.fallback)}
+                      </Box>
+                    ))}
+                  </VStack>
+                </PopoverBody>
+              </PopoverContent>
+            </Portal>
           </Popover>
 
 
@@ -366,6 +361,8 @@ function FabToolbar({
                 sx={filterButtonSx}
               />
             </PopoverTrigger>
+            {/* Portal：同排序 Popover 的原因 —— 逃离 .fab-toolbar 的 sticky+z-index stacking context */}
+            <Portal>
             <PopoverContent sx={popoverContentSx} minW="300px" maxW="380px">
               <PopoverBody p={4}>
                 <VStack spacing={3} align="stretch">
@@ -496,6 +493,7 @@ function FabToolbar({
                 </VStack>
               </PopoverBody>
             </PopoverContent>
+            </Portal>
           </Popover>
         </HStack>
         </FilterGroupProvider>

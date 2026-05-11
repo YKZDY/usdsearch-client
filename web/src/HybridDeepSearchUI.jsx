@@ -319,6 +319,32 @@ const HybridDeepSearchUI = () => {
   // === LM CUSTOMIZATION: 路径目录树（混合静态 + 搜索结果聚合）===
   // 每次 results 变化时自动重新聚合，给路径筛选注入「真实数据反馈」
   const { tree: pathTree } = usePathSuggestions(results);
+
+  // [UX Polish R2] selectedTags 客户端二次过滤
+  // 背景：后端不支持 filter_by_tags，若把 tag 拼进 q，"点最近标签 #grass"
+  //   会变成文本搜 grass，命中一堆文件名含 grass 但未打过 tag 的资产。
+  // 方案：搜索时不带 selectedTags（buildSearchPayload 已不再合并），
+  //   拿回结果后按 source.tags 做 AND 过滤（每个选中的 tag 都必须真实存在）。
+  // 注意：categoryTag 走 q（分类树语义），不在这里过滤。
+  const tagFilteredResults = useMemo(() => {
+    if (!Array.isArray(selectedTags) || selectedTags.length === 0) return results;
+    const want = selectedTags
+      .map(s => (typeof s === 'string' ? s.trim().toLowerCase() : ''))
+      .filter(Boolean);
+    if (want.length === 0) return results;
+    return results.filter(item => {
+      const tags = item?.source?.tags;
+      if (!Array.isArray(tags) || tags.length === 0) return false;
+      const names = tags
+        .map(tg => {
+          const s = typeof tg === 'string' ? tg : (tg?.name || tg?.tag || tg?.value || '');
+          return typeof s === 'string' ? s.trim().toLowerCase() : '';
+        })
+        .filter(Boolean);
+      return want.every(w => names.includes(w));
+    });
+  }, [results, selectedTags]);
+
   const [isLoading, setIsLoading] = useState(false);
   // error state removed - was never rendered in JSX
   const [showScores, setShowScores] = useState(SEARCH_DEFAULTS.showScores);
@@ -470,8 +496,11 @@ const HybridDeepSearchUI = () => {
   // Copy selected URLs - use refs to keep callback reference stable
   const resultsRef = useRef(results);
   resultsRef.current = results;
-  // V2: 同步给 Shift+Click 区间选择 handler 使用
-  resultsForSelectionRef.current = results;
+  // V2: 同步给 Shift+Click 区间选择 handler 使用（[UX Polish R2] 用过滤后数组，让"从 A 到 B"语义与可见卡片一致）
+  resultsForSelectionRef.current = tagFilteredResults;
+  // [UX Polish R2] 过滤后数组 ref：全选等"以屏幕可见资产为准"的场景用这个
+  const tagFilteredResultsRef = useRef(tagFilteredResults);
+  tagFilteredResultsRef.current = tagFilteredResults;
   const selectedItemsRef = useRef(selectedItems);
   selectedItemsRef.current = selectedItems;
   
@@ -1182,7 +1211,8 @@ const HybridDeepSearchUI = () => {
   }, []);
 
   const selectAllResults = useCallback(() => {
-    const list = resultsRef.current || [];
+    // [UX Polish R2] 全选以"当前屏幕可见资产"（tag 过滤后）为准
+    const list = tagFilteredResultsRef.current || [];
     const next = new Set();
     list.forEach(r => {
       const id = r?.id || r?.source?.base_key || r?.source?.url;
@@ -2758,10 +2788,10 @@ const HybridDeepSearchUI = () => {
                   }
                   setTimeout(() => handleSearchRef.current?.(), 50);
                 }}
-                results={results}
+                results={tagFilteredResults}
                 // === v5 合并行：TitleBar + 结果计数内嵌 toolbar ===
                 titleBarProps={titleBarProps}
-                resultCount={showOnlyWithPreviews ? (results?.filter(r => r.thumbnail_exists === true)?.length || 0) : (results?.length || 0)}
+                resultCount={showOnlyWithPreviews ? (tagFilteredResults?.filter(r => r.thumbnail_exists === true)?.length || 0) : (tagFilteredResults?.length || 0)}
                 />
               </Box>
               {/* Layer 2: SelectionModeBar —— 绝对定位覆盖在 FabToolbar 上方，
@@ -2787,7 +2817,7 @@ const HybridDeepSearchUI = () => {
                 <Box flex="1">
                   <SelectionModeBar
                     selectedCount={selectedItems.size}
-                    totalCount={results?.length || 0}
+                    totalCount={tagFilteredResults?.length || 0}
                     onCopySelectedUrls={copySelectedUrls}
                     onSelectAll={selectAllResults}
                     onDeselectAll={deselectAllKeepMode}
@@ -2805,7 +2835,7 @@ const HybridDeepSearchUI = () => {
             </Box>
             {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar crossfade END === */}
             <MemoizedResults
-              results={results}
+              results={tagFilteredResults}
               showOnlyWithPreviews={showOnlyWithPreviews}
               onItemClick={handleItemClick}
               copyToClipboard={copyToClipboard}

@@ -302,7 +302,7 @@ const zh = {
   viewDetails: "查看详情",
   copyUrl: "复制 URL",
   findSimilarAssets: "查找相似资产",
-  whyThisMatched: "为什么匹配",
+  whyThisMatched: "为什么命中",
 
   // === AssetDetailsModal.jsx ===
   assetInformation: "资产信息",
@@ -497,6 +497,7 @@ const zh = {
   tagsClearAll: "清除全部",
   tagsFromResults: "点击标签可快速添加",
   tagsNoResults: "搜索结果中暂无标签数据，请先执行搜索",
+  tagsNoRealTagsHint: "当前结果中暂无已打标签的资产。打开任意资产详情可手动添加标签。",
   stepFine001: "±0.01 精调",
   stepCoarse01: "±0.1 快调",
   stepFine005: "±0.05",

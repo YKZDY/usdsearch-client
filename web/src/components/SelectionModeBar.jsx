@@ -4,6 +4,7 @@ import {
   Popover, PopoverTrigger, PopoverContent, PopoverBody, PopoverArrow, PopoverHeader,
 } from '@chakra-ui/react';
 import { CloseIcon, CopyIcon, CheckIcon } from '@chakra-ui/icons';
+import { FEATURE_FLAGS } from '../config.jsx';
 
 /**
  * useMinWidth —— 同步求值的 matchMedia hook
@@ -243,8 +244,8 @@ const SelectionModeBar = React.memo(({
               {t?.('copySelectedUrls') || '复制选中的 URL'}
             </Button>
           )}
-          {/* V2 批量打标签按钮 */}
-          {onBatchTag && !inProgress && (
+          {/* V2 批量打标签按钮（FEATURE_FLAGS.BATCH_TAGGING 控制显隐；演示就绪后再放开） */}
+          {FEATURE_FLAGS.BATCH_TAGGING && onBatchTag && !inProgress && (
             <Tooltip
               label={!canBatch ? (batchLimitTip || (t?.('batchTagLimitTip') || '请先缩小范围至 100 个以内')) : ''}
               isDisabled={canBatch}

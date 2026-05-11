@@ -497,6 +497,7 @@ const en = {
   tagsClearAll: "Clear all",
   tagsFromResults: "Click tag to add",
   tagsNoResults: "No tag data in results, please search first",
+  tagsNoRealTagsHint: "No tagged assets in current results. Open any asset's details to add tags manually.",
   stepFine001: "±0.01 fine",
   stepCoarse01: "±0.1 coarse",
   stepFine005: "±0.05",
