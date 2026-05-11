@@ -57,26 +57,24 @@ const SizeFilter = memo(function SizeFilter({
   const searchParamsRef = useRef(searchParams);
   useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
 
-  // 保险：监听 searchParams 变化，只要出现非预设的 size 组合就自动存入记忆
-  // 这是记忆保存的兜底机制，即便 onCommit 路径未触发也能保证记忆被捕获
-  useEffect(() => {
-    const rawMin = searchParams.file_size_greater_than;
-    const rawMax = searchParams.file_size_less_than;
-    const normMin = rawMin === '' || rawMin === null || rawMin === undefined ? '' : Number(rawMin);
-    const normMax = rawMax === '' || rawMax === null || rawMax === undefined ? '' : Number(rawMax);
-    // 两个都空 → 无筛选，不存
+  /**
+   * 保存大小记忆（core = {min, max}）
+   * - 先按 core 去重（剥离 fromPreset 差异），再 addMemory(withFromPreset)
+   * - 标签为"全部"或空值 → 不存
+   */
+  const saveSizeMemory = useCallback((min, max, fromPreset) => {
+    const normMin = min === '' || min === null || min === undefined ? '' : Number(min);
+    const normMax = max === '' || max === null || max === undefined ? '' : Number(max);
     if (normMin === '' && normMax === '') return;
-    const value = { min: normMin, max: normMax };
-    const isPreset = SIZE_QUICK_TAGS.some(tag =>
-      String(tag.value.min) === String(value.min) && String(tag.value.max) === String(value.max)
-    );
-    if (isPreset) return;
-    const label = formatSizeLabel(value.min, value.max);
-    if (label && label !== '全部') {
-      addSizeMemory(label, value);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.file_size_greater_than, searchParams.file_size_less_than]);
+    const core = { min: normMin, max: normMax };
+    const label = formatSizeLabel(normMin, normMax);
+    if (!label || label === '全部') return;
+    // 去重（剥离 fromPreset 差异 + 兼容老数据）
+    removeSizeMemory({ ...core, fromPreset: true });
+    removeSizeMemory({ ...core, fromPreset: false });
+    removeSizeMemory(core);
+    addSizeMemory(label, { ...core, fromPreset: !!fromPreset });
+  }, [addSizeMemory, removeSizeMemory]);
 
   const onCommit = useCallback((changed) => {
     Object.entries(changed).forEach(([key, val]) => {
@@ -86,25 +84,17 @@ const SizeFilter = memo(function SizeFilter({
     const latestParams = searchParamsRef.current;
     const min = changed.file_size_greater_than ?? latestParams.file_size_greater_than ?? '';
     const max = changed.file_size_less_than ?? latestParams.file_size_less_than ?? '';
-    // 规范化：数值转数字，空值保持 ''
+    // 非预设 → 自定义记忆（fromPreset=false）
     const normMin = min === '' || min === null || min === undefined ? '' : Number(min);
     const normMax = max === '' || max === null || max === undefined ? '' : Number(max);
-    // 只在至少有一个值时才考虑保存
-    if (normMin !== '' || normMax !== '') {
-      const value = { min: normMin, max: normMax };
-      const isPreset = SIZE_QUICK_TAGS.some(tag =>
-        String(tag.value.min) === String(value.min) && String(tag.value.max) === String(value.max)
-      );
-      // 非预设 → 存为记忆
-      if (!isPreset) {
-        const label = formatSizeLabel(value.min, value.max);
-        if (label && label !== '全部') {
-          addSizeMemory(label, value);
-        }
-      }
+    const isPreset = SIZE_QUICK_TAGS.some(tag =>
+      String(tag.value.min) === String(normMin) && String(tag.value.max) === String(normMax)
+    );
+    if (!isPreset) {
+      saveSizeMemory(normMin, normMax, false);
     }
     onTriggerSearch?.();
-  }, [handleChange, onTriggerSearch, addSizeMemory]);
+  }, [handleChange, onTriggerSearch, saveSizeMemory]);
 
   const { localValues, setLocalValue, commit, reset } = useLocalFilterState(
     searchParams,
@@ -133,21 +123,25 @@ const SizeFilter = memo(function SizeFilter({
       handleChange('file_size_less_than', tagValue.max);
       setLocalValue('file_size_greater_than', tagValue.min);
       setLocalValue('file_size_less_than', tagValue.max);
+      // 即时存记忆（fromPreset=true）
+      saveSizeMemory(tagValue.min, tagValue.max, true);
     }
     onTriggerSearch?.();
-  }, [handleChange, onTriggerSearch, setLocalValue, searchParams]);
+  }, [handleChange, onTriggerSearch, setLocalValue, searchParams, saveSizeMemory]);
 
-  // 点击记忆 tag（支持取消：再点一次清空）
+  // 点击记忆 tag（支持取消：再点一次清空）；兼容新 value 结构（带 fromPreset）
   const handleMemoryTag = useCallback((tagValue) => {
+    const min = tagValue?.min ?? '';
+    const max = tagValue?.max ?? '';
     const currentMin = String(searchParams.file_size_greater_than || '');
     const currentMax = String(searchParams.file_size_less_than || '');
-    if (String(tagValue.min) === currentMin && String(tagValue.max) === currentMax) {
+    if (String(min) === currentMin && String(max) === currentMax) {
       // 再次点击 = 取消
       handleChange('file_size_greater_than', '');
       handleChange('file_size_less_than', '');
     } else {
-      handleChange('file_size_greater_than', tagValue.min);
-      handleChange('file_size_less_than', tagValue.max);
+      handleChange('file_size_greater_than', min);
+      handleChange('file_size_less_than', max);
     }
     onTriggerSearch?.();
   }, [handleChange, onTriggerSearch, searchParams]);
@@ -200,8 +194,11 @@ const SizeFilter = memo(function SizeFilter({
             </Text>
             <Wrap spacing={2}>
               {sizeMemories.map((mem, idx) => {
-                const isMemSelected = String(mem.value.min) === String(searchParams.file_size_greater_than || '') &&
-                  String(mem.value.max) === String(searchParams.file_size_less_than || '');
+                const memMin = mem.value?.min;
+                const memMax = mem.value?.max;
+                const isMemSelected = String(memMin) === String(searchParams.file_size_greater_than || '') &&
+                  String(memMax) === String(searchParams.file_size_less_than || '');
+                const isPreset = !!(mem.value && typeof mem.value === 'object' && mem.value.fromPreset);
                 return (
                   <WrapItem key={idx}>
                     <MemoryChip
@@ -209,7 +206,9 @@ const SizeFilter = memo(function SizeFilter({
                         icon: <SizeIcon />,
                         label: mem.label,
                         tone: isMemSelected ? 'gold' : 'neutral',
+                        isPreset,
                       }]}
+                      presetTooltip={t?.('memoryFromPreset') || '来自快捷预设'}
                       onClick={() => handleMemoryTag(mem.value)}
                       onRemove={() => removeSizeMemory(mem.value)}
                     />

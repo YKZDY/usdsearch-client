@@ -58,6 +58,7 @@ import { SEARCH_DEFAULTS, FEATURE_FLAGS } from "./config";
 import CardSelectCheckbox from "./components/shared/CardSelectCheckbox";
 import EmptySearchHint from "./components/EmptySearchHint";
 import { useDragSelect } from "./hooks/useDragSelect";
+import { useClickOrDoubleClick } from "./hooks/useClickOrDoubleClick";
 import TaggedBadge from "./components/TaggedBadge";
 import FailedBadge from "./components/FailedBadge";
 
@@ -344,12 +345,19 @@ const HybridSearchResultGridItem = memo(({
 
   // Tooltip text based on mode
   const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
-    ? (isMultiSelectMode ? t('clickToSelect') : t('clickToViewDetails'))
+    ? (isMultiSelectMode ? t('clickOrDoubleClickHint') : t('clickOrDoubleClickHint'))
     : '';
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
     ? "rgba(255, 210, 48, 0.15)"
     : "rgba(255, 255, 255, 0.05)";
+
+  // 单击 = 切换选中；双击 = 打开详情（B 方案 + 220ms 双击窗口，避免多选态闪入闪出）
+  const clickHandlers = useClickOrDoubleClick({
+    onClick: (e) => onSelectionChange?.(result, e, index),
+    onDoubleClick: () => onItemClick?.(result),
+    enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+  });
 
   // [TagSearchFix P3] 识别"是否因 tag 命中而被搜出"，并提取命中的 tag 文本，
   // 用于在 category badge 上优先展示并加主题色描边——让用户秒懂"打过这个 tag 才搜到"。
@@ -381,29 +389,17 @@ const HybridSearchResultGridItem = memo(({
       borderWidth="1px"
       /* V2 U6: 命中态外发光仅在非选中时渲染（避免三层金色视觉过载） */
       boxShadow={tagHitInfo.isTagHit && !isSelected ? "0 0 16px rgba(255, 210, 48, 0.25)" : undefined}
-      /* 光子品牌色：hover 金色边框 + 微光（Fab overlay 行为由 CSS 单独控制）；命中态 hover 加强 */
+      /* 光子品牌色：hover 金色边框 + 微浮起 + 微光；命中态 hover 加强 */
       _hover={{
         borderColor: "#FFD230",
+        transform: "translateY(-2px)",
         shadow: tagHitInfo.isTagHit && !isSelected
-          ? "0 0 24px rgba(255,210,48,0.4)"
-          : "0 0 20px rgba(255,210,48,0.08)",
+          ? "0 6px 24px rgba(255,210,48,0.4)"
+          : "0 6px 20px rgba(255,210,48,0.12)",
       }}
-      transition="all 0.25s"
+      transition="transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.1s linear, box-shadow 0.1s linear, background 0.1s linear"
       cursor="pointer"
-      onClick={(e) => {
-        if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
-          onSelectionChange?.(result, e, index);
-        } else if (isMultiSelectMode) {
-          onSelectionChange?.(result, e, index);
-        } else {
-          // 非多选模式下 Shift+Click 直接进入多选（常规交互）
-          if (e?.shiftKey) {
-            onSelectionChange?.(result, e, index);
-          } else {
-            onItemClick?.(result);
-          }
-        }
-      }}
+      {...clickHandlers}
       h="100%"
       borderRadius="12px"
       overflow="hidden"
@@ -749,7 +745,7 @@ const HybridSearchResultItem = memo(({
 
   // Tooltip text based on mode
   const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
-    ? (isMultiSelectMode ? t('clickToSelect') : t('clickToViewDetails'))
+    ? t('clickOrDoubleClickHint')
     : '';
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
@@ -765,6 +761,13 @@ const HybridSearchResultItem = memo(({
     );
   }, [result.metadata?.explanations]);
 
+  // 单击 = 切换选中；双击 = 打开详情（与 Grid 卡片一致）
+  const clickHandlers = useClickOrDoubleClick({
+    onClick: (e) => onSelectionChange?.(result, e, index),
+    onDoubleClick: () => onItemClick?.(result),
+    enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+  });
+
   return (
     <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>
     <Card 
@@ -779,19 +782,7 @@ const HybridSearchResultItem = memo(({
       }}
       transition="all 0.25s"
       cursor="pointer"
-      onClick={(e) => {
-        if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
-          onSelectionChange?.(result, e, index);
-        } else if (isMultiSelectMode) {
-          onSelectionChange?.(result, e, index);
-        } else {
-          if (e?.shiftKey) {
-            onSelectionChange?.(result, e, index);
-          } else {
-            onItemClick?.(result);
-          }
-        }
-      }}
+      {...clickHandlers}
       borderRadius="12px"
       position="relative"
     >

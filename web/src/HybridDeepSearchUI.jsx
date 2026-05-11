@@ -339,7 +339,9 @@ const HybridDeepSearchUI = () => {
   const [selectedItems, setSelectedItems] = useState(new Set());
 
   // === NEW CARD INTERACTION: Multi-select mode derived state ===
-  const isMultiSelectMode = FEATURE_FLAGS.NEW_CARD_INTERACTION && selectedItems.size > 0;
+  // sticky 标志：用户"取消全选"后仍停留在多选模式，直到显式退出（Esc / "退出多选"按钮）
+  const [stickyMultiSelect, setStickyMultiSelect] = useState(false);
+  const isMultiSelectMode = FEATURE_FLAGS.NEW_CARD_INTERACTION && (selectedItems.size > 0 || stickyMultiSelect);
 
   // V2 批量打标签 state
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
@@ -350,11 +352,34 @@ const HybridDeepSearchUI = () => {
   const [undoToastState, setUndoToastState] = useState(null); // { message, onAction, actionLabel, variant }
   const lastClickedIndexRef = useRef(null); // Shift+Click 区间
 
-  // Clear all selections (exit multi-select mode)
+  // Clear all selections AND exit multi-select mode（Esc / "退出多选" 按钮走这里）
   const clearSelection = useCallback(() => {
     setSelectedItems(new Set());
+    setStickyMultiSelect(false);
     lastClickedIndexRef.current = null;
   }, []);
+
+  // Deselect all but KEEP multi-select mode（"取消全选"按钮走这里）
+  // 用户清空选中后仍可继续单击/框选卡片，bar 不会消失
+  const deselectAllKeepMode = useCallback(() => {
+    setSelectedItems(new Set());
+    setStickyMultiSelect(true);
+    lastClickedIndexRef.current = null;
+  }, []);
+
+  // === NEW CARD INTERACTION: Esc 键全局退出多选模式（提升键盘可达性） ===
+  useEffect(() => {
+    if (!isMultiSelectMode) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      // 让 Modal/弹窗优先消费 Esc，仅当没有打开的对话框时才清除选中
+      const hasOpenDialog = document.querySelector('[role="dialog"][aria-modal="true"]');
+      if (hasOpenDialog) return;
+      clearSelection();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMultiSelectMode, clearSelection]);
 
   // Toggle item selection（V2 支持 event + index：Shift+Click 区间选择）
   const resultsForSelectionRef = useRef([]);
@@ -807,17 +832,40 @@ const HybridDeepSearchUI = () => {
 
   // Auto-search when URL parameters are loaded and ready
   // === LM CUSTOMIZATION: Remove searchQuery/imageBase64 guard — allow empty query (Fab: show all products) ===
+  // === LM CUSTOMIZATION: auto-search auth-aware START ===
+  // 修复"首次输入令牌登录后首页 0 结果"bug：
+  //   - 仅在已认证 + 已初始化时执行 mount 阶段自动搜索
+  //   - 未认证时不消费 shouldAutoSearch 标志（不重置为 false），等待下方边沿触发器
+  //     在 auth.isAuthenticated 由 false→true 时再次将其置 true 重入本 effect
   useEffect(() => {
-    if (shouldAutoSearch && isInitialized) {
-      // Add a small delay to ensure all state updates are fully applied
-      const timer = setTimeout(() => {
-        handleSearch();
-        setShouldAutoSearch(false); // Reset flag
-      }, 200);
-      
-      return () => clearTimeout(timer);
+    if (!shouldAutoSearch || !isInitialized) return undefined;
+    if (!auth.isAuthenticated) {
+      // 未认证：跳过自动搜索，避免无效 401 请求与误导性"0 个资产"空态。
+      // 保留 shouldAutoSearch=true，由下方 prevAuthRef 边沿 useEffect 在登录完成后重新触发。
+      return undefined;
     }
-  }, [shouldAutoSearch, isInitialized]);
+    // Add a small delay to ensure all state updates are fully applied
+    const timer = setTimeout(() => {
+      handleSearch();
+      setShouldAutoSearch(false); // Reset flag
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [shouldAutoSearch, isInitialized, auth.isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 边沿检测：auth.isAuthenticated 由 false → true 时（且已初始化），
+  // 重新置位 shouldAutoSearch 触发一次"显示全部"自动搜索（首登补搜路径）。
+  // 已登录用户 mount 时 isAuthenticated 初始即 true，不会被识别为边沿，行为零回归。
+  const prevAuthRef = useRef(auth.isAuthenticated);
+  useEffect(() => {
+    const prev = prevAuthRef.current;
+    const curr = auth.isAuthenticated;
+    prevAuthRef.current = curr;
+    if (!prev && curr && isInitialized) {
+      setShouldAutoSearch(true);
+    }
+  }, [auth.isAuthenticated, isInitialized]);
+  // === LM CUSTOMIZATION: auto-search auth-aware END ===
 
   // Update URL when parameters change (only after initialization)
   // Note: searchQuery is excluded to avoid URL updates on every keystroke
@@ -2638,25 +2686,23 @@ const HybridDeepSearchUI = () => {
 
           {/* Right Content - Results */}
           <GridItem overflow="hidden" display="flex" flexDirection="column" h="100%">
-            {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar 互斥显示 === */}
-            {isMultiSelectMode ? (
-              <Box className="selection-bar-wrapper" px="4px" py="12px" mb="8px" borderBottom="1px solid rgba(255, 255, 255, 0.05)">
-                <SelectionModeBar
-                  selectedCount={selectedItems.size}
-                  onCopySelectedUrls={copySelectedUrls}
-                  onSelectAll={selectAllResults}
-                  onClearSelection={clearSelection}
-                  t={t}
-                  onBatchTag={handleOpenBatchModal}
-                  canBatch={selectedItems.size <= 100}
-                  batchLimitTip={t('batchTagLimitTip') || '请先缩小范围至 100 个以内'}
-                  batchProgress={batchProgress}
-                  batchFailedItems={batchFailedItems}
-                  onBatchRetry={handleBatchRetry}
-                />
-              </Box>
-            ) : (
-              <FabToolbar
+            {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar 同层 crossfade 互斥显示 === */}
+            {/* 关键：两者渲染在同一 relative 容器内，双层 absolute + opacity 切换；
+                 容器高度由 FabToolbar 撑起（SelectionModeBar 设为 absolute 脱离流，
+                 但容器始终保持 FabToolbar 的自然高度），从而保证切换时下方卡片不抖动。
+                 SelectionModeBar 内部垂直居中对齐，视觉上仍是一整条 bar。 */}
+            <Box position="relative" mb="8px">
+              {/* Layer 1: FabToolbar —— 撑起容器高度，多选时透明但不脱流
+                   退出层：160ms（比进入层稍慢），让新内容先到位，旧内容随后淡出 */}
+              <Box
+                opacity={isMultiSelectMode ? 0 : 1}
+                pointerEvents={isMultiSelectMode ? 'none' : 'auto'}
+                transition="opacity 0.16s cubic-bezier(0.4, 0, 0.2, 1)"
+                willChange="opacity"
+                transform="translateZ(0)"
+                aria-hidden={isMultiSelectMode}
+              >
+                <FabToolbar
                 searchParams={searchParams}
                 handleChange={handleFilterChange}
                 setSearchParams={setSearchParams}
@@ -2716,9 +2762,48 @@ const HybridDeepSearchUI = () => {
                 // === v5 合并行：TitleBar + 结果计数内嵌 toolbar ===
                 titleBarProps={titleBarProps}
                 resultCount={showOnlyWithPreviews ? (results?.filter(r => r.thumbnail_exists === true)?.length || 0) : (results?.length || 0)}
-              />
-            )}
-            {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar 互斥显示 END === */}
+                />
+              </Box>
+              {/* Layer 2: SelectionModeBar —— 绝对定位覆盖在 FabToolbar 上方，
+                   高度由内部撑开，top:0/bottom:0 让其垂直居中于容器
+                   进入层：120ms + 更陡曲线，让用户尽快看到"已选中 X 个"结果 */}
+              <Box
+                position="absolute"
+                top={0}
+                left={0}
+                right={0}
+                bottom={0}
+                opacity={isMultiSelectMode ? 1 : 0}
+                pointerEvents={isMultiSelectMode ? 'auto' : 'none'}
+                transition="opacity 0.12s cubic-bezier(0.2, 0, 0.2, 1)"
+                willChange="opacity"
+                transform="translateZ(0)"
+                display="flex"
+                alignItems="center"
+                aria-hidden={!isMultiSelectMode}
+                className="selection-bar-wrapper"
+                px="4px"
+              >
+                <Box flex="1">
+                  <SelectionModeBar
+                    selectedCount={selectedItems.size}
+                    totalCount={results?.length || 0}
+                    onCopySelectedUrls={copySelectedUrls}
+                    onSelectAll={selectAllResults}
+                    onDeselectAll={deselectAllKeepMode}
+                    onClearSelection={clearSelection}
+                    t={t}
+                    onBatchTag={handleOpenBatchModal}
+                    canBatch={selectedItems.size <= 100}
+                    batchLimitTip={t('batchTagLimitTip') || '请先缩小范围至 100 个以内'}
+                    batchProgress={batchProgress}
+                    batchFailedItems={batchFailedItems}
+                    onBatchRetry={handleBatchRetry}
+                  />
+                </Box>
+              </Box>
+            </Box>
+            {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar crossfade END === */}
             <MemoizedResults
               results={results}
               showOnlyWithPreviews={showOnlyWithPreviews}

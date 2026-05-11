@@ -13,8 +13,18 @@ import {
   WrapItem,
   Tooltip,
   Collapse,
+  Portal,
+  useToast,
 } from '@chakra-ui/react';
-import { ChevronRightIcon, ChevronDownIcon, AddIcon, MinusIcon, SearchIcon } from '@chakra-ui/icons';
+import {
+  ChevronRightIcon,
+  ChevronDownIcon,
+  AddIcon,
+  MinusIcon,
+  SearchIcon,
+  CheckIcon,
+  CopyIcon,
+} from '@chakra-ui/icons';
 
 /**
  * PathTreeBrowser - 路径树形浏览器（路径筛选主体）
@@ -77,6 +87,8 @@ const PathTreeBrowser = memo(function PathTreeBrowser({
 }) {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(() => new Set(['/Library', '/Library/Test', '/Users'])); // 默认展开真实环境主目录
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, node } | null
+  const toast = useToast();
   const prevTreeRef = useRef(tree);
 
   // 自动展开 live 节点祖先链（搜索结果回流后自动展开有数据的路径）
@@ -107,6 +119,21 @@ const PathTreeBrowser = memo(function PathTreeBrowser({
 
   const filterResult = useMemo(() => computeFilterMatches(tree, query), [tree, query]);
   const forceExpanded = !!query.trim(); // 搜索时强制展开命中分支
+
+  // 右键菜单：全局点击/Escape/右键空白处 关闭
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const close = () => setContextMenu(null);
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('click', close);
+    window.addEventListener('contextmenu', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('contextmenu', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [contextMenu]);
 
   const toggleExpand = useCallback((path) => {
     setExpanded((prev) => {
@@ -174,101 +201,188 @@ const PathTreeBrowser = memo(function PathTreeBrowser({
       const isInc = includeSet.has(node.path);
       const isExc = excludeSet.has(node.path);
 
+      // 三色：包含=蓝、排除=红、默认=透明
+      const stateColor = isInc ? '#7BC8FF' : isExc ? '#FF8B8B' : null;
+      const stateBg = isInc
+        ? 'rgba(123,200,255,0.10)'
+        : isExc
+        ? 'rgba(255,139,139,0.10)'
+        : 'transparent';
+
       return (
         <Box key={node.path}>
           <HStack
-            spacing={1}
-            py={1}
-            px={2}
-            pl={`${8 + depth * 18}px`}
+            spacing={0}
+            h="30px"
             borderRadius="6px"
-            cursor={hasChildren ? 'pointer' : 'default'}
-            _hover={{ bg: 'whiteAlpha.50' }}
             role="group"
-            onClick={() => hasChildren && toggleExpand(node.path)}
-            bg={isInc ? 'rgba(123,200,255,0.08)' : isExc ? 'rgba(255,139,139,0.08)' : 'transparent'}
+            position="relative"
+            cursor="default"
+            bg="transparent"
+            sx={{
+              // 底色用伪元素叠加，opacity 渐变避免 bg 跳变重绘
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                inset: 0,
+                borderRadius: '6px',
+                background: stateBg,
+                opacity: stateColor ? 1 : 0,
+                pointerEvents: 'none',
+                transition: 'opacity 0.1s linear',
+              },
+              // hover 在未选中态才显示一层弱化底
+              '&:hover::after': {
+                content: '""',
+                position: 'absolute',
+                inset: 0,
+                borderRadius: '6px',
+                background: stateColor ? 'transparent' : 'rgba(255,255,255,0.04)',
+                pointerEvents: 'none',
+              },
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu({ x: e.clientX, y: e.clientY, node });
+            }}
           >
-            <Box w="14px" display="flex" alignItems="center" justifyContent="center">
+            {/* 左侧高亮条 — 始终占 3px 宽位，通过 opacity 显隐避免重排 */}
+            <Box
+              w="3px"
+              h="60%"
+              flexShrink={0}
+              borderRadius="0 2px 2px 0"
+              bg={stateColor || 'transparent'}
+              opacity={stateColor ? 1 : 0}
+              transition="opacity 0.1s linear"
+              pointerEvents="none"
+            />
+
+            {/* Zone 1：chevron 区（约 21px + 缩进） — 仅展开/收起 */}
+            <Box
+              w={`${21 + depth * 16}px`}
+              h="full"
+              display="flex"
+              alignItems="center"
+              justifyContent="flex-end"
+              pr="4px"
+              cursor={hasChildren ? 'pointer' : 'default'}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (hasChildren) toggleExpand(node.path);
+              }}
+              _hover={hasChildren ? { '& .pt-chev': { color: 'whiteAlpha.900' } } : undefined}
+            >
               {hasChildren ? (
                 isOpen ? (
-                  <ChevronDownIcon boxSize={3} color="whiteAlpha.600" />
+                  <ChevronDownIcon className="pt-chev" boxSize={3.5} color="whiteAlpha.600" />
                 ) : (
-                  <ChevronRightIcon boxSize={3} color="whiteAlpha.600" />
+                  <ChevronRightIcon className="pt-chev" boxSize={3.5} color="whiteAlpha.600" />
                 )
               ) : (
                 <Box w="3px" h="3px" borderRadius="full" bg="whiteAlpha.300" />
               )}
             </Box>
 
-            <Text
-              fontSize="12px"
-              color={isInc ? '#7BC8FF' : isExc ? '#FF8B8B' : 'whiteAlpha.900'}
-              fontWeight={node.live ? 600 : 400}
+            {/* Zone 2：标签区（flex=1） — 单击 = 加入/取消包含 */}
+            <HStack
+              spacing={1.5}
               flex={1}
-              isTruncated
-              title={node.path}
+              minW={0}
+              h="full"
+              px={2}
+              cursor="pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleInclude(node.path);
+              }}
             >
-              {node.name}
-              {node.live && (
-                <Box
-                  as="span"
-                  ml={1.5}
-                  w="4px"
-                  h="4px"
-                  display="inline-block"
-                  borderRadius="full"
-                  bg="#FFD230"
-                  verticalAlign="middle"
-                />
-              )}
-            </Text>
-
-            {node.count > 0 && (
-              <Text fontSize="10px" color="whiteAlpha.500" fontFamily="mono" mr={1}>
-                {node.count >= 1000 ? `${(node.count / 1000).toFixed(1)}k` : node.count}
+              <Text
+                fontSize="12px"
+                color={isInc ? '#7BC8FF' : isExc ? '#FF8B8B' : 'whiteAlpha.900'}
+                fontWeight={node.live || isInc || isExc ? 600 : 400}
+                flex={1}
+                isTruncated
+              >
+                {node.name}
+                {node.live && (
+                  <Box
+                    as="span"
+                    ml={1.5}
+                    w="4px"
+                    h="4px"
+                    display="inline-block"
+                    borderRadius="full"
+                    bg="#FFD230"
+                    verticalAlign="middle"
+                  />
+                )}
               </Text>
-            )}
 
-            <HStack spacing={0} opacity={isInc || isExc ? 1 : 0} _groupHover={{ opacity: 1 }} transition="opacity 0.15s">
-              <Tooltip label={isInc ? t?.('pathRemoveInclude') || '取消包含' : t?.('pathAddInclude') || '加入搜索路径'} hasArrow>
-                <IconButton
-                  aria-label="include"
-                  size="xs"
-                  variant="ghost"
-                  minW="20px"
-                  h="20px"
-                  icon={<AddIcon boxSize={2.5} />}
-                  color={isInc ? '#7BC8FF' : 'whiteAlpha.500'}
-                  bg={isInc ? 'rgba(123,200,255,0.2)' : 'transparent'}
-                  _hover={{ bg: 'rgba(123,200,255,0.3)', color: '#7BC8FF' }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleInclude(node.path);
-                  }}
-                />
-              </Tooltip>
-              <Tooltip label={isExc ? t?.('pathRemoveExclude') || '取消排除' : t?.('pathAddExclude') || '排除该路径'} hasArrow>
-                <IconButton
-                  aria-label="exclude"
-                  size="xs"
-                  variant="ghost"
-                  minW="20px"
-                  h="20px"
-                  icon={<MinusIcon boxSize={2.5} />}
-                  color={isExc ? '#FF8B8B' : 'whiteAlpha.500'}
-                  bg={isExc ? 'rgba(255,139,139,0.2)' : 'transparent'}
-                  _hover={{ bg: 'rgba(255,139,139,0.3)', color: '#FF8B8B' }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleExclude(node.path);
-                  }}
-                />
-              </Tooltip>
+              {node.count > 0 && (
+                <Text fontSize="10px" color="whiteAlpha.500" fontFamily="mono">
+                  {node.count >= 1000 ? `${(node.count / 1000).toFixed(1)}k` : node.count}
+                </Text>
+              )}
+            </HStack>
+
+            {/* Zone 3：操作区（+/− 24×24 极简）—— 无边框，仅靠 opacity + 浅底色，避免抖动 */}
+            <HStack spacing={0.5} pr={2} pl={1} flexShrink={0}>
+              <IconButton
+                aria-label={isInc ? (t?.('pathContextRemoveInclude') || '取消包含') : (t?.('pathContextInclude') || '加入搜索路径')}
+                title={isInc ? (t?.('pathContextRemoveInclude') || '取消包含') : (t?.('pathContextInclude') || '加入搜索路径')}
+                size="sm"
+                variant="ghost"
+                minW="24px"
+                w="24px"
+                h="24px"
+                borderRadius="5px"
+                icon={isInc ? <CheckIcon boxSize={2.5} /> : <AddIcon boxSize={2} />}
+                color={isInc ? '#7BC8FF' : 'whiteAlpha.500'}
+                bg={isInc ? 'rgba(123,200,255,0.18)' : 'transparent'}
+                opacity={isInc ? 1 : 0.65}
+                _hover={{
+                  bg: isInc ? 'rgba(123,200,255,0.28)' : 'rgba(123,200,255,0.16)',
+                  color: '#7BC8FF',
+                  opacity: 1,
+                }}
+                _active={{ transform: 'none' }}
+                transition="opacity 0.1s linear, color 0.1s linear, background-color 0.1s linear"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleInclude(node.path);
+                }}
+              />
+              <IconButton
+                aria-label={isExc ? (t?.('pathContextRemoveExclude') || '取消排除') : (t?.('pathContextExclude') || '排除该路径')}
+                title={isExc ? (t?.('pathContextRemoveExclude') || '取消排除') : (t?.('pathContextExclude') || '排除该路径')}
+                size="sm"
+                variant="ghost"
+                minW="24px"
+                w="24px"
+                h="24px"
+                borderRadius="5px"
+                icon={<MinusIcon boxSize={2} />}
+                color={isExc ? '#FF8B8B' : 'whiteAlpha.500'}
+                bg={isExc ? 'rgba(255,139,139,0.18)' : 'transparent'}
+                opacity={isExc ? 1 : 0.65}
+                _hover={{
+                  bg: isExc ? 'rgba(255,139,139,0.28)' : 'rgba(255,139,139,0.16)',
+                  color: '#FF8B8B',
+                  opacity: 1,
+                }}
+                _active={{ transform: 'none' }}
+                transition="opacity 0.1s linear, color 0.1s linear, background-color 0.1s linear"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleExclude(node.path);
+                }}
+              />
             </HStack>
           </HStack>
 
           {hasChildren && (
-            <Collapse in={isOpen} animateOpacity unmountOnExit>
+            <Collapse in={isOpen} animateOpacity={false} unmountOnExit>
               <Box>{renderNodes(node.children, depth + 1)}</Box>
             </Collapse>
           )}
@@ -276,7 +390,40 @@ const PathTreeBrowser = memo(function PathTreeBrowser({
       );
     });
 
+  // 右键菜单点击处理
+  const handleMenuAction = useCallback((action, node) => {
+    if (!node) return;
+    setContextMenu(null);
+    if (action === 'include') return handleInclude(node.path);
+    if (action === 'exclude') return handleExclude(node.path);
+    if (action === 'toggleExpand') return toggleExpand(node.path);
+    if (action === 'copy') {
+      const text = node.path;
+      const showOk = () => toast({
+        title: t?.('pathContextCopied') || '已复制',
+        status: 'success',
+        duration: 1200,
+        position: 'bottom',
+        variant: 'subtle',
+      });
+      try {
+        navigator.clipboard?.writeText(text).then(showOk).catch(() => {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          showOk();
+        });
+      } catch (err) {
+        console.error('[PathTreeBrowser] copy failed', err);
+      }
+    }
+  }, [handleInclude, handleExclude, toggleExpand, toast, t]);
+
   return (
+    <>
     <VStack spacing={2} align="stretch">
       {/* 顶部搜索 */}
       <HStack spacing={2}>
@@ -376,6 +523,86 @@ const PathTreeBrowser = memo(function PathTreeBrowser({
         </HStack>
       </HStack>
     </VStack>
+
+    {/* 右键浮动菜单 */}
+    {contextMenu && (
+      <Portal>
+        <Box
+          position="fixed"
+          left={`${contextMenu.x}px`}
+          top={`${contextMenu.y}px`}
+          zIndex={2000}
+          minW="180px"
+          py={1}
+          borderRadius="8px"
+          bg="rgba(36,36,40,0.96)"
+          border="1px solid rgba(255,255,255,0.12)"
+          boxShadow="0 10px 30px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.3)"
+          sx={{ backdropFilter: 'blur(8px)' }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {(() => {
+            const node = contextMenu.node;
+            const isInc = includeSet.has(node.path);
+            const isExc = excludeSet.has(node.path);
+            const hasChildren = !!node.children?.length;
+            const items = [
+              {
+                key: 'include',
+                icon: <AddIcon boxSize={2.5} />,
+                color: '#7BC8FF',
+                label: isInc ? (t?.('pathContextRemoveInclude') || '取消包含') : (t?.('pathContextInclude') || '加入搜索路径'),
+              },
+              {
+                key: 'exclude',
+                icon: <MinusIcon boxSize={2.5} />,
+                color: '#FF8B8B',
+                label: isExc ? (t?.('pathContextRemoveExclude') || '取消排除') : (t?.('pathContextExclude') || '排除该路径'),
+              },
+              ...(hasChildren ? [{
+                key: 'toggleExpand',
+                icon: expanded.has(node.path) ? <ChevronDownIcon boxSize={3} /> : <ChevronRightIcon boxSize={3} />,
+                color: 'whiteAlpha.800',
+                label: expanded.has(node.path) ? (t?.('pathContextCollapse') || '收起') : (t?.('pathContextExpand') || '展开'),
+              }] : []),
+              {
+                key: 'copy',
+                icon: <CopyIcon boxSize={2.5} />,
+                color: 'whiteAlpha.800',
+                label: t?.('pathContextCopy') || '复制路径',
+              },
+            ];
+            return items.map((it) => (
+              <HStack
+                key={it.key}
+                as="button"
+                type="button"
+                w="full"
+                h="30px"
+                px={3}
+                spacing={2}
+                cursor="pointer"
+                color="whiteAlpha.900"
+                _hover={{ bg: 'whiteAlpha.100' }}
+                transition="background 0.1s ease"
+                onClick={() => handleMenuAction(it.key, node)}
+              >
+                <Box w="14px" display="flex" alignItems="center" justifyContent="center" color={it.color}>
+                  {it.icon}
+                </Box>
+                <Text fontSize="12px" flex={1} textAlign="left">{it.label}</Text>
+              </HStack>
+            ));
+          })()}
+          <Box h="1px" bg="whiteAlpha.100" my={1} mx={2} />
+          <Text px={3} py={1} fontSize="10px" color="whiteAlpha.500" isTruncated>
+            {contextMenu.node.path}
+          </Text>
+        </Box>
+      </Portal>
+    )}
+    </>
   );
 });
 

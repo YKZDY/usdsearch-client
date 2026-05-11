@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Box, HStack, Text, Icon } from '@chakra-ui/react';
+import { Box, HStack, Text, Icon, Tooltip } from '@chakra-ui/react';
 import { CloseIcon } from '@chakra-ui/icons';
 
 /**
@@ -11,11 +11,12 @@ import { CloseIcon } from '@chakra-ui/icons';
  * - 比传统 dashed 边框更精致，比纯实色更克制
  *
  * Props:
- * - segments: Array<{ icon?: ReactNode, label: string, tone?: 'neutral' | 'positive' | 'negative' | 'gold' }>
- *             多 segment 之间用细分隔线
+ * - segments: Array<{ icon?: ReactNode, label: string, tone?: 'neutral' | 'positive' | 'negative' | 'gold', isPreset?: boolean }>
+ *             多 segment 之间用细分隔线；isPreset=true 时 segment 最左侧额外渲染⚡图标
  * - onClick: 点击应用记忆
  * - onRemove: 点击 × 移除（不会冒泡到 onClick）
  * - tooltip: 可选完整路径提示（title 属性）
+ * - presetTooltip: 当任一 segment.isPreset=true 时，整体包 Tooltip 展示此文案（默认 "来自快捷预设"）
  */
 
 const TONE_MAP = {
@@ -25,10 +26,19 @@ const TONE_MAP = {
   gold:     { bg: 'rgba(255, 210, 48, 0.10)', color: 'rgba(255, 230, 130, 0.98)', iconColor: 'rgba(255, 210, 48, 0.85)' },
 };
 
-const MemoryChip = memo(function MemoryChip({ segments = [], onClick, onRemove, tooltip }) {
+/** 极小号闪电图标 — 用于标记"来自快捷预设" */
+const BoltIcon = () => (
+  <svg width="9" height="11" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true" style={{ flexShrink: 0 }}>
+    <path d="M6 0L0 7h3l-1 5 6-7H5l1-5z" />
+  </svg>
+);
+
+const MemoryChip = memo(function MemoryChip({ segments = [], onClick, onRemove, tooltip, presetTooltip = '来自快捷预设' }) {
   if (!segments.length) return null;
 
-  return (
+  const hasPreset = segments.some(s => s.isPreset);
+
+  const chipBody = (
     <HStack
       as="div"
       spacing={0}
@@ -38,7 +48,7 @@ const MemoryChip = memo(function MemoryChip({ segments = [], onClick, onRemove, 
       borderRadius="8px"
       cursor={onClick ? 'pointer' : 'default'}
       transition="all 0.18s cubic-bezier(0.4, 0, 0.2, 1)"
-      title={tooltip}
+      title={hasPreset ? undefined : tooltip}
       _hover={{
         bg: 'rgba(255, 210, 48, 0.06)',
         borderColor: 'rgba(255, 210, 48, 0.35)',
@@ -69,6 +79,17 @@ const MemoryChip = memo(function MemoryChip({ segments = [], onClick, onRemove, 
               bg={tone.bg}
               flexShrink={0}
             >
+              {seg.isPreset && (
+                <Box
+                  color="rgba(255, 210, 48, 0.95)"
+                  display="flex"
+                  alignItems="center"
+                  aria-label="preset"
+                  sx={{ filter: 'drop-shadow(0 0 2px rgba(255,210,48,0.45))' }}
+                >
+                  <BoltIcon />
+                </Box>
+              )}
               {seg.icon && (
                 <Box color={tone.iconColor} display="flex" alignItems="center" fontSize="11px">
                   {seg.icon}
@@ -133,6 +154,24 @@ const MemoryChip = memo(function MemoryChip({ segments = [], onClick, onRemove, 
       )}
     </HStack>
   );
+
+  if (hasPreset) {
+    return (
+      <Tooltip
+        label={presetTooltip}
+        placement="top"
+        fontSize="11px"
+        hasArrow
+        openDelay={300}
+        bg="gray.800"
+        color="whiteAlpha.900"
+      >
+        {chipBody}
+      </Tooltip>
+    );
+  }
+
+  return chipBody;
 });
 
 export default MemoryChip;

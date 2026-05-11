@@ -77,13 +77,22 @@ const QuickTags = memo(function QuickTags({
             borderRadius="6px"
             opacity={excluded ? 0.55 : 1}
             textDecoration={excluded ? 'line-through' : 'none'}
+            boxShadow={
+              selected
+                ? 'inset 0 0 0 1px rgba(255,210,48,0.45), inset 0 1px 8px rgba(255,210,48,0.18)'
+                : 'none'
+            }
             _hover={{
               bg: selected ? 'rgba(255, 210, 48, 0.3)'
                 : excluded ? 'rgba(255, 175, 175, 0.12)'
                 : 'whiteAlpha.200',
               borderColor: selected ? 'rgba(255, 210, 48, 0.7)'
                 : excluded ? 'rgba(255, 175, 175, 0.3)'
-                : 'whiteAlpha.300',
+                : 'rgba(123,200,255,0.45)',
+              boxShadow: selected
+                ? 'inset 0 0 0 1px rgba(255,210,48,0.6), inset 0 1px 10px rgba(255,210,48,0.25)'
+                : excluded ? 'none'
+                : 'inset 0 0 0 1px rgba(123,200,255,0.25)',
               opacity: 1,
             }}
             transition="all 0.15s ease"

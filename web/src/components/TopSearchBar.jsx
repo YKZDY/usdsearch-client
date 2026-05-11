@@ -140,9 +140,14 @@ function TopSearchBar({ style }) {
 
   const handleClear = useCallback(() => {
     setQuery('');
+    setShowHistory(false);
+    setHistoryIndex(-1);
     window.dispatchEvent(new CustomEvent('top-search-query-changed', {
       detail: { query: '' }
     }));
+    // 与"清除图片"对齐：清空后自动触发一次搜索回到浏览模式，
+    // 让结果列表 / 标题 / URL ?q= 同步重置（修复"点击 × 后页面无反应"）
+    setTimeout(() => window.dispatchEvent(new Event('trigger-search')), 0);
   }, []);
 
   const handleChange = useCallback((e) => {

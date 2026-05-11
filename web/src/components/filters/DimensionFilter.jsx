@@ -1,8 +1,10 @@
-import React, { memo, useCallback, useMemo } from 'react';
-import { VStack, HStack, Text, Input, Switch, FormControl, FormLabel, Box, Wrap, WrapItem, Tag, TagLabel } from '@chakra-ui/react';
+import React, { memo, useCallback, useMemo, useRef, useEffect } from 'react';
+import { VStack, HStack, Text, Input, Switch, FormControl, FormLabel, Box, Wrap, WrapItem } from '@chakra-ui/react';
 import FilterPopoverButton from './FilterPopoverButton';
+import QuickTags from '../shared/QuickTags';
 import MemoryChip from './MemoryChip';
 import { useFilterMemory } from '../../hooks/useFilterMemory';
+import { useLocalFilterState } from '../shared/useLocalFilterState';
 
 /** 立方体（尺寸）图标 */
 const CubeIcon = () => (
@@ -41,15 +43,23 @@ const DIMENSION_PRESETS = [
   { label: '全部', min: '', max: '' },
 ];
 
+/** 格式化尺寸记忆标签 */
+function formatDimLabel(min, max) {
+  if (min && max) return `${min}-${max}m`;
+  if (min) return `>${min}m`;
+  if (max) return `<${max}m`;
+  return '';
+}
+
 /**
  * DimensionFilter - 对象尺寸筛选面板（仿 Fab 原版 + 快捷预设）
- * 
+ *
  * 参数：
  * - bbox_use_scaled_dimensions: 使用缩放尺寸（包括缩放、旋转）
  * - min_bbox_x / max_bbox_x: X 尺寸范围
  * - min_bbox_y / max_bbox_y: Y 尺寸范围
  * - min_bbox_z / max_bbox_z: Z 尺寸范围
- * 
+ *
  * 快捷预设同时设置三轴的 min/max
  * 单位：米（m）—— 与后端 USD 场景 metersPerUnit 一致
  * 支持键盘 ↑↓ ±0.1m 步进，←→ ±1m 步进（输入框 focus 时）
@@ -63,6 +73,38 @@ const DimensionFilter = memo(function DimensionFilter({
   // 记忆功能
   const { memories: dimMemories, addMemory: addDimMemory, removeMemory: removeDimMemory } = useFilterMemory('dimension');
 
+  // 用 ref 保证即时存记忆时能拿到最新 searchParams
+  const searchParamsRef = useRef(searchParams);
+  useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
+
+  // onCommit：把 local 的 6 个 bbox 值写入 searchParams 并触发搜索
+  const onCommit = useCallback((changed) => {
+    Object.entries(changed).forEach(([key, val]) => handleChange(key, val));
+    onTriggerSearch?.();
+  }, [handleChange, onTriggerSearch]);
+
+  const { localValues, setLocalValue, commit, commitIfDirty } = useLocalFilterState(
+    searchParams, ALL_KEYS, onCommit
+  );
+
+  /**
+   * 保存尺寸记忆（core = {min, max}，代表 X/Y/Z 共用的范围）
+   * - 先按 core 去重，再 addMemory(withFromPreset)
+   * - 标签为空则不存
+   */
+  const saveDimMemory = useCallback((min, max, fromPreset) => {
+    const minStr = String(min ?? '').trim();
+    const maxStr = String(max ?? '').trim();
+    if (!minStr && !maxStr) return;
+    const core = { min: minStr, max: maxStr };
+    const label = formatDimLabel(minStr, maxStr);
+    if (!label) return;
+    removeDimMemory({ ...core, fromPreset: true });
+    removeDimMemory({ ...core, fromPreset: false });
+    removeDimMemory(core); // 兼容老数据
+    addDimMemory(label, { ...core, fromPreset: !!fromPreset });
+  }, [addDimMemory, removeDimMemory]);
+
   const isActive = useMemo(() => {
     return ALL_KEYS.some(k => String(searchParams?.[k] ?? '').trim() !== '');
   }, [searchParams]);
@@ -72,68 +114,85 @@ const DimensionFilter = memo(function DimensionFilter({
   }, [isActive]);
 
   const handleReset = useCallback(() => {
-    ALL_KEYS.forEach(key => handleChange(key, ''));
+    ALL_KEYS.forEach(key => {
+      handleChange(key, '');
+      setLocalValue(key, '');
+    });
     handleChange('bbox_use_scaled_dimensions', true);
     onTriggerSearch?.();
-  }, [handleChange, onTriggerSearch]);
+  }, [handleChange, onTriggerSearch, setLocalValue]);
 
   const handleScaledToggle = useCallback((e) => {
     handleChange('bbox_use_scaled_dimensions', e.target.checked);
   }, [handleChange]);
 
-  // 快捷预设：同时设置三轴（支持取消）
-  const handlePreset = useCallback((preset) => {
-    // 如果已选中同一个预设，再点取消
-    const minX = String(searchParams?.min_bbox_x ?? '').trim();
-    const maxX = String(searchParams?.max_bbox_x ?? '').trim();
-    if (preset.min === minX && preset.max === maxX) {
-      ALL_KEYS.forEach(key => handleChange(key, ''));
-    } else {
-      ['x', 'y', 'z'].forEach(axis => {
-        handleChange(`min_bbox_${axis}`, preset.min);
-        handleChange(`max_bbox_${axis}`, preset.max);
-      });
-    }
-    onTriggerSearch?.();
-  }, [handleChange, onTriggerSearch, searchParams]);
-
-  // 点击记忆 tag
-  const handleMemoryTag = useCallback((memValue) => {
-    ['x', 'y', 'z'].forEach(axis => {
-      handleChange(`min_bbox_${axis}`, memValue.min);
-      handleChange(`max_bbox_${axis}`, memValue.max);
-    });
-    onTriggerSearch?.();
-  }, [handleChange, onTriggerSearch]);
-
-  // onClose 时存记忆（如果是自定义值且非预设）—— 不再触发搜索（搜索已在 handlePreset/handleMemoryTag/handleReset 等具体操作中触发过）
-  // 这是修复「连点筛选 button 莫名搜索」bug 的关键：handleClose 不应无条件调 onTriggerSearch
-  const handleClose = useCallback(() => {
-    const minX = String(searchParams?.min_bbox_x ?? '').trim();
-    const maxX = String(searchParams?.max_bbox_x ?? '').trim();
-    if (minX || maxX) {
-      const isPreset = DIMENSION_PRESETS.some(p => p.min === minX && p.max === maxX);
-      if (!isPreset) {
-        const label = `${minX || '0'}-${maxX || '∞'}m`;
-        addDimMemory(label, { min: minX, max: maxX });
-      }
-    }
-  }, [searchParams, addDimMemory]);
-
-  // Input onChange 适配器（事件对象 → key, val）
-  const handleInputChange = useCallback((e) => {
-    const { name, value } = e.target;
-    handleChange(name, value);
-  }, [handleChange]);
-
-  // 判断当前匹配哪个预设
+  // 判断当前匹配哪个预设（用于高亮 + toggle 判断）
   const activePreset = useMemo(() => {
     const minX = String(searchParams?.min_bbox_x ?? '').trim();
     const maxX = String(searchParams?.max_bbox_x ?? '').trim();
     return DIMENSION_PRESETS.find(p => p.min === minX && p.max === maxX) || null;
   }, [searchParams]);
 
-  // 键盘步进 handler（数值输入框，单位 m）
+  // 快捷预设：同时设置三轴（支持取消 + 即时存记忆）
+  const handlePreset = useCallback((presetLabel) => {
+    const preset = DIMENSION_PRESETS.find(p => p.label === presetLabel);
+    if (!preset) return;
+    const isToggleOff = activePreset && activePreset.label === preset.label;
+    if (isToggleOff) {
+      ALL_KEYS.forEach(key => {
+        handleChange(key, '');
+        setLocalValue(key, '');
+      });
+    } else {
+      ['x', 'y', 'z'].forEach(axis => {
+        handleChange(`min_bbox_${axis}`, preset.min);
+        handleChange(`max_bbox_${axis}`, preset.max);
+        setLocalValue(`min_bbox_${axis}`, preset.min);
+        setLocalValue(`max_bbox_${axis}`, preset.max);
+      });
+      // 即时存记忆（排除"全部"这种空值预设）
+      if (preset.min || preset.max) {
+        saveDimMemory(preset.min, preset.max, true);
+      }
+    }
+    onTriggerSearch?.();
+  }, [handleChange, onTriggerSearch, setLocalValue, activePreset, saveDimMemory]);
+
+  // 点击记忆 tag（兼容老数据：mem.value 为 {min, max}）
+  const handleMemoryTag = useCallback((memValue) => {
+    const min = memValue?.min ?? '';
+    const max = memValue?.max ?? '';
+    ['x', 'y', 'z'].forEach(axis => {
+      handleChange(`min_bbox_${axis}`, min);
+      handleChange(`max_bbox_${axis}`, max);
+      setLocalValue(`min_bbox_${axis}`, min);
+      setLocalValue(`max_bbox_${axis}`, max);
+    });
+    onTriggerSearch?.();
+  }, [handleChange, onTriggerSearch, setLocalValue]);
+
+  // onClose：先 commitIfDirty 提交未保存的步进编辑，再兜底存"自定义"记忆
+  const handleClose = useCallback(() => {
+    commitIfDirty();
+    const latest = searchParamsRef.current;
+    const minX = String(latest?.min_bbox_x ?? '').trim();
+    const maxX = String(latest?.max_bbox_x ?? '').trim();
+    if (minX || maxX) {
+      const isPreset = DIMENSION_PRESETS.some(p => p.min === minX && p.max === maxX);
+      // 仅自定义值才在 close 时兜底（预设已在 handlePreset 中即时存过）
+      if (!isPreset) {
+        saveDimMemory(minX, maxX, false);
+      }
+    }
+  }, [commitIfDirty, saveDimMemory]);
+
+  // Input onChange 适配器（事件对象 → key, val），写到 local 状态，commit 时才提交
+  const handleInputChange = useCallback((e) => {
+    const { name, value } = e.target;
+    setLocalValue(name, value);
+  }, [setLocalValue]);
+
+  // 键盘步进 handler（数值输入框，单位 m）；写 local 状态，由 commit（失焦或 Enter）触发搜索
   const handleKeyDown = useCallback((e) => {
     const input = e.target;
     const name = input.name;
@@ -144,12 +203,19 @@ const DimensionFilter = memo(function DimensionFilter({
     else if (e.key === 'ArrowDown') { step = -0.1; e.preventDefault(); }
     else if (e.key === 'ArrowRight' && input.selectionStart === String(input.value).length) { step = 1; e.preventDefault(); }
     else if (e.key === 'ArrowLeft' && input.selectionStart === 0) { step = -1; e.preventDefault(); }
+    else if (e.key === 'Enter') { commit(); return; }
 
     if (step !== 0) {
       const newVal = Math.max(0, Math.round((currentVal + step) * 100) / 100);
-      handleChange(name, String(newVal));
+      setLocalValue(name, String(newVal));
     }
-  }, [handleChange]);
+  }, [setLocalValue, commit]);
+
+  // 预设按钮 tags（传给 QuickTags；用 label 作为 value 以便 QuickTags 做单选比对）
+  const presetTags = useMemo(
+    () => DIMENSION_PRESETS.map(p => ({ label: p.label, value: p.label })),
+    []
+  );
 
   return (
     <FilterPopoverButton
@@ -180,59 +246,48 @@ const DimensionFilter = memo(function DimensionFilter({
           </Text>
         </FormControl>
 
-        {/* 快捷预设档位 */}
+        {/* 快捷预设档位 —— 复用 QuickTags 组件，视觉与其他面板统一（32-34px, 加粗字号, 黄色高亮） */}
         <Box>
           <Text fontSize="xs" color="whiteAlpha.600" fontWeight="500" mb={2}>
             快捷预设
           </Text>
-          <Wrap spacing={2}>
-            {DIMENSION_PRESETS.map((preset) => {
-              const isSelected = activePreset === preset;
-              return (
-                <WrapItem key={preset.label}>
-                  <Tag
-                    size="md"
-                    variant={isSelected ? 'solid' : 'subtle'}
-                    bg={isSelected ? 'rgba(255, 210, 48, 0.2)' : 'whiteAlpha.100'}
-                    color={isSelected ? '#FFD230' : 'whiteAlpha.800'}
-                    border={isSelected ? '1px solid rgba(255, 210, 48, 0.5)' : '1px solid transparent'}
-                    borderRadius="full"
-                    cursor="pointer"
-                    px={3}
-                    py={1}
-                    _hover={{ bg: isSelected ? 'rgba(255, 210, 48, 0.3)' : 'whiteAlpha.200' }}
-                    transition="all 0.15s ease"
-                    onClick={() => handlePreset(preset)}
-                    userSelect="none"
-                  >
-                    <TagLabel fontSize="12px">{preset.label}</TagLabel>
-                  </Tag>
-                </WrapItem>
-              );
-            })}
-          </Wrap>
+          <QuickTags
+            tags={presetTags}
+            selectedValue={activePreset?.label ?? null}
+            onSelect={handlePreset}
+          />
         </Box>
 
-        {/* 记忆的自定义尺寸 */}
+        {/* 记忆的自定义尺寸 —— 紧贴快捷预设下方 */}
         {dimMemories.length > 0 && (
           <Box>
             <Text fontSize="12px" color="whiteAlpha.600" fontWeight="500" letterSpacing="0.02em" mb={2.5}>
               {t?.('dimensionRecentMemory') || t?.('recentCustom') || '最近尺寸组合'}
             </Text>
             <Wrap spacing={2}>
-              {dimMemories.map((mem, idx) => (
-                <WrapItem key={idx}>
-                  <MemoryChip
-                    segments={[{
-                      icon: <CubeIcon />,
-                      label: mem.label,
-                      tone: 'gold',
-                    }]}
-                    onClick={() => handleMemoryTag(mem.value)}
-                    onRemove={() => removeDimMemory(mem.value)}
-                  />
-                </WrapItem>
-              ))}
+              {dimMemories.map((mem, idx) => {
+                const memMin = String(mem.value?.min ?? '').trim();
+                const memMax = String(mem.value?.max ?? '').trim();
+                const curMin = String(searchParams?.min_bbox_x ?? '').trim();
+                const curMax = String(searchParams?.max_bbox_x ?? '').trim();
+                const isMemSelected = memMin === curMin && memMax === curMax && (memMin || memMax);
+                const isPreset = !!(mem.value && typeof mem.value === 'object' && mem.value.fromPreset);
+                return (
+                  <WrapItem key={idx}>
+                    <MemoryChip
+                      segments={[{
+                        icon: <CubeIcon />,
+                        label: mem.label,
+                        tone: isMemSelected ? 'gold' : 'neutral',
+                        isPreset,
+                      }]}
+                      presetTooltip={t?.('memoryFromPreset') || '来自快捷预设'}
+                      onClick={() => handleMemoryTag(mem.value)}
+                      onRemove={() => removeDimMemory(mem.value)}
+                    />
+                  </WrapItem>
+                );
+              })}
             </Wrap>
           </Box>
         )}
@@ -249,9 +304,10 @@ const DimensionFilter = memo(function DimensionFilter({
               step="0.1"
               min="0"
               name="min_bbox_x"
-              value={searchParams.min_bbox_x || ''}
+              value={localValues.min_bbox_x || ''}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onBlur={commit}
               placeholder="最小 X (m)"
               sx={inputSx}
             />
@@ -262,9 +318,10 @@ const DimensionFilter = memo(function DimensionFilter({
               step="0.1"
               min="0"
               name="max_bbox_x"
-              value={searchParams.max_bbox_x || ''}
+              value={localValues.max_bbox_x || ''}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onBlur={commit}
               placeholder="最大 X (m)"
               sx={inputSx}
             />
@@ -283,9 +340,10 @@ const DimensionFilter = memo(function DimensionFilter({
               step="0.1"
               min="0"
               name="min_bbox_y"
-              value={searchParams.min_bbox_y || ''}
+              value={localValues.min_bbox_y || ''}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onBlur={commit}
               placeholder="最小 Y (m)"
               sx={inputSx}
             />
@@ -296,9 +354,10 @@ const DimensionFilter = memo(function DimensionFilter({
               step="0.1"
               min="0"
               name="max_bbox_y"
-              value={searchParams.max_bbox_y || ''}
+              value={localValues.max_bbox_y || ''}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onBlur={commit}
               placeholder="最大 Y (m)"
               sx={inputSx}
             />
@@ -317,9 +376,10 @@ const DimensionFilter = memo(function DimensionFilter({
               step="0.1"
               min="0"
               name="min_bbox_z"
-              value={searchParams.min_bbox_z || ''}
+              value={localValues.min_bbox_z || ''}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onBlur={commit}
               placeholder="最小 Z (m)"
               sx={inputSx}
             />
@@ -330,9 +390,10 @@ const DimensionFilter = memo(function DimensionFilter({
               step="0.1"
               min="0"
               name="max_bbox_z"
-              value={searchParams.max_bbox_z || ''}
+              value={localValues.max_bbox_z || ''}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onBlur={commit}
               placeholder="最大 Z (m)"
               sx={inputSx}
             />

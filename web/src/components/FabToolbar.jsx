@@ -45,6 +45,7 @@ import FormatFilter from './filters/FormatFilter';
 import TagsFilter from './filters/TagsFilter';
 import UserFilter from './filters/UserFilter';
 import PathFilter from './filters/PathFilter';
+import { FilterGroupProvider } from './filters/FilterGroupContext';
 // === END LM CUSTOMIZATION ===
 
 /** Fab 实测的 Popover 面板样式 */
@@ -240,6 +241,9 @@ function FabToolbar({
       </Box>
 
       <HStack spacing={2} flexWrap="wrap" align="center">
+        {/* FilterGroupProvider：让 8 个 FilterPopoverButton 互斥打开（同一时刻只开一个）；
+            右侧排序 / 设置是独立 Popover（不消费此 context），所以放在 Provider 内也不会受影响 */}
+        <FilterGroupProvider>
 
         {/* ── 1. 格式 ── */}
         <FormatFilter
@@ -494,6 +498,7 @@ function FabToolbar({
             </PopoverContent>
           </Popover>
         </HStack>
+        </FilterGroupProvider>
       </HStack>
 
       {/* ── 已选条件 Chips 条（结构化筛选 + 用户手动标签；搜索词与分类已下放到 ResultsTitleBar 展示） ── */}

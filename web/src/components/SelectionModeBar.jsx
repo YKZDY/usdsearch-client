@@ -1,9 +1,41 @@
-import React from 'react';
+import React, { useSyncExternalStore, useCallback } from 'react';
 import {
-  HStack, Button, Text, Badge, IconButton, Tooltip, Box, VStack,
+  HStack, Button, Text, Badge, IconButton, Tooltip, Box, VStack, Kbd,
   Popover, PopoverTrigger, PopoverContent, PopoverBody, PopoverArrow, PopoverHeader,
 } from '@chakra-ui/react';
 import { CloseIcon, CopyIcon, CheckIcon } from '@chakra-ui/icons';
+
+/**
+ * useMinWidth —— 同步求值的 matchMedia hook
+ *
+ * 替代 Chakra 的 useBreakpointValue：
+ * - useBreakpointValue 首帧会返回 undefined/fallback，导致 showHints "慢半拍闪入"
+ * - 本 hook 用 useSyncExternalStore + matchMedia，首次渲染就有正确值，无闪烁
+ * - SSR 安全（typeof window 检查）
+ *
+ * @param {string} query - CSS 媒体查询串，例如 '(min-width: 62em)'
+ * @returns {boolean} 当前是否匹配
+ */
+const useMediaQuery = (query) => {
+  const subscribe = useCallback((onChange) => {
+    if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+    const mql = window.matchMedia(query);
+    // Safari 旧版用 addListener / removeListener
+    if (mql.addEventListener) {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
+  }, [query]);
+  const getSnapshot = useCallback(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return true;
+    return window.matchMedia(query).matches;
+  }, [query]);
+  // SSR fallback：默认 true（宽屏），避免首帧窄屏误判
+  const getServerSnapshot = () => true;
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+};
 
 /**
  * 多选模式状态栏
@@ -16,9 +48,11 @@ import { CloseIcon, CopyIcon, CheckIcon } from '@chakra-ui/icons';
  */
 const SelectionModeBar = React.memo(({
   selectedCount,
+  totalCount = 0,                  // 当前结果总数，用于判断是否已全选
   onCopySelectedUrls,
   onSelectAll,
-  onClearSelection,
+  onDeselectAll,                   // 取消全选（仅清空，保持多选模式）；未传则回退到 onClearSelection
+  onClearSelection,                // 退出多选（清空 + 退出）
   t,
   // V2 新增
   onBatchTag,
@@ -33,6 +67,12 @@ const SelectionModeBar = React.memo(({
   const total = batchProgress?.total ?? 0;
   const failedCount = batchProgress?.failedCount ?? 0;
   const progressPct = total > 0 ? Math.min(100, (current / total) * 100) : 0;
+  // 是否"已全选"：当前选中数量 >= 当前结果总数且非零，用于把"全选"按钮切成"取消全选"
+  const isAllSelected = totalCount > 0 && selectedCount >= totalCount;
+  // 交互提示：在窄屏（<lg ≈ 62em）或执行中隐藏，避免拥挤换行
+  // 用 matchMedia 同步求值，首帧即正确，消除 hint 文案闪烁
+  const isWide = useMediaQuery('(min-width: 62em)');
+  const showHints = isWide && !inProgress;
 
   return (
     <Box position="relative" w="100%">
@@ -64,6 +104,33 @@ const SelectionModeBar = React.memo(({
           <Text fontSize="sm" color="gray.200" fontWeight="medium">
             {(t?.('itemsSelected', { count: selectedCount })) || `已选中 ${selectedCount} 个资产`}
           </Text>
+
+          {/* 交互说明小字：告知用户单击/双击/Esc 三个快捷操作（宽屏+非执行中才显示） */}
+          {showHints && (
+            <HStack spacing={2} color="gray.400" fontSize="xs">
+              <Text opacity={0.75}>·</Text>
+              <Text>{t?.('hintClickToggle') || '单击切换选中'}</Text>
+              <Text opacity={0.5}>·</Text>
+              <Text>{t?.('hintDblClickDetails') || '双击查看详情'}</Text>
+              <Text opacity={0.5}>·</Text>
+              <HStack spacing={1}>
+                <Kbd
+                  fontSize="10px"
+                  bg="rgba(255,255,255,0.08)"
+                  color="gray.300"
+                  borderColor="rgba(255,255,255,0.15)"
+                  boxShadow="0 1px 0 rgba(255,255,255,0.08) inset, 0 1px 2px rgba(0,0,0,0.4)"
+                  px={1.5}
+                  py={0}
+                  lineHeight="1.4"
+                >
+                  Esc
+                </Kbd>
+                <Text>{t?.('hintEscExit') || '退出'}</Text>
+              </HStack>
+            </HStack>
+          )}
+
 
           {/* 执行中：进度文字 + 当前 item Tooltip（E1+） */}
           {inProgress && (
@@ -149,13 +216,18 @@ const SelectionModeBar = React.memo(({
 
         <HStack spacing={3}>
           {onSelectAll && !inProgress && (
-            <Tooltip label={t?.('selectAll') || '全选'}>
+            <Tooltip label={isAllSelected
+              ? (t?.('deselectAll') || '取消全选')
+              : (t?.('selectAll') || '全选')}>
               <IconButton
                 size="sm"
                 variant="ghost"
-                icon={<CheckIcon />}
-                onClick={onSelectAll}
-                aria-label={t?.('selectAll') || '全选'}
+                icon={isAllSelected ? <CloseIcon boxSize={2.5} /> : <CheckIcon />}
+                onClick={isAllSelected ? (onDeselectAll || onClearSelection) : onSelectAll}
+                aria-label={isAllSelected
+                  ? (t?.('deselectAll') || '取消全选')
+                  : (t?.('selectAll') || '全选')}
+                aria-pressed={isAllSelected}
                 colorScheme="yellow"
               />
             </Tooltip>

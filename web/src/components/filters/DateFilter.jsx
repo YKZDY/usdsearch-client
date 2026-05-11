@@ -1,8 +1,10 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { VStack, HStack, Text, Input, Divider, Wrap, WrapItem, Tag, TagLabel, TagCloseButton, Button, Box } from '@chakra-ui/react';
+import { VStack, HStack, Text, Divider, Wrap, WrapItem, Button, Box } from '@chakra-ui/react';
 import { ChevronDownIcon, ChevronUpIcon } from '@chakra-ui/icons';
 import FilterPopoverButton from './FilterPopoverButton';
 import QuickTags from '../shared/QuickTags';
+import DateRangeField from '../shared/DateRangeField';
+import MemoryDateChip from '../shared/MemoryDateChip';
 import { useLocalFilterState } from '../shared/useLocalFilterState';
 import { useFilterMemory } from '../../hooks/useFilterMemory';
 
@@ -27,16 +29,6 @@ const DATE_QUICK_TAGS = [
   { label: '过去1年', value: { hours: 365 * 24 } },
   { label: '全部', value: { hours: 0 } },
 ];
-
-const inputSx = {
-  bg: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.15)',
-  borderRadius: '8px',
-  _hover: { borderColor: 'whiteAlpha.400' },
-  _focus: { borderColor: 'white', bg: 'rgba(255,255,255,0.08)' },
-  color: 'white',
-  fontSize: '12px',
-};
 
 /**
  * DateFilter - 日期筛选面板
@@ -144,6 +136,16 @@ const DateFilter = memo(function DateFilter({
     return null;
   }, [searchParams]);
 
+  // 判断当前激活的记忆 chip（与 created_after/before 完全匹配）
+  const isMemoryActive = useCallback((mem) => {
+    const a = mem?.value?.after || '';
+    const b = mem?.value?.before || '';
+    return (
+      (searchParams.created_after || '') === a &&
+      (searchParams.created_before || '') === b
+    );
+  }, [searchParams]);
+
   const isActive = DATE_KEYS.some(key => !!searchParams[key]);
   const badgeCount = DATE_KEYS.filter(key => !!searchParams[key]).length;
 
@@ -177,25 +179,13 @@ const DateFilter = memo(function DateFilter({
             <Wrap spacing={2}>
               {dateMemories.map((mem, idx) => (
                 <WrapItem key={idx}>
-                  <Tag
-                    size="sm"
-                    variant="subtle"
-                    bg="rgba(255,255,255,0.05)"
-                    color="whiteAlpha.700"
-                    border="1px dashed rgba(255,255,255,0.2)"
-                    borderRadius="6px"
-                    cursor="pointer"
-                    px={2.5}
-                    py={1}
-                    minH="26px"
-                    _hover={{ bg: 'whiteAlpha.100' }}
-                    transition="all 0.15s ease"
+                  <MemoryDateChip
+                    memory={mem}
+                    isActive={isMemoryActive(mem)}
                     onClick={() => handleMemoryTag(mem.value)}
-                    userSelect="none"
-                  >
-                    <TagLabel fontSize="11px">{mem.label}</TagLabel>
-                    <TagCloseButton onClick={(e) => { e.stopPropagation(); removeDateMemory(mem.value); }} />
-                  </Tag>
+                    onRemove={() => removeDateMemory(mem.value)}
+                    t={t}
+                  />
                 </WrapItem>
               ))}
             </Wrap>
@@ -210,33 +200,18 @@ const DateFilter = memo(function DateFilter({
         </Text>
 
         {/* 创建于（默认显示） */}
-        <HStack spacing={2} align="center">
-          <Text fontSize="xs" color="whiteAlpha.700" minW="50px">
+        <HStack spacing={3} align="center">
+          <Text fontSize="xs" color="whiteAlpha.700" minW="50px" letterSpacing="0.04em">
             {t?.('dateCreatedAt') || '创建于'}
           </Text>
-          <Input
-            type="date"
-            size="sm"
-            value={localValues.created_after || ''}
-            onChange={(e) => setLocalValue('created_after', e.target.value)}
-            onBlur={commit}
-            sx={inputSx}
-          />
-          <Text fontSize="xs" color="whiteAlpha.500">~</Text>
-          <Input
-            type="date"
-            size="sm"
-            value={localValues.created_before || ''}
-            onChange={(e) => setLocalValue('created_before', e.target.value)}
-            onBlur={commit}
-            placeholder={t?.('dateLeaveBlankToNow') || '留空=至今'}
-            sx={inputSx}
+          <DateRangeField
+            startValue={localValues.created_after || ''}
+            endValue={localValues.created_before || ''}
+            onChange={(seg, v) => setLocalValue(seg === 'start' ? 'created_after' : 'created_before', v)}
+            onCommit={commit}
+            t={t}
           />
         </HStack>
-        {/* 末尾留空提示 */}
-        <Text fontSize="12px" color="whiteAlpha.500" letterSpacing="0.02em" mt={-1} ml="58px">
-          {t?.('dateLeaveBlankHint') || '* 末尾留空 = 至今'}
-        </Text>
 
         {/* 高级筛选切换按钮 */}
         <Box>
@@ -259,27 +234,16 @@ const DateFilter = memo(function DateFilter({
 
         {/* 修改于（折叠到高级，默认隐藏） */}
         {showAdvanced && (
-          <HStack spacing={2} align="center">
-            <Text fontSize="xs" color="whiteAlpha.700" minW="50px">
+          <HStack spacing={3} align="center">
+            <Text fontSize="xs" color="whiteAlpha.700" minW="50px" letterSpacing="0.04em">
               {t?.('dateModifiedAt') || '修改于'}
             </Text>
-            <Input
-              type="date"
-              size="sm"
-              value={localValues.modified_after || ''}
-              onChange={(e) => setLocalValue('modified_after', e.target.value)}
-              onBlur={commit}
-              sx={inputSx}
-            />
-            <Text fontSize="xs" color="whiteAlpha.500">~</Text>
-            <Input
-              type="date"
-              size="sm"
-              value={localValues.modified_before || ''}
-              onChange={(e) => setLocalValue('modified_before', e.target.value)}
-              onBlur={commit}
-              placeholder={t?.('dateLeaveBlankToNow') || '留空=至今'}
-              sx={inputSx}
+            <DateRangeField
+              startValue={localValues.modified_after || ''}
+              endValue={localValues.modified_before || ''}
+              onChange={(seg, v) => setLocalValue(seg === 'start' ? 'modified_after' : 'modified_before', v)}
+              onCommit={commit}
+              t={t}
             />
           </HStack>
         )}

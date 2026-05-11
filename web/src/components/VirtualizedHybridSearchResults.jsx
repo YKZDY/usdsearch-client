@@ -57,6 +57,7 @@ import { useTranslation } from "../i18n/LanguageContext";
 import CardSelectCheckbox from "./shared/CardSelectCheckbox";
 import EmptySearchHint from "./EmptySearchHint";
 import { useDragSelect } from "../hooks/useDragSelect";
+import { useClickOrDoubleClick } from "../hooks/useClickOrDoubleClick";
 import TaggedBadge from "./TaggedBadge";
 import FailedBadge from "./FailedBadge";
 
@@ -326,25 +327,22 @@ const VirtualizedResultGridItem = memo(({
     onFindSimilar?.(baseKey);
   }, [onFindSimilar, baseKey]);
 
-  // NEW CARD INTERACTION: Card click behavior depends on mode
+  // NEW CARD INTERACTION: 单击=选中 / 双击=详情（B 方案 + 220ms 双击窗口）
+  const clickHandlers = useClickOrDoubleClick({
+    onClick: (e) => onSelectionChange?.(result, e, index),
+    onDoubleClick: () => onItemClick?.(result),
+    enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+  });
+  // 兼容旧逻辑：非新交互时仍走原 onClick 路径
   const handleCardClick = useCallback((e) => {
     if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
       onSelectionChange?.(result, e, index);
-    } else if (isMultiSelectMode) {
-      onSelectionChange?.(result, e, index);
-    } else {
-      // V2: Shift+Click 直接进入多选（区间选择）
-      if (e?.shiftKey) {
-        onSelectionChange?.(result, e, index);
-      } else {
-        onItemClick?.(result);
-      }
     }
-  }, [isMultiSelectMode, onSelectionChange, onItemClick, result, index]);
+  }, [onSelectionChange, result, index]);
 
   // Tooltip text based on mode
   const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
-    ? (isMultiSelectMode ? t('clickToSelect') : t('clickToViewDetails'))
+    ? t('clickOrDoubleClickHint')
     : '';
 
   // Border color: subtle hint in multi-select mode for unselected cards
@@ -361,13 +359,17 @@ const VirtualizedResultGridItem = memo(({
       boxShadow={isTagHit && !isSelected ? "0 0 16px rgba(255, 210, 48, 0.25)" : undefined}
       _hover={{
         borderColor: "#FFD230",
+        transform: "translateY(-2px)",
         shadow: isTagHit && !isSelected
-          ? "0 0 24px rgba(255,210,48,0.4)"
-          : "0 0 20px rgba(255,210,48,0.08)",
+          ? "0 6px 24px rgba(255,210,48,0.4)"
+          : "0 6px 20px rgba(255,210,48,0.12)",
       }}
-      transition="all 0.25s"
+      transition="transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.1s linear, box-shadow 0.1s linear, background 0.1s linear"
       cursor="pointer"
-      onClick={handleCardClick}
+      onClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onClick : handleCardClick}
+      onDoubleClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onDoubleClick : undefined}
+      onMouseDown={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseDown : undefined}
+      onMouseMove={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseMove : undefined}
       h="100%"
       borderRadius="12px"
       overflow="hidden"
@@ -679,24 +681,21 @@ const VirtualizedResultListItem = memo(({
     onToggle();
   }, [onToggle]);
 
-  // NEW CARD INTERACTION: Card click behavior depends on mode
+  // NEW CARD INTERACTION: 单击=选中 / 双击=详情（B 方案 + 220ms 双击窗口）
+  const clickHandlers = useClickOrDoubleClick({
+    onClick: (e) => onSelectionChange?.(result, e, index),
+    onDoubleClick: () => onItemClick?.(result),
+    enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+  });
   const handleCardClick = useCallback((e) => {
     if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
       onSelectionChange?.(result, e, index);
-    } else if (isMultiSelectMode) {
-      onSelectionChange?.(result, e, index);
-    } else {
-      if (e?.shiftKey) {
-        onSelectionChange?.(result, e, index);
-      } else {
-        onItemClick?.(result);
-      }
     }
-  }, [isMultiSelectMode, onSelectionChange, onItemClick, result, index]);
+  }, [onSelectionChange, result, index]);
 
   // Tooltip text based on mode
   const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
-    ? (isMultiSelectMode ? t('clickToSelect') : t('clickToViewDetails'))
+    ? t('clickOrDoubleClickHint')
     : '';
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
@@ -718,7 +717,10 @@ const VirtualizedResultListItem = memo(({
       }}
       transition="all 0.25s"
       cursor="pointer"
-      onClick={handleCardClick}
+      onClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onClick : handleCardClick}
+      onDoubleClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onDoubleClick : undefined}
+      onMouseDown={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseDown : undefined}
+      onMouseMove={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseMove : undefined}
       borderRadius="12px"
       position="relative"
     >

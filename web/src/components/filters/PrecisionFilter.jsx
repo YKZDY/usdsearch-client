@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useRef, useEffect } from 'react';
 import { VStack, Text, Divider, Box, Wrap, WrapItem } from '@chakra-ui/react';
 import FilterPopoverButton from './FilterPopoverButton';
 import StepperInput from '../shared/StepperInput';
@@ -79,6 +79,30 @@ const PrecisionFilter = memo(function PrecisionFilter({
     removeMemory: removePrecMemory,
   } = useFilterMemory('precision');
 
+  // 用 ref 保证即时存记忆时能拿到最新 searchParams（避免 stale closure）
+  const searchParamsRef = useRef(searchParams);
+  useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
+
+  /**
+   * 保存精度记忆（core = {similarity_threshold, cutoff_threshold}）
+   * - 先按 core 去重（剥离 fromPreset 差异），再 addMemory(withFromPreset)
+   * - 至少有一项非空才存；全空直接跳过
+   */
+  const savePrecMemory = useCallback((sim, cut, fromPreset) => {
+    const simVal = sim === '' || sim === null || sim === undefined ? '' : sim;
+    const cutVal = cut === '' || cut === null || cut === undefined ? '' : cut;
+    if (simVal === '' && cutVal === '') return;
+    const core = { similarity_threshold: simVal, cutoff_threshold: cutVal };
+    // 去重：剥离 fromPreset 后比较
+    removePrecMemory({ ...core, fromPreset: true });
+    removePrecMemory({ ...core, fromPreset: false });
+    removePrecMemory(core); // 兼容老数据（无 fromPreset 字段）
+    const simStr = simVal !== '' ? Number(simVal).toFixed(2) : '默认';
+    const cutStr = cutVal !== '' ? Number(cutVal).toFixed(2) : '默认';
+    const label = `相似 ${simStr} / 截断 ${cutStr}`;
+    addPrecMemory(label, { ...core, fromPreset: !!fromPreset });
+  }, [addPrecMemory, removePrecMemory]);
+
   const onCommit = useCallback((changed) => {
     Object.entries(changed).forEach(([key, val]) => {
       handleChange(key, val);
@@ -107,7 +131,8 @@ const PrecisionFilter = memo(function PrecisionFilter({
   // 快捷 tag 即时生效（再点同一个值 = 恢复默认值=清空 searchParams）
   const handleSimilarityTag = useCallback((val) => {
     const current = Number(searchParams.similarity_threshold);
-    if (current === val) {
+    const isToggleOff = current === val;
+    if (isToggleOff) {
       // 再次点击 → 清空（恢复"使用默认值"语义）
       setLocalValue('similarity_threshold', '');
       handleChange('similarity_threshold', '');
@@ -116,11 +141,17 @@ const PrecisionFilter = memo(function PrecisionFilter({
       handleChange('similarity_threshold', val);
     }
     onTriggerSearch?.();
-  }, [handleChange, onTriggerSearch, setLocalValue, searchParams.similarity_threshold]);
+    // 即时存记忆（除非是"取消选择"）
+    if (!isToggleOff) {
+      const latestCut = searchParamsRef.current.cutoff_threshold;
+      savePrecMemory(val, latestCut, true);
+    }
+  }, [handleChange, onTriggerSearch, setLocalValue, searchParams.similarity_threshold, savePrecMemory]);
 
   const handleCutoffTag = useCallback((val) => {
     const current = Number(searchParams.cutoff_threshold);
-    if (current === val) {
+    const isToggleOff = current === val;
+    if (isToggleOff) {
       setLocalValue('cutoff_threshold', '');
       handleChange('cutoff_threshold', '');
     } else {
@@ -128,7 +159,11 @@ const PrecisionFilter = memo(function PrecisionFilter({
       handleChange('cutoff_threshold', val);
     }
     onTriggerSearch?.();
-  }, [handleChange, onTriggerSearch, setLocalValue, searchParams.cutoff_threshold]);
+    if (!isToggleOff) {
+      const latestSim = searchParamsRef.current.similarity_threshold;
+      savePrecMemory(latestSim, val, true);
+    }
+  }, [handleChange, onTriggerSearch, setLocalValue, searchParams.cutoff_threshold, savePrecMemory]);
 
   const handleReset = useCallback(() => {
     handleChange('similarity_threshold', '');
@@ -139,8 +174,8 @@ const PrecisionFilter = memo(function PrecisionFilter({
 
   // 应用记忆（写入 searchParams + localValues）
   const handleMemoryTag = useCallback((memValue) => {
-    const sim = memValue.similarity_threshold;
-    const cut = memValue.cutoff_threshold;
+    const sim = memValue?.similarity_threshold ?? '';
+    const cut = memValue?.cutoff_threshold ?? '';
     handleChange('similarity_threshold', sim ?? '');
     handleChange('cutoff_threshold', cut ?? '');
     setLocalValue('similarity_threshold', sim ?? '');
@@ -148,30 +183,19 @@ const PrecisionFilter = memo(function PrecisionFilter({
     onTriggerSearch?.();
   }, [handleChange, setLocalValue, onTriggerSearch]);
 
-  // onClose：用 commitIfDirty 严格守卫；提交后若是非快捷值则存记忆
+  // onClose：commitIfDirty 提交任何未保存的步进编辑；只要有任何值就兜底存一次自定义记忆
+  // （即时存储已覆盖"点击快捷 tag"场景；本兜底主要覆盖"在 StepperInput 中手动输入后关闭"）
   const handleClose = useCallback(() => {
-    const dirty = commitIfDirty();
-    // 不论是否 dirty，只要当前 searchParams 是「自定义」就存记忆
-    const sim = searchParams.similarity_threshold;
-    const cut = searchParams.cutoff_threshold;
+    commitIfDirty();
+    const sim = searchParamsRef.current.similarity_threshold;
+    const cut = searchParamsRef.current.cutoff_threshold;
     const simIsCustom = sim !== '' && sim !== null && sim !== undefined && !isInQuickTags(sim, SIMILARITY_TAGS);
     const cutIsCustom = cut !== '' && cut !== null && cut !== undefined && !isInQuickTags(cut, CUTOFF_TAGS);
-    if (dirty || simIsCustom || cutIsCustom) {
-      if (sim || cut) {
-        // 至少一个非空才存
-        const hasCustom = simIsCustom || cutIsCustom;
-        if (hasCustom) {
-          const simStr = sim !== '' && sim !== null && sim !== undefined ? Number(sim).toFixed(2) : '默认';
-          const cutStr = cut !== '' && cut !== null && cut !== undefined ? Number(cut).toFixed(2) : '默认';
-          const label = `相似 ${simStr} / 截断 ${cutStr}`;
-          addPrecMemory(label, {
-            similarity_threshold: sim || '',
-            cutoff_threshold: cut || '',
-          });
-        }
-      }
+    if (simIsCustom || cutIsCustom) {
+      // 仅当含自定义值时兜底存（全预设已在点击时存过）
+      savePrecMemory(sim, cut, false);
     }
-  }, [commitIfDirty, searchParams.similarity_threshold, searchParams.cutoff_threshold, addPrecMemory]);
+  }, [commitIfDirty, savePrecMemory]);
 
   // 判断是否有激活的筛选
   const isActive = !!(searchParams.similarity_threshold || searchParams.cutoff_threshold);
@@ -243,12 +267,14 @@ const PrecisionFilter = memo(function PrecisionFilter({
               {precMemories.map((mem, idx) => {
                 const sim = mem.value?.similarity_threshold;
                 const cut = mem.value?.cutoff_threshold;
+                const isPreset = !!(mem.value && typeof mem.value === 'object' && mem.value.fromPreset);
                 const segs = [];
                 if (sim !== '' && sim !== null && sim !== undefined) {
                   segs.push({
                     icon: <TargetIcon />,
                     label: `${t?.('precisionSimShort') || '相似'} ${Number(sim).toFixed(2)}`,
                     tone: 'gold',
+                    isPreset,
                   });
                 }
                 if (cut !== '' && cut !== null && cut !== undefined) {
@@ -264,6 +290,7 @@ const PrecisionFilter = memo(function PrecisionFilter({
                     <MemoryChip
                       segments={segs}
                       tooltip={mem.label}
+                      presetTooltip={t?.('memoryFromPreset') || '来自快捷预设'}
                       onClick={() => handleMemoryTag(mem.value)}
                       onRemove={() => removePrecMemory(mem.value)}
                     />

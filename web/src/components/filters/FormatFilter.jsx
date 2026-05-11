@@ -147,6 +147,30 @@ const FormatFilter = memo(function FormatFilter({
 }) {
   const { memories: fmtMemories, addMemory: addFmtMemory, removeMemory: removeFmtMemory } = useFilterMemory('format');
 
+  /**
+   * 归一化记忆 value，统一取出 formats 数组（兼容老数据：value 为 string[]）
+   */
+  const extractFormats = useCallback((memValue) => {
+    if (Array.isArray(memValue)) return memValue;
+    if (memValue && Array.isArray(memValue.formats)) return memValue.formats;
+    if (typeof memValue === 'string') return parseExtList(memValue);
+    return [];
+  }, []);
+
+  /**
+   * 保存一组 formats 到记忆；fromPreset 标记是否来自快捷按钮。
+   * 采用"先按 core 去重再新增"：保证同一组合（不论来自预设还是自定义）只占一个槽位。
+   */
+  const saveFmtMemory = useCallback((formats, fromPreset) => {
+    if (!formats || formats.length === 0) return;
+    // 去重（忽略 fromPreset 差异）
+    removeFmtMemory({ formats, fromPreset: true });
+    removeFmtMemory({ formats, fromPreset: false });
+    removeFmtMemory(formats); // 兼容老数据
+    const label = formats.join(', ');
+    addFmtMemory(label, { formats, fromPreset: !!fromPreset });
+  }, [addFmtMemory, removeFmtMemory]);
+
   // 两个折叠区：默认都闭合（除非已有非默认值）
   const [showExcludeSection, setShowExcludeSection] = useState(false);
   const [showExcludeFileName, setShowExcludeFileName] = useState(() => !!searchParams.exclude_file_name);
@@ -180,8 +204,14 @@ const FormatFilter = memo(function FormatFilter({
     const current = parseExtList(searchParams.file_extension_include);
     const next = current.includes(ext) ? current.filter(e => e !== ext) : [...current, ext];
     handleChange('file_extension_include', next.join(', '));
+    // 即时存记忆：点击快捷扩展名时，把"点击后的完整组合"作为一条预设记忆
+    // - 点击使该项从无到有（加入）→ 存新组合
+    // - 点击使该项从有到无（取消）→ 若还有剩余项，存剩余组合；否则不存
+    if (next.length > 0) {
+      saveFmtMemory(next, true);
+    }
     onTriggerSearch?.();
-  }, [searchParams, handleChange, onTriggerSearch]);
+  }, [searchParams, handleChange, onTriggerSearch, saveFmtMemory]);
 
   const handleRemoveExclude = useCallback((ext) => {
     const next = excludedFormats.filter(e => e !== ext);
@@ -214,18 +244,21 @@ const FormatFilter = memo(function FormatFilter({
 
   const handleClose = useCallback(() => {
     commitIfDirty();
-    if (selectedFormats.length >= 2) {
-      const isSinglePreset = selectedFormats.length === 1 && ALL_QUICK_VALUES.includes(selectedFormats[0]);
-      if (!isSinglePreset) {
-        addFmtMemory(selectedFormats.join(', '), selectedFormats);
-      }
+    // 兜底：如果当前 include 有值，判断是否全部命中快捷预设——
+    //   全部命中预设 → 可能已在 handleFormatTag 中存过（幂等，无副作用）
+    //   存在非预设项 → 作为"自定义组合"存入记忆
+    if (selectedFormats.length > 0) {
+      const allPreset = selectedFormats.every(ext => ALL_QUICK_VALUES.includes(ext));
+      saveFmtMemory(selectedFormats, allPreset);
     }
-  }, [commitIfDirty, selectedFormats, addFmtMemory]);
+  }, [commitIfDirty, selectedFormats, saveFmtMemory]);
 
-  const handleMemoryTag = useCallback((formats) => {
+  const handleMemoryTag = useCallback((memValue) => {
+    const formats = extractFormats(memValue);
+    if (formats.length === 0) return;
     handleChange('file_extension_include', formats.join(', '));
     onTriggerSearch?.();
-  }, [handleChange, onTriggerSearch]);
+  }, [handleChange, onTriggerSearch, extractFormats]);
 
   const handleReset = useCallback(() => {
     FORMAT_KEYS.forEach(key => handleChange(key, ''));
@@ -356,18 +389,20 @@ const FormatFilter = memo(function FormatFilter({
             </Text>
             <Wrap spacing={1.5}>
               {fmtMemories.map((mem, idx) => {
-                const formats = Array.isArray(mem.value) ? mem.value : parseExtList(mem.value);
+                const formats = extractFormats(mem.value);
                 if (formats.length === 0) return null;
                 const moreSuffix = t?.('memoryMoreSuffix') || '项';
                 const visibleCount = 3;
                 const labelText = formats.slice(0, visibleCount).join(' · ');
                 const badge = formats.length > visibleCount ? `+${formats.length - visibleCount} ${moreSuffix}` : undefined;
+                const isPreset = !!(mem.value && typeof mem.value === 'object' && !Array.isArray(mem.value) && mem.value.fromPreset);
                 return (
                   <WrapItem key={idx}>
                     <MemoryChip
-                      segments={[{ icon: <FileIcon />, label: labelText, tone: 'positive', badge }]}
+                      segments={[{ icon: <FileIcon />, label: labelText, tone: 'positive', badge, isPreset }]}
                       tooltip={formats.join(' · ')}
-                      onClick={() => handleMemoryTag(formats)}
+                      presetTooltip={t?.('memoryFromPreset') || '来自快捷预设'}
+                      onClick={() => handleMemoryTag(mem.value)}
                       onRemove={() => removeFmtMemory(mem.value)}
                     />
                   </WrapItem>
