@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, { useMemo, useCallback, memo } from "react";
+import React, { useMemo, useCallback, memo, useRef } from "react";
 import {
   Box,
   VStack,
@@ -51,8 +51,14 @@ import VirtualizedResults from "./VirtualizedResults";
 import SearchExplanations from "../SearchExplanations";
 import NavigableAssetImage from "./NavigableAssetImage";
 import { useSmartImageLoader } from "../hooks/useSmartImageLoader";
-import { formatFileSize, formatDate } from "../utils/formatUtils";
-import { SEARCH_DEFAULTS } from "../config";
+import { formatFileSize } from "../utils/formatUtils";
+import { SEARCH_DEFAULTS, FEATURE_FLAGS } from "../config";
+import { useTranslation } from "../i18n/LanguageContext";
+import CardSelectCheckbox from "./shared/CardSelectCheckbox";
+import EmptySearchHint from "./EmptySearchHint";
+import { useDragSelect } from "../hooks/useDragSelect";
+import TaggedBadge from "./TaggedBadge";
+import FailedBadge from "./FailedBadge";
 
 // Memoized components for better performance
 const HighlightedText = memo(({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
@@ -284,14 +290,27 @@ const VirtualizedResultGridItem = memo(({
   searchQuery = "",
   getHeaders,
   apiUrl,
-  isSelected = false
+  isSelected = false,
+  isMultiSelectMode = false,
+  failedReason = null,
+  onRetryFailed,
 }) => {
+  const { t } = useTranslation();
   const baseKey = result.source?.base_key || result.source?.url || result.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
-  const handleToggleSelect = useCallback(() => {
-    onSelectionChange?.(result);
-  }, [onSelectionChange, result]);
+  // V2 Q1-A: 识别 tag 命中
+  const isTagHit = useMemo(() => {
+    const explanations = result.metadata?.explanations || [];
+    return explanations.some(exp =>
+      Array.isArray(exp?.matched_terms) &&
+      exp.matched_terms.some(term => typeof term === 'string' && term.includes('tags.tag'))
+    );
+  }, [result.metadata?.explanations]);
+
+  const handleToggleSelect = useCallback((e) => {
+    onSelectionChange?.(result, e, index);
+  }, [onSelectionChange, result, index]);
 
   const handleViewDetails = useCallback(() => {
     onItemClick?.(result);
@@ -307,60 +326,183 @@ const VirtualizedResultGridItem = memo(({
     onFindSimilar?.(baseKey);
   }, [onFindSimilar, baseKey]);
 
+  // NEW CARD INTERACTION: Card click behavior depends on mode
+  const handleCardClick = useCallback((e) => {
+    if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
+      onSelectionChange?.(result, e, index);
+    } else if (isMultiSelectMode) {
+      onSelectionChange?.(result, e, index);
+    } else {
+      // V2: Shift+Click 直接进入多选（区间选择）
+      if (e?.shiftKey) {
+        onSelectionChange?.(result, e, index);
+      } else {
+        onItemClick?.(result);
+      }
+    }
+  }, [isMultiSelectMode, onSelectionChange, onItemClick, result, index]);
+
+  // Tooltip text based on mode
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+    ? (isMultiSelectMode ? t('clickToSelect') : t('clickToViewDetails'))
+    : '';
+
+  // Border color: subtle hint in multi-select mode for unselected cards
+  const defaultBorderColor = isMultiSelectMode && !isSelected
+    ? "rgba(255, 210, 48, 0.15)"
+    : "rgba(255, 255, 255, 0.05)";
+
   return (
+    <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>
     <Card 
-      bg={isSelected ? "#2a2b1e" : "#1C1D20"} 
-      borderColor={isSelected ? "#FFD230" : "#383838"} 
-      _hover={{ borderColor: "#FFD230", shadow: "0 0 20px rgba(255,210,48,0.08)" }}
+      bg={isSelected ? "#2a2b1e" : "rgba(255, 255, 255, 0.05)"} 
+      borderColor={isSelected ? "#FFD230" : defaultBorderColor} 
+      borderWidth="1px"
+      boxShadow={isTagHit && !isSelected ? "0 0 16px rgba(255, 210, 48, 0.25)" : undefined}
+      _hover={{
+        borderColor: "#FFD230",
+        shadow: isTagHit && !isSelected
+          ? "0 0 24px rgba(255,210,48,0.4)"
+          : "0 0 20px rgba(255,210,48,0.08)",
+      }}
       transition="all 0.25s"
       cursor="pointer"
-      onClick={handleToggleSelect}
+      onClick={handleCardClick}
       h="100%"
+      borderRadius="12px"
+      overflow="hidden"
       position="relative"
     >
-      {/* Selection indicator */}
-      {isSelected && (
-        <Box
-          position="absolute"
-          top={2}
-          left={2}
-          zIndex={10}
-          bg="#FFD230"
-          color="black"
-          borderRadius="full"
-          boxSize="20px"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          fontSize="xs"
-          fontWeight="bold"
-        >
-          &#10003;
-        </Box>
+      {/* V2 Q1-A: 命中角标 */}
+      {isTagHit && <TaggedBadge size={gridSize === 'S' ? 'sm' : 'md'} />}
+      {/* V2 U1: 失败角标 */}
+      {failedReason && (
+        <FailedBadge reason={failedReason} onRetry={() => onRetryFailed?.(result)} />
       )}
-      <CardBody p={gridSize === "S" ? 2 : 3}>
-        <VStack spacing={gridSize === "S" ? 2 : 3} align="stretch" h="100%">
-          <NavigableAssetImage
-            result={result}
-            index={index}
-            getHeaders={getHeaders}
-            apiUrl={apiUrl}
-            width="100%"
-            height={gridSize === "S" ? "128px" : "256px"}
-            borderRadius="md"
-          />
+      {/* NEW CARD INTERACTION: Checkbox (hover to show / always show in multi-select) */}
+      {FEATURE_FLAGS.NEW_CARD_INTERACTION ? (
+        <CardSelectCheckbox
+          isSelected={isSelected}
+          isMultiSelectMode={isMultiSelectMode}
+          onToggle={handleToggleSelect}
+        />
+      ) : (
+        /* Legacy: Selection indicator */
+        isSelected && (
+          <Box
+            position="absolute"
+            top={2}
+            left={2}
+            zIndex={10}
+            bg="#FFD230"
+            color="black"
+            borderRadius="full"
+            boxSize="20px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            fontSize="xs"
+            fontWeight="bold"
+          >
+            &#10003;
+          </Box>
+        )
+      )}
+      <CardBody px="12px" py="8px">
+        <VStack spacing={gridSize === "S" ? 2 : 2} align="stretch" h="100%">
+          {/* === Fab-style image with hover overlay === */}
+          <Box position="relative" overflow="hidden" borderRadius="md">
+            <NavigableAssetImage
+              result={result}
+              index={index}
+              getHeaders={getHeaders}
+              apiUrl={apiUrl}
+              width="100%"
+              height="auto"
+              borderRadius="md"
+              style={{ aspectRatio: "16/9", objectFit: "cover", backgroundColor: "rgb(40, 40, 44)" }}
+            />
+            {/* Hover overlay — Fab: white bg, opacity 0→0.1 */}
+            <Box
+              className="fab-hover-overlay"
+              position="absolute"
+              inset={0}
+              bg="white"
+              opacity={0}
+              transition="opacity 0.15s ease"
+              pointerEvents="none"
+              borderRadius="md"
+              sx={{ ".chakra-card:hover &": { opacity: 0.1 } }}
+            />
+            {/* Bottom-left badges on hover */}
+            {gridSize !== "S" && (
+              <HStack
+                className="fab-hover-badges"
+                position="absolute"
+                bottom={2}
+                left={2}
+                right={2}
+                spacing={2}
+                opacity={0}
+                visibility="hidden"
+                transition="opacity 0.2s ease, visibility 0.2s ease"
+                pointerEvents="none"
+                sx={{ ".chakra-card:hover &": { opacity: 1, visibility: "visible" } }}
+              >
+                {result.source?.tags?.[0] && (
+                  <Badge
+                    bg="rgba(48, 48, 52, 0.7)"
+                    backdropFilter="blur(50px)"
+                    color="white"
+                    borderRadius="9999px"
+                    px={3}
+                    py="2px"
+                    fontSize="12px"
+                    fontWeight="400"
+                    h="24px"
+                    display="flex"
+                    alignItems="center"
+                  >
+                    {typeof result.source.tags[0] === 'string' ? result.source.tags[0] : (result.source.tags[0].tag || result.source.tags[0].value || '')}
+                  </Badge>
+                )}
+              </HStack>
+            )}
+          </Box>
 
           <VStack spacing={gridSize === "S" ? 1 : 2} align="stretch" flex={1}>
-            <Tooltip label={baseKey} placement="top">
-              <Text 
-                fontSize={gridSize === "S" ? "xs" : "sm"}
-                fontWeight="semibold" 
-                noOfLines={gridSize === "S" ? 1 : 2}
-                lineHeight="1.2"
+            {/* Title + Rating row — Fab layout: title left, rating right, gap 20px */}
+            <HStack justify="space-between" align="center" gap="20px">
+              <Tooltip label={baseKey} placement="top">
+                <Text 
+                  fontSize="12px"
+                  fontWeight="700" 
+                  noOfLines={1}
+                  lineHeight="15.6px"
+                  letterSpacing="0.36px"
+                  color="white"
+                  fontFamily="'Inter', sans-serif"
+                  title={filename}
+                  flex={1}
+                  minW={0}
+                >
+                  {filename}
+                </Text>
+              </Tooltip>
+            </HStack>
+
+            {/* Author row — aligned with HybridSearchResults */}
+            {gridSize !== "S" && (
+              <Text
+                fontSize="12px"
+                fontWeight="400"
+                color="rgba(255,255,255,0.65)"
+                noOfLines={1}
+                lineHeight="15.6px"
               >
-                {filename}
+                {result.source?.created_by || result.source?.modified_by || '—'}
               </Text>
-            </Tooltip>
+            )}
 
             {showScores && (
               <HStack spacing={1} wrap="wrap">
@@ -382,60 +524,90 @@ const VirtualizedResultGridItem = memo(({
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
             )}
 
-            <VStack spacing={1} align="stretch" fontSize="2xs" color="gray.300" flex={1}>
+            <VStack spacing={1} align={gridSize === "S" ? "end" : "stretch"} fontSize="2xs" color="gray.300" flex={1}>
               {result.source?.size && (
-                <Text>Size: {formatFileSize(result.source.size)}</Text>
+                <Text textAlign={gridSize === "S" ? "right" : "left"}>{t('size')} {formatFileSize(result.source.size)}</Text>
               )}
               {gridSize !== "S" && result.source?.modified_timestamp && (
-                <Text>Modified: {new Date(result.source.modified_timestamp).toLocaleDateString()}</Text>
+                <Text>{t('modified')} {new Date(result.source.modified_timestamp).toLocaleDateString()}</Text>
               )}
             </VStack>
 
             <HStack justify={gridSize === "S" ? "center" : "space-between"} pt={gridSize === "S" ? 1 : 2}>
               {gridSize === "S" ? (
-                <Tooltip label="View details">
-                  <IconButton
-                    size="xs"
-                    variant="ghost"
-                    icon={<ExternalLinkIcon />}
-                    onClick={handleViewDetails}
-                    aria-label="View details"
-                  />
-                </Tooltip>
-              ) : (
-                <>
+                FEATURE_FLAGS.NEW_CARD_INTERACTION ? (
+                  /* NEW: S size - only copy + find similar */
                   <HStack spacing={1}>
                     {copyToClipboard && (
-                      <Tooltip label="Copy URL">
+                      <Tooltip label={t('copyUrl')}>
                         <IconButton
                           size="xs"
                           variant="ghost"
                           icon={<CopyIcon />}
                           onClick={handleCopy}
-                          aria-label="Copy URL"
+                          aria-label={t('copyUrl')}
                         />
                       </Tooltip>
                     )}
-                    <Tooltip label="Find similar assets">
+                    <Tooltip label={t('findSimilarAssets')}>
                       <IconButton
                         size="xs"
                         variant="ghost"
                         icon={<SearchIcon />}
                         onClick={handleFindSimilar}
-                        aria-label="Find similar assets"
+                        aria-label={t('findSimilarAssets')}
                         colorScheme="purple"
                       />
                     </Tooltip>
                   </HStack>
-                  <Tooltip label="View details">
+                ) : (
+                  /* Legacy: S size - view details button */
+                  <Tooltip label={t('viewDetails')}>
                     <IconButton
                       size="xs"
                       variant="ghost"
                       icon={<ExternalLinkIcon />}
                       onClick={handleViewDetails}
-                      aria-label="View details"
+                      aria-label={t('viewDetails')}
                     />
                   </Tooltip>
+                )
+              ) : (
+                <>
+                  <HStack spacing={1}>
+                    {copyToClipboard && (
+                      <Tooltip label={t('copyUrl')}>
+                        <IconButton
+                          size="xs"
+                          variant="ghost"
+                          icon={<CopyIcon />}
+                          onClick={handleCopy}
+                          aria-label={t('copyUrl')}
+                        />
+                      </Tooltip>
+                    )}
+                    <Tooltip label={t('findSimilarAssets')}>
+                      <IconButton
+                        size="xs"
+                        variant="ghost"
+                        icon={<SearchIcon />}
+                        onClick={handleFindSimilar}
+                        aria-label={t('findSimilarAssets')}
+                        colorScheme="purple"
+                      />
+                    </Tooltip>
+                  </HStack>
+                  {!FEATURE_FLAGS.NEW_CARD_INTERACTION && (
+                    <Tooltip label={t('viewDetails')}>
+                      <IconButton
+                        size="xs"
+                        variant="ghost"
+                        icon={<ExternalLinkIcon />}
+                        onClick={handleViewDetails}
+                        aria-label={t('viewDetails')}
+                      />
+                    </Tooltip>
+                  )}
                 </>
               )}
             </HStack>
@@ -443,6 +615,7 @@ const VirtualizedResultGridItem = memo(({
         </VStack>
       </CardBody>
     </Card>
+    </Tooltip>
   );
 });
 
@@ -459,20 +632,33 @@ const VirtualizedResultListItem = memo(({
   searchQuery = "",
   getHeaders,
   apiUrl,
-  isSelected = false
+  isSelected = false,
+  isMultiSelectMode = false,
+  failedReason = null,
+  onRetryFailed,
 }) => {
+  const { t } = useTranslation();
   const { isOpen, onToggle } = useDisclosure();
   
   const allMatchedTerms = useMemo(() => {
     return result.metadata?.explanations?.flatMap(exp => exp.matched_terms || []) || [];
   }, [result.metadata?.explanations]);
+
+  // V2 Q1-A: tag 命中识别
+  const isTagHit = useMemo(() => {
+    const explanations = result.metadata?.explanations || [];
+    return explanations.some(exp =>
+      Array.isArray(exp?.matched_terms) &&
+      exp.matched_terms.some(term => typeof term === 'string' && term.includes('tags.tag'))
+    );
+  }, [result.metadata?.explanations]);
   
   const baseKey = result.source?.base_key || result.source?.url || result.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
-  const handleToggleSelect = useCallback(() => {
-    onSelectionChange?.(result);
-  }, [onSelectionChange, result]);
+  const handleToggleSelect = useCallback((e) => {
+    onSelectionChange?.(result, e, index);
+  }, [onSelectionChange, result, index]);
 
   const handleViewDetails = useCallback(() => {
     onItemClick?.(result);
@@ -493,35 +679,82 @@ const VirtualizedResultListItem = memo(({
     onToggle();
   }, [onToggle]);
 
+  // NEW CARD INTERACTION: Card click behavior depends on mode
+  const handleCardClick = useCallback((e) => {
+    if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
+      onSelectionChange?.(result, e, index);
+    } else if (isMultiSelectMode) {
+      onSelectionChange?.(result, e, index);
+    } else {
+      if (e?.shiftKey) {
+        onSelectionChange?.(result, e, index);
+      } else {
+        onItemClick?.(result);
+      }
+    }
+  }, [isMultiSelectMode, onSelectionChange, onItemClick, result, index]);
+
+  // Tooltip text based on mode
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+    ? (isMultiSelectMode ? t('clickToSelect') : t('clickToViewDetails'))
+    : '';
+
+  const defaultBorderColor = isMultiSelectMode && !isSelected
+    ? "rgba(255, 210, 48, 0.15)"
+    : "rgba(255, 255, 255, 0.05)";
+
   return (
+    <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>
     <Card 
-      bg={isSelected ? "#2a2b1e" : "#1C1D20"} 
-      borderColor={isSelected ? "#FFD230" : "#383838"} 
-      _hover={{ borderColor: "#FFD230", shadow: "0 0 20px rgba(255,210,48,0.08)" }}
+      bg={isSelected ? "#2a2b1e" : "rgba(255, 255, 255, 0.05)"} 
+      borderColor={isSelected ? "#FFD230" : defaultBorderColor} 
+      borderWidth="1px"
+      boxShadow={isTagHit && !isSelected ? "0 0 16px rgba(255, 210, 48, 0.25)" : undefined}
+      _hover={{
+        borderColor: "#FFD230",
+        shadow: isTagHit && !isSelected
+          ? "0 0 24px rgba(255,210,48,0.4)"
+          : "0 0 20px rgba(255,210,48,0.08)",
+      }}
       transition="all 0.25s"
       cursor="pointer"
-      onClick={handleToggleSelect}
+      onClick={handleCardClick}
+      borderRadius="12px"
       position="relative"
     >
-      {/* Selection indicator */}
-      {isSelected && (
-        <Box
-          position="absolute"
-          top={2}
-          left={2}
-          zIndex={10}
-          bg="#FFD230"
-          color="black"
-          borderRadius="full"
-          boxSize="20px"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          fontSize="xs"
-          fontWeight="bold"
-        >
-          &#10003;
-        </Box>
+      {/* V2 Q1-A: 命中角标 */}
+      {isTagHit && <TaggedBadge size="sm" />}
+      {/* V2 U1: 失败角标 */}
+      {failedReason && (
+        <FailedBadge reason={failedReason} onRetry={() => onRetryFailed?.(result)} />
+      )}
+      {/* NEW CARD INTERACTION: Checkbox */}
+      {FEATURE_FLAGS.NEW_CARD_INTERACTION ? (
+        <CardSelectCheckbox
+          isSelected={isSelected}
+          isMultiSelectMode={isMultiSelectMode}
+          onToggle={handleToggleSelect}
+        />
+      ) : (
+        isSelected && (
+          <Box
+            position="absolute"
+            top={2}
+            left={2}
+            zIndex={10}
+            bg="#FFD230"
+            color="black"
+            borderRadius="full"
+            boxSize="20px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            fontSize="xs"
+            fontWeight="bold"
+          >
+            &#10003;
+          </Box>
+        )
       )}
       <CardBody p={4}>
         <Grid templateColumns="200px 1fr auto" gap={4} alignItems="start">
@@ -567,35 +800,37 @@ const VirtualizedResultListItem = memo(({
                 
                 <HStack>
                   {copyToClipboard && (
-                    <Tooltip label="Copy URL">
+                    <Tooltip label={t('copyUrl')}>
                       <IconButton
                         size="sm"
                         variant="ghost"
                         icon={<CopyIcon />}
                         onClick={handleCopy}
-                        aria-label="Copy URL"
+                        aria-label={t('copyUrl')}
                       />
                     </Tooltip>
                   )}
-                  <Tooltip label="Find similar assets">
+                  <Tooltip label={t('findSimilarAssets')}>
                     <IconButton
                       size="sm"
                       variant="ghost"
                       icon={<SearchIcon />}
                       onClick={handleFindSimilar}
-                      aria-label="Find similar assets"
+                      aria-label={t('findSimilarAssets')}
                       colorScheme="purple"
                     />
                   </Tooltip>
-                  <Tooltip label="View details">
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      icon={<ExternalLinkIcon />}
-                      onClick={handleViewDetails}
-                      aria-label="View details"
-                    />
-                  </Tooltip>
+                  {!FEATURE_FLAGS.NEW_CARD_INTERACTION && (
+                    <Tooltip label={t('viewDetails')}>
+                      <IconButton
+                        size="sm"
+                        variant="ghost"
+                        icon={<ExternalLinkIcon />}
+                        onClick={handleViewDetails}
+                        aria-label={t('viewDetails')}
+                      />
+                    </Tooltip>
+                  )}
                 </HStack>
               </HStack>
 
@@ -605,10 +840,10 @@ const VirtualizedResultListItem = memo(({
               {result.source && (
                 <VStack spacing={1} align="stretch" fontSize="sm" color="gray.300">
                   {result.source.size && (
-                    <Text>Size: {formatFileSize(result.source.size)}</Text>
+                    <Text>{t('size')} {formatFileSize(result.source.size)}</Text>
                   )}
                   {result.source.modified_timestamp && (
-                    <Text>Modified: {new Date(result.source.modified_timestamp).toLocaleDateString()}</Text>
+                    <Text>{t('modified')} {new Date(result.source.modified_timestamp).toLocaleDateString()}</Text>
                   )}
                 </VStack>
               )}
@@ -644,6 +879,7 @@ const VirtualizedResultListItem = memo(({
         </Collapse>
       </CardBody>
     </Card>
+    </Tooltip>
   );
 });
 
@@ -662,8 +898,36 @@ const VirtualizedHybridSearchResults = ({
   apiUrl,
   selectedItems,
   onSelectionChange,
-  onCopySelectedUrls
+  onCopySelectedUrls,
+  onBatchSelection,
+  isMultiSelectMode = false,
+  // V2 U1: 批量失败持久化
+  failedBatchItems = null,
+  onRetryFailed,
 }) => {
+  const { t } = useTranslation();
+
+  // === Drag select refs & hooks (must be before any early return) ===
+  const scrollContainerRef = useRef(null);
+  const getItemId = useCallback((item) => {
+    return item?.id || item?.source?.base_key || item?.source?.url;
+  }, []);
+
+  const handleDragSelectionChange = useCallback((newSelectedIds) => {
+    if (onBatchSelection) {
+      onBatchSelection(newSelectedIds);
+    }
+  }, [onBatchSelection]);
+
+  const { isDragging, selectionRect, handleMouseDown } = useDragSelect({
+    containerRef: scrollContainerRef,
+    items: results,
+    getItemId,
+    onSelectionChange: handleDragSelectionChange,
+    baseSelection: selectedItems,
+    enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+  });
+
   // Calculate score range for normalization
   const { maxScore, minScore } = useMemo(() => {
     if (results.length === 0) return { maxScore: 1, minScore: 0 };
@@ -675,7 +939,10 @@ const VirtualizedHybridSearchResults = ({
   }, [results]);
 
   // Grid item renderer
-  const renderGridItem = useCallback((result, index) => (
+  const renderGridItem = useCallback((result, index) => {
+    const assetUrl = result.source?.url || result.source?.base_key || result.id;
+    const failedEntry = failedBatchItems?.get?.(assetUrl);
+    return (
     <VirtualizedResultGridItem
       result={result}
       index={index}
@@ -689,11 +956,18 @@ const VirtualizedHybridSearchResults = ({
       getHeaders={getHeaders}
       apiUrl={apiUrl}
       isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
+      isMultiSelectMode={isMultiSelectMode}
+      failedReason={failedEntry?.reason || null}
+      onRetryFailed={onRetryFailed}
     />
-  ), [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, gridSize, searchQuery, getHeaders, apiUrl, selectedItems]);
+    );
+  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, gridSize, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed]);
 
   // List item renderer
-  const renderListItem = useCallback((result, index) => (
+  const renderListItem = useCallback((result, index) => {
+    const assetUrl = result.source?.url || result.source?.base_key || result.id;
+    const failedEntry = failedBatchItems?.get?.(assetUrl);
+    return (
     <VirtualizedResultListItem
       result={result}
       index={index}
@@ -708,8 +982,12 @@ const VirtualizedHybridSearchResults = ({
       getHeaders={getHeaders}
       apiUrl={apiUrl}
       isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
+      isMultiSelectMode={isMultiSelectMode}
+      failedReason={failedEntry?.reason || null}
+      onRetryFailed={onRetryFailed}
     />
-  ), [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, maxScore, minScore, searchQuery, getHeaders, apiUrl, selectedItems]);
+    );
+  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, maxScore, minScore, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed]);
 
   const handleCopyAllUrls = useCallback(() => {
     const allUrls = results.map((result) => 
@@ -722,60 +1000,50 @@ const VirtualizedHybridSearchResults = ({
     return (
       <Box textAlign="center" py={8}>
         <CircularProgress isIndeterminate color="#FFD230" />
-        <Text mt={4} color="gray.300">Searching...</Text>
+        <Text mt={4} color="gray.300">{t('searching')}</Text>
       </Box>
     );
   }
 
   if (isEmpty || results.length === 0) {
-    return (
-      <Box textAlign="center" py={8}>
-        <Text fontSize="md" color="gray.300">
-          No results found. Try adjusting your search terms or configuration.
-        </Text>
-      </Box>
-    );
+    return <EmptySearchHint searchQuery={searchQuery} />;
   }
 
   return (
-    <VStack spacing={4} align="stretch">
-      {/* Results Summary */}
-      <HStack justify="space-between" wrap="wrap">
-        <HStack spacing={4}>
-          <Text fontSize="sm" color="gray.300">
-            {results.length} results found
-          </Text>
-          {copyToClipboard && (
-            <Button
-              size="sm"
-              leftIcon={<CopyIcon />}
-              onClick={onCopySelectedUrls}
-              variant="outline"
-              colorScheme="blue"
-              isDisabled={!selectedItems || selectedItems.size === 0}
-            >
-              Copy Selected URLs
-            </Button>
-          )}
-        </HStack>
-        <HStack>
-          <Text fontSize="xs" color="gray.500">
-            Score range: {minScore.toFixed(3)} - {maxScore.toFixed(3)}
-          </Text>
-        </HStack>
-      </HStack>
+    <VStack spacing={2} align="stretch" flex={1} minH={0} overflow="hidden">
+      {/* === v5: TitleBar + 结果计数已移入 FabToolbar 合并行，此处不再独立渲染 === */}
 
-      {/* Virtualized Results */}
-      <VirtualizedResults
-        items={results}
-        renderItem={viewMode === "grid" ? renderGridItem : renderListItem}
-        itemHeight={viewMode === "grid" ? (gridSize === "S" ? 200 : 400) : 250}
-        containerHeight="calc(100vh - 300px)" // Full height minus space for header, controls, and summary
-        overscan={5}
-        gridMode={viewMode === "grid"}
-        itemWidth={gridSize === "S" ? 140 : 280}
-        gap={viewMode === "grid" ? (gridSize === "S" ? 8 : 16) : 16}
-      />
+      {/* Virtualized Results with drag select */}
+      <Box position="relative" flex={1} minH={0}>
+        <VirtualizedResults
+          items={results}
+          renderItem={viewMode === "grid" ? renderGridItem : renderListItem}
+          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 200 : 320) : 250}
+          containerHeight="100%"
+          overscan={5}
+          gridMode={viewMode === "grid"}
+          itemWidth={gridSize === "S" ? 140 : 280}
+          gap={viewMode === "grid" ? (gridSize === "S" ? 8 : 16) : 16}
+          scrollContainerRef={scrollContainerRef}
+          onMouseDown={handleMouseDown}
+          style={{ userSelect: isDragging ? 'none' : 'auto' }}
+        />
+        {/* Drag selection rectangle overlay */}
+        {isDragging && selectionRect && (
+          <Box
+            position="fixed"
+            left={`${selectionRect.x}px`}
+            top={`${selectionRect.y}px`}
+            width={`${selectionRect.width}px`}
+            height={`${selectionRect.height}px`}
+            bg="rgba(255, 210, 48, 0.08)"
+            border="1px solid rgba(255, 210, 48, 0.4)"
+            borderRadius="4px"
+            pointerEvents="none"
+            zIndex={9999}
+          />
+        )}
+      </Box>
     </VStack>
   );
 };

@@ -52,7 +52,9 @@ import {
 } from "@chakra-ui/react";
 import { InfoIcon, CloseIcon } from "@chakra-ui/icons";
 import FilterByPropertiesInput from "./propertiesInput";
+// === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
+// === LM CUSTOMIZATION: i18n END ===
 import { DEFAULT_SEARCH_PARAMS } from "./config";
 
 const RangeSliderWithInput = ({ 

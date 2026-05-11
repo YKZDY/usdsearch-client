@@ -1,0 +1,385 @@
+/* === LM CUSTOMIZATION: Category Sidebar (Flat TreeView) Styles === */
+/* 对齐 Fab 实测规格（docs/Fab改造/扒取产出/）。
+   所有常量来源于 src/theme/fabTokens.js，在此以注释标注对应 token。 */
+
+/* ─────────────────────────────────────────────────
+   侧边栏容器
+   ────────────────────────────────────────────────── */
+.category-sidebar {
+  /* 固定定位：脱离 flex 流，固定在视口左侧顶栏下方 */
+  position: fixed;
+  left: 0;
+  top: 72px;
+  width: 320px;
+  height: calc(100vh - 72px);
+  background: #141517;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 100;
+  /* 不用 flex — 让子元素保持自然高度，容器负责滚动
+     v6：顶部 padding 使用 CSS 变量，与右侧 toolbar 顶部 padding 严格一致（10px），
+     保证侧边栏 ✕ 行与主区 Header 行同一水平线 */
+  padding: var(--sidebar-top-pad, 10px) 16px 16px;
+  box-sizing: border-box;
+}
+
+.category-sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  border-right: none;
+  overflow: hidden;
+}
+
+/* ─────────────────────────────────────────────────
+   头部：✕ 行
+   v6：高度严格 = 右侧 Header 行（32px），✕ 贴右边缘，
+   下边距 = toolbar 行间距（10px），保证「产品类型」与筛选按钮行对齐。
+   ────────────────────────────────────────────────── */
+.sidebar-header {
+  display: flex;
+  justify-content: flex-end;                  /* ✕ 靠右 */
+  align-items: center;
+  height: var(--sidebar-header-h, 32px);      /* = 主区 Header 行高 */
+  padding: 0;
+  margin-bottom: var(--sidebar-header-gap, 10px);  /* = toolbar 行间距 */
+  flex-shrink: 0;
+}
+
+.sidebar-title {
+  /* Fab 实测：Inter Tight 24px/700 — 保留供未来可能恢复主标题使用 */
+  font-family: "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 125%;
+  letter-spacing: 0.24px;
+  color: #ffffff;
+}
+
+.collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.collapse-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.collapse-btn:focus-visible {
+  outline: 2px solid rgba(255, 210, 48, 0.6);
+  outline-offset: 1px;
+}
+
+/* ─────────────────────────────────────────────────
+   分组标题（h2 "产品类型" — 不可折叠的静态标题）
+   v6：min-height = 筛选按钮高度（32px），top 严格对齐主区筛选按钮行顶部
+   ────────────────────────────────────────────────── */
+.sidebar-group-heading {
+  /* Fab 实测：14px/700 */
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.85);
+  padding: 0 8px;
+  min-height: 32px;                            /* = 筛选按钮高度 */
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* ─────────────────────────────────────────────────
+   可折叠分组（优惠/通道）— h2 > button
+   对齐 Fab Playwright 扒取：14px/700, padding 8px, flex, space-between
+   ────────────────────────────────────────────────── */
+.sidebar-section-heading {
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.sidebar-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: none;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 150%;
+  color: rgb(255, 255, 255);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+
+.sidebar-section-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Chevron 折叠箭头 — 16x16，展开时旋转 180° (Fab: matrix(-1,0,0,-1)) */
+.sidebar-chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.65);
+  transition: transform 0.25s ease;
+  transform: rotate(0deg);
+}
+
+.sidebar-chevron--expanded {
+  transform: rotate(180deg);
+}
+
+/* ─────────────────────────────────────────────────
+   列表分组（优惠/通道 region）
+   ────────────────────────────────────────────────── */
+.sidebar-list-group {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 列表项 — 对齐 Fab: 32px, padding 6px 8px, 14px/400, rgba(255,255,255,0.65), borderRadius 8px */
+.sidebar-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-family: "Inter", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 150%;
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.sidebar-list-item:hover {
+  color: rgb(255, 255, 255);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-list-item--active,
+.sidebar-list-item--active:hover {
+  color: rgb(255, 255, 255);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.sidebar-list-item--disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sidebar-list-item--disabled:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.65);
+}
+
+/* 列表项 SVG 图标 — 20x20，对齐 Fab */
+.sidebar-list-svg-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.7;
+}
+
+/* 列表项文本 */
+.sidebar-list-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 计数徽章 — 对齐 Fab: 14px/400, rgba(255,255,255,0.65) */
+.sidebar-list-badge {
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.65);
+  margin-left: auto;
+}
+
+/* Coming Soon 徽章（优惠项使用） */
+.sidebar-coming-soon-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: rgba(255, 210, 48, 0.5);
+  white-space: nowrap;
+}
+
+
+
+/* ─────────────────────────────────────────────────
+   扁平 TreeView
+   ────────────────────────────────────────────────── */
+.tree-view {
+  /* 普通 block 布局，内容自然撑开高度，由侧边栏容器负责滚动 */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 单个 TreeItem（所有层级共享基础样式） */
+.tree-item {
+  --depth: 0;
+  --leaf-offset: 0px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;                     /* Fab 实测 */
+  border-radius: 6px;               /* --density-border-radius-1-5 */
+  cursor: pointer;
+  font-family: "Inter", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 150%;
+  color: rgba(255, 255, 255, 0.85); /* 默认 */
+  transition: color 0.15s ease, background-color 0.15s ease;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  user-select: none;
+  /* 缩进公式：8 + depth*24 + leaf_offset — 对齐 Fab TreeView */
+  padding: 6px 8px 6px calc(8px + var(--depth) * 24px + var(--leaf-offset));
+}
+
+/* 叶子：无箭头占位，左侧再偏移 24px 对齐有箭头的项 */
+.tree-item--leaf {
+  --leaf-offset: 24px;
+}
+
+/* 深度 0 分支（如 "3D"）：加粗突出 */
+.tree-item--branch[style*="--depth: 0"],
+.tree-item--branch:where([style*="--depth:0"]) {
+  font-weight: 500;
+  color: #ffffff;
+}
+
+/* Hover */
+.tree-item:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 选中态（对齐 Fab .fabkit-TreeView--current） */
+.tree-item--current,
+.tree-item--current:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* ─────────────────────────────────────────────────
+   展开箭头（12×12 SVG）
+   ────────────────────────────────────────────────── */
+.tree-arrow {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.65);
+  transition: transform 0.2s ease, color 0.15s ease;
+  transform-origin: center;
+}
+
+.tree-arrow--expanded {
+  transform: rotate(90deg);
+}
+
+.tree-item:hover .tree-arrow {
+  color: #ffffff;
+}
+
+/* ─────────────────────────────────────────────────
+   Icon 与 label
+   ────────────────────────────────────────────────── */
+.tree-item-icon {
+  /* SVG 图标：16x16，继承当前文字颜色 */
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.75;
+}
+
+.tree-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────────────
+   折叠时的展开按钮（固定在左上角）
+   ────────────────────────────────────────────────── */
+.sidebar-expand-btn {
+  position: fixed;
+  left: 0;
+  top: 76px;
+  z-index: 100;
+  background: #202024; /* --colors-background-elevated-high */
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  padding: 8px 6px;
+  font-size: 12px;
+  transition: color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-expand-btn:hover {
+  color: #ffffff;
+  background: #303034; /* --colors-background-menu */
+}
+
+/* ─────────────────────────────────────────────────
+   自定义滚动条（细腻 4px）
+   ────────────────────────────────────────────────── */
+.category-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.category-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.category-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.category-sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

@@ -49,7 +49,9 @@ import {
   SearchIcon,
   ViewIcon,
 } from "@chakra-ui/icons";
+// === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
+// === LM CUSTOMIZATION: i18n END ===
 
 const getSearchTypeColor = (searchType) => {
   const colors = {

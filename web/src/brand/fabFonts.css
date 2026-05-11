@@ -1,0 +1,22 @@
+/* === LM CUSTOMIZATION: Fab fonts START ===
+ * 引入 Fab 使用的 Inter + Inter Tight 字体（来自 Google Fonts）
+ * 来源：docs/Fab改造/扒取产出/README.md
+ *   - Inter: 正文（paragraph-sm 14px 为默认）
+ *   - Inter Tight: 标题（heading-xl 32px/900 等）
+ * 使用方式：
+ *   font-family: "Inter", ...        // 正文
+ *   font-family: "Inter Tight", ...  // 标题
+ * 合入英伟达新版本时：整个文件直接保留，不会与上游冲突（上游无此文件）
+ * === LM CUSTOMIZATION: Fab fonts END === */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@700;800;900&display=swap');
+
+/* 可选：为需要大范围使用 Fab 字体的区域提供工具类 */
+.fab-heading {
+  font-family: "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.fab-body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+}

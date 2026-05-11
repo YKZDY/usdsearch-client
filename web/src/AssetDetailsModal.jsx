@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Box,
   VStack,
@@ -56,10 +56,10 @@ import {
   PopoverBody,
   PopoverArrow,
   PopoverCloseButton,
-  useToast,
 } from "@chakra-ui/react";
 import {
   CopyIcon,
+  CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   RepeatIcon,
@@ -69,7 +69,32 @@ import NavigableAssetImage from "./components/NavigableAssetImage";
 import GraphVisualization from "./Graph";
 import { apiUrl, SEARCH_DEFAULTS } from "./config";
 import { formatFileSize, formatDate } from "./utils/formatUtils";
+// === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
+// === LM CUSTOMIZATION: i18n END ===
+import EditableTagsPanel from "./components/EditableTagsPanel";
+
+// === LM CUSTOMIZATION: detail-modal-revamp START ===
+// 高级模式开关：URL 参数 ?advanced=1 写入 localStorage 持久化，
+// ?advanced=0 清除；仅在加载时求值一次（切换需刷新页面）。
+// 关闭时，索引管理 / 搜索解释 / AI 元数据 / VLM 元数据 / AGS / USD 属性 /
+// 依赖 / 反向依赖 等高级面板会被 hide 掉，源代码保留。
+const ADVANCED_MODE = (() => {
+  try {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get("advanced");
+    if (flag === "1") {
+      window.localStorage.setItem("lm_advanced_mode", "1");
+    } else if (flag === "0") {
+      window.localStorage.removeItem("lm_advanced_mode");
+    }
+    return window.localStorage.getItem("lm_advanced_mode") === "1";
+  } catch (e) {
+    return false;
+  }
+})();
+// === LM CUSTOMIZATION: detail-modal-revamp END ===
 
 // Status utility functions
 const getStatusColor = (status) => {
@@ -391,12 +416,12 @@ const AssetDetailsModal = ({
   plugins,
   getHeaders,
   apiUrl,
+  serverUrl,
   triggerReindexAllPlugins,
   triggerReindexIndividualPlugin
 }) => {
   const [pluginStatuses, setPluginStatuses] = useState({});
   const { t } = useTranslation();
-  const toast = useToast();
   const [assetDependencies, setAssetDependencies] = useState(null);
   const [assetInverseDependencies, setAssetInverseDependencies] = useState(null);
   const [usdProperties, setUsdProperties] = useState(null);
@@ -412,8 +437,50 @@ const AssetDetailsModal = ({
   const { isOpen: isDepsOpen, onToggle: toggleDeps } = useDisclosure();
   const { isOpen: isInverseDepsOpen, onToggle: toggleInverseDeps } = useDisclosure();
   const { isOpen: isTechnicalOpen, onToggle: toggleTechnical } = useDisclosure();
-  const { isOpen: isTagsOpen, onToggle: toggleTags } = useDisclosure();
+  const { isOpen: isTagsOpen, onToggle: toggleTags } = useDisclosure({ defaultIsOpen: true });
   const { isOpen: isIndexMgmtOpen, onToggle: toggleIndexMgmt } = useDisclosure({ defaultIsOpen: false });
+
+  // === LM CUSTOMIZATION: detail-modal-revamp START ===
+  // URL 行复制按钮的反馈状态
+  const [urlCopiedAt, setUrlCopiedAt] = useState(0);
+  // 详情面板的"显示技术字段"开关
+  const [showTechFields, setShowTechFields] = useState(false);
+  // 高级面板折叠组的展开状态（持久化偏好；默认值：管理员模式开 / 普通模式关，
+  // 但 localStorage 中显式写过的值优先）
+  const [isAdvancedPanelsOpen, setIsAdvancedPanelsOpen] = useState(() => {
+    try {
+      if (typeof window === "undefined") return ADVANCED_MODE;
+      const saved = window.localStorage.getItem("lm_advanced_panels_open");
+      if (saved === "1") return true;
+      if (saved === "0") return false;
+      return ADVANCED_MODE;
+    } catch (e) {
+      return ADVANCED_MODE;
+    }
+  });
+  const toggleAdvancedPanels = useCallback(() => {
+    setIsAdvancedPanelsOpen((prev) => {
+      const next = !prev;
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("lm_advanced_panels_open", next ? "1" : "0");
+        }
+      } catch (e) { /* ignore quota / privacy mode */ }
+      return next;
+    });
+  }, []);
+  // 复制反馈定时器句柄（卸载时清理）
+  const urlCopyTimerRef = useRef(null);
+
+  // 卸载时清理定时器，避免在已卸载组件上 setState 报警告
+  useEffect(() => {
+    return () => {
+      if (urlCopyTimerRef.current) clearTimeout(urlCopyTimerRef.current);
+    };
+  }, []);
+  // === LM CUSTOMIZATION: detail-modal-revamp END ===
+
+
   
   const overallStatus = calculateOverallIndexStatus(pluginStatuses);
 
@@ -526,6 +593,10 @@ const AssetDetailsModal = ({
       setAssetInverseDependencies(null);
       setUsdProperties(null);
       setExpandedGroups({});
+      // === LM CUSTOMIZATION: detail-modal-revamp START ===
+      setShowTechFields(false);
+      setUrlCopiedAt(0);
+      // === LM CUSTOMIZATION: detail-modal-revamp END ===
       
       // If collapse sections are already open, reload their data for the new asset
       // Use setTimeout to ensure state is cleared first
@@ -577,14 +648,34 @@ const AssetDetailsModal = ({
 
   const baseKey = selectedItem.source?.base_key || selectedItem.source?.url || selectedItem.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
+
+  // === LM CUSTOMIZATION: detail-modal-revamp START ===
+  const isUrlJustCopied = urlCopiedAt > 0;
+  const handleCopyUrlInline = () => {
+    if (baseKey && copyToClipboard) copyToClipboard(baseKey);
+    setUrlCopiedAt(Date.now());
+    if (urlCopyTimerRef.current) clearTimeout(urlCopyTimerRef.current);
+    urlCopyTimerRef.current = setTimeout(() => setUrlCopiedAt(0), 1500);
+  };
+  const tagCount = Array.isArray(selectedItem.source?.tags)
+    ? selectedItem.source.tags.length
+    : 0;
+  // === LM CUSTOMIZATION: detail-modal-revamp END ===
   
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="6xl">
       <ModalOverlay />
       <ModalContent bg="gray.800" color="white" maxH="90vh" boxShadow="0 0 20px 5px rgba(72, 187, 120, 0.3)" borderRadius="md">
         <ModalHeader borderBottomWidth="1px" borderColor="gray.600">
-          <HStack>
+          <HStack pr={10}>
             <Text isTruncated flex={1}>{filename}</Text>
+            {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+            {ADVANCED_MODE && (
+              <Badge colorScheme="purple" variant="subtle">
+                {t('adminMode')}
+              </Badge>
+            )}
+            {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
             {showScores && (
               <Badge colorScheme="yellow">{t('scoreLabel')}{selectedItem.score?.toFixed(3)}</Badge>
             )}
@@ -617,17 +708,37 @@ const AssetDetailsModal = ({
                     </Text>
                     <VStack spacing={2} align="stretch">
                       {/* Base Key / URL */}
-                      <HStack>
+                      {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+                      <HStack
+                        align="flex-start"
+                        spacing={2}
+                        px={2}
+                        mx={-2}
+                        py={1}
+                        borderRadius="md"
+                        _hover={{ bg: 'whiteAlpha.50' }}
+                        transition="background 0.15s"
+                      >
                         <Text fontWeight="semibold" minW="100px">{t('url')}</Text>
-                        <Text 
-                          fontSize="sm" 
-                          wordBreak="break-all" 
+                        <Text
+                          fontSize="sm"
+                          wordBreak="break-all"
                           flex={1}
                           fontFamily="mono"
                         >
                           {baseKey}
                         </Text>
+                        <Tooltip label={isUrlJustCopied ? t('urlCopied') : t('copyUrlTooltip')} placement="top">
+                          <IconButton
+                            size="xs"
+                            variant="ghost"
+                            aria-label={t('copyUrl')}
+                            icon={isUrlJustCopied ? <CheckIcon color="green.300" /> : <CopyIcon />}
+                            onClick={handleCopyUrlInline}
+                          />
+                        </Tooltip>
                       </HStack>
+                      {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
 
                       {/* Essential Information */}
                       {selectedItem.source && (
@@ -662,23 +773,26 @@ const AssetDetailsModal = ({
                               <Text fontSize="sm">{formatDate(selectedItem.source.modified_timestamp)}</Text>
                             </HStack>
                           )}
+                          {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+                          {/* pathType 字段已下沉到「详情」面板（业务字段），此处保留源码以便恢复 */}
+                          {/*
                           {selectedItem.source.pathType && (
                             <HStack>
                               <Text fontWeight="semibold" minW="100px">{t('pathType')}</Text>
                               <Badge colorScheme="yellow" size="sm">{selectedItem.source.pathType}</Badge>
                             </HStack>
                           )}
-                          {selectedItem.source.status && (
+                          */}
+                          {/* status === 'None' 视为无意义信息隐藏 */}
+                          {selectedItem.source.status && selectedItem.source.status !== 'None' && (
                             <HStack>
                               <Text fontWeight="semibold" minW="100px">{t('status')}</Text>
-                              <Badge 
-                                colorScheme={selectedItem.source.status === 'None' ? 'gray' : 'yellow'} 
-                                size="sm"
-                              >
+                              <Badge colorScheme="yellow" size="sm">
                                 {selectedItem.source.status}
                               </Badge>
                             </HStack>
                           )}
+                          {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
                         </>
                       )}
                     </VStack>
@@ -709,111 +823,507 @@ const AssetDetailsModal = ({
               </GridItem>
             </Grid>
 
-            {/* Re-indexing Controls */}
-            <Box>
-              <HStack justify="space-between" mb={2}>
+
+              {/* Tags */}
+              <Box>
+              <HStack
+                justify="space-between" mb={2}
+                onClick={toggleTags}
+                cursor="pointer"
+                px={3} mx={-3} py={1}
+                borderRadius="md"
+                _hover={{ bg: 'whiteAlpha.50' }}
+                transition="background 0.15s"
+              >
                 <Text 
                   fontSize="lg" 
                   fontWeight="semibold" 
                   color="#FFD230"
-                  cursor="pointer"
-                  onClick={toggleIndexMgmt}
                 >
+                  {t('tagsSection')}
+                  {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+                  {tagCount > 0 && (
+                    <Badge ml={2} colorScheme="yellow" variant="subtle">
+                      {tagCount}
+                    </Badge>
+                  )}
+                  {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
+                </Text>
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  icon={isTagsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                  aria-label="Toggle tags"
+                  pointerEvents="none"
+                />
+              </HStack>
+              <Collapse in={isTagsOpen} animateOpacity>
+                <Box bg="gray.750" p={4} borderRadius="md" overflow="visible">
+                  <EditableTagsPanel
+                    serverUrl={serverUrl}
+                    assetPath={baseKey}
+                    initialTags={selectedItem.source.tags}
+                    getHeaders={getHeaders}
+                    apiUrl={apiUrl}
+                    assetUrl={baseKey}
+                  />
+                  </Box>
+              </Collapse>
+            </Box>
+
+            {/* Details */}
+            {selectedItem.source && (
+              <Box>
+                <HStack
+                  justify="space-between" mb={2}
+                  onClick={toggleTechnical}
+                  cursor="pointer"
+                  px={3} mx={-3} py={1}
+                  borderRadius="md"
+                  _hover={{ bg: 'whiteAlpha.50' }}
+                  transition="background 0.15s"
+                >
+                  <Text 
+                    fontSize="lg" 
+                    fontWeight="semibold" 
+                    color="#FFD230"
+                  >
+                    {t('details')}
+                  </Text>
+                  <HStack spacing={1}>
+                    {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+                    {isTechnicalOpen && (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        colorScheme="yellow"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowTechFields((v) => !v);
+                        }}
+                      >
+                        {showTechFields ? t('hideTechnicalFields') : t('showTechnicalFields')}
+                      </Button>
+                    )}
+                    {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      icon={isTechnicalOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                      aria-label="Toggle technical details"
+                      pointerEvents="none"
+                    />
+                  </HStack>
+                </HStack>
+                <Collapse in={isTechnicalOpen} animateOpacity>
+                  <Box bg="gray.750" p={4} borderRadius="md">
+                    <Table size="sm" variant="simple">
+                      <Thead>
+                        <Tr>
+                          <Th color="gray.300">{t('property')}</Th>
+                          <Th color="gray.300">{t('value')}</Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+                        {/* 业务字段（默认显示）：创建者 / 修改者 / 路径类型 */}
+                        {selectedItem.source.created_by && (
+                          <Tr>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('createdBy')}</Td>
+                            <Td fontSize="sm">{selectedItem.source.created_by}</Td>
+                          </Tr>
+                        )}
+                        {selectedItem.source.modified_by && (
+                          <Tr>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('modifiedBy')}</Td>
+                            <Td fontSize="sm">{selectedItem.source.modified_by}</Td>
+                          </Tr>
+                        )}
+                        {selectedItem.source.pathType && (
+                          <Tr>
+                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('pathType').replace(/[:：]\s*$/, '')}</Td>
+                            <Td fontSize="sm">
+                              <Badge colorScheme="yellow" size="sm">{selectedItem.source.pathType}</Badge>
+                            </Td>
+                          </Tr>
+                        )}
+                        {/* 创建者/修改者均缺失且未展开技术字段时，给出友好提示 */}
+                        {!selectedItem.source.created_by &&
+                          !selectedItem.source.modified_by &&
+                          !selectedItem.source.pathType &&
+                          !showTechFields && (
+                          <Tr>
+                            <Td colSpan={2} textAlign="center" color="gray.500" fontSize="sm" py={4}>
+                              {t('showTechnicalFields')}
+                            </Td>
+                          </Tr>
+                        )}
+
+                        {/* 技术字段（受 showTechFields 开关控制） */}
+                        {showTechFields && (
+                          <>
+                            {selectedItem.source.etag && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('etag')}</Td>
+                                <Td fontSize="sm" fontFamily="mono">{selectedItem.source.etag}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.hash_value && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('hashValue')}</Td>
+                                <Td fontSize="sm" fontFamily="mono">{selectedItem.source.hash_value}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.empty !== undefined && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('empty')}</Td>
+                                <Td fontSize="sm">{selectedItem.source.empty ? t('yes') : t('no')}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.on_mount !== undefined && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('onMount')}</Td>
+                                <Td fontSize="sm">{selectedItem.source.on_mount ? t('yes') : t('no')}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.content_type && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('contentType')}</Td>
+                                <Td fontSize="sm">{selectedItem.source.content_type}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.mime_type && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('mimeType')}</Td>
+                                <Td fontSize="sm">{selectedItem.source.mime_type}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.is_directory !== undefined && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('isDirectory')}</Td>
+                                <Td fontSize="sm">{selectedItem.source.is_directory ? t('yes') : t('no')}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.permissions && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('permissions')}</Td>
+                                <Td fontSize="sm">{selectedItem.source.permissions}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.checksum && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('checksum')}</Td>
+                                <Td fontSize="sm" fontFamily="mono">{selectedItem.source.checksum}</Td>
+                              </Tr>
+                            )}
+                            {selectedItem.source.version && (
+                              <Tr>
+                                <Td fontWeight="semibold" color="gray.300" width="30%">{t('version')}</Td>
+                                <Td fontSize="sm">{selectedItem.source.version}</Td>
+                              </Tr>
+                            )}
+                            {/* Additional fields that might exist */}
+                            {Object.entries(selectedItem.source).map(([key, value]) => {
+                              const skipFields = [
+                                'base_key', 'url', 'name', 'ext', 'size', 'created_timestamp',
+                                'modified_timestamp', 'pathType', 'status', 'image',
+                                'vision_generated_metadata', 'usd_properties', 'etag',
+                                'hash_value', 'empty', 'on_mount', 'created_by', 'modified_by',
+                                'content_type', 'mime_type', 'is_directory', 'permissions',
+                                'checksum', 'version', 'path', 'tags'
+                              ];
+
+                              if (skipFields.includes(key) || value === null || value === undefined || value === '') {
+                                return null;
+                              }
+
+                              const fieldNamesMap = {
+                                'type': t('type'),
+                                'created': t('created'),
+                                'modified': t('modified'),
+                                'created_timestamp': t('created'),
+                                'modified_timestamp': t('modified'),
+                                'created_by': t('createdBy'),
+                                'modified_by': t('modifiedBy'),
+                                'ext': t('type'),
+                                'pathType': t('pathType'),
+                                'status': t('status'),
+                                'size': t('size'),
+                                'hash_value': t('hashValue'),
+                                'hash': t('hashValue'),
+                                'hash_type': t('hashType'),
+                                'checksum': t('checksum'),
+                              };
+                              const displayName = fieldNamesMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+                              return (
+                                <Tr key={key}>
+                                  <Td fontWeight="semibold" color="gray.300" width="30%">
+                                    {displayName}
+                                  </Td>
+                                  <Td fontSize="sm">
+                                    {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                  </Td>
+                                </Tr>
+                              );
+                            })}
+                          </>
+                        )}
+                        {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
+                      </Tbody>
+                    </Table>
+                  </Box>
+                </Collapse>
+              </Box>
+            )}
+
+            {/* === LM CUSTOMIZATION: advanced-panels-collapse START === */}
+            {/* 分隔区：显示/隐藏高级面板按钮 */}
+            <Box position="relative" py={2}>
+              <Box borderTopWidth="1px" borderColor="gray.600" position="absolute" top="50%" left={0} right={0} />
+              <HStack justify="center" position="relative">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  colorScheme="yellow"
+                  onClick={toggleAdvancedPanels}
+                  rightIcon={isAdvancedPanelsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                >
+                  {isAdvancedPanelsOpen ? t('hideAdvancedPanels') : t('showAdvancedPanels')}
+                </Button>
+              </HStack>
+            </Box>
+
+            {/* 高级面板组（懒挂载：折叠时不渲染，避免 GraphVisualization 等重组件副作用） */}
+            <Collapse in={isAdvancedPanelsOpen} animateOpacity unmountOnExit>
+              <VStack spacing={6} align="stretch">
+
+            {/* Dependencies */}
+            <Box>
+              <HStack
+                justify="space-between" mb={2}
+                onClick={handleToggleDeps}
+                cursor="pointer"
+                px={3} mx={-3} py={1}
+                borderRadius="md"
+                _hover={{ bg: 'whiteAlpha.50' }}
+                transition="background 0.15s"
+              >
+                <Text fontSize="lg" fontWeight="semibold" color="#FFD230">
+                  {t('dependencies')}
+                </Text>
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  icon={isDepsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                  aria-label="Toggle dependencies"
+                  pointerEvents="none"
+                />
+              </HStack>
+              <Collapse in={isDepsOpen} animateOpacity>
+                <Box bg="gray.750" p={4} borderRadius="md">
+                  {loadingDeps ? (
+                    <Box textAlign="center" py={8}>
+                      <CircularProgress isIndeterminate size="40px" />
+                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingDependencies')}</Text>
+                    </Box>
+                  ) : assetDependencies && (assetDependencies.nodes?.length > 0 || assetDependencies.edges?.length > 0) ? (
+                    <GraphVisualization data={assetDependencies} />
+                  ) : (
+                    <Box textAlign="center" py={8} color="gray.400">
+                      <Text>{t('noDependencies')}</Text>
+                    </Box>
+                  )}
+                </Box>
+              </Collapse>
+            </Box>
+
+            {/* Inverse Dependencies */}
+            <Box>
+              <HStack
+                justify="space-between" mb={2}
+                onClick={handleToggleInverseDeps}
+                cursor="pointer"
+                px={3} mx={-3} py={1}
+                borderRadius="md"
+                _hover={{ bg: 'whiteAlpha.50' }}
+                transition="background 0.15s"
+              >
+                <Text fontSize="lg" fontWeight="semibold" color="#FFD230">
+                  {t('inverseDependencies')}
+                </Text>
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  icon={isInverseDepsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                  aria-label="Toggle inverse dependencies"
+                  pointerEvents="none"
+                />
+              </HStack>
+              <Collapse in={isInverseDepsOpen} animateOpacity>
+                <Box bg="gray.750" p={4} borderRadius="md">
+                  {loadingInverseDeps ? (
+                    <Box textAlign="center" py={8}>
+                      <CircularProgress isIndeterminate size="40px" />
+                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingInverseDependencies')}</Text>
+                    </Box>
+                  ) : assetInverseDependencies && (assetInverseDependencies.nodes?.length > 0 || assetInverseDependencies.edges?.length > 0) ? (
+                    <GraphVisualization data={assetInverseDependencies} isInverse={true} />
+                  ) : (
+                    <Box textAlign="center" py={8} color="gray.400">
+                      <Text>{t('noInverseDependencies')}</Text>
+                    </Box>
+                  )}
+                </Box>
+              </Collapse>
+            </Box>
+
+            {/* USD Properties */}
+            <Box>
+              <HStack
+                justify="space-between" mb={2}
+                onClick={handleToggleUsdProps}
+                cursor="pointer"
+                px={3} mx={-3} py={1}
+                borderRadius="md"
+                _hover={{ bg: 'whiteAlpha.50' }}
+                transition="background 0.15s"
+              >
+                <Text fontSize="lg" fontWeight="semibold" color="#FFD230">
+                  {t('usdProperties')}
+                </Text>
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  icon={isUsdPropsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                  aria-label="Toggle USD properties"
+                  pointerEvents="none"
+                />
+              </HStack>
+              <Collapse in={isUsdPropsOpen} animateOpacity>
+                <Box bg="gray.750" p={4} borderRadius="md">
+                  {loadingUsdProps ? (
+                    <Box textAlign="center" py={8}>
+                      <CircularProgress isIndeterminate size="40px" />
+                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingUsdProperties')}</Text>
+                    </Box>
+                  ) : (
+                    <USDPropertiesTable
+                      usdProperties={usdProperties}
+                      expandedGroups={expandedGroups}
+                      setExpandedGroups={setExpandedGroups}
+                    />
+                  )}
+                </Box>
+              </Collapse>
+            </Box>
+
+            {/* Index Management */}
+            <Box>
+              <HStack
+                justify="space-between" mb={2}
+                onClick={toggleIndexMgmt}
+                cursor="pointer"
+                px={3} mx={-3} py={1}
+                borderRadius="md"
+                _hover={{ bg: 'whiteAlpha.50' }}
+                transition="background 0.15s"
+              >
+                <Text fontSize="lg" fontWeight="semibold" color="#FFD230">
                   {t('indexManagement')}
                 </Text>
                 <IconButton
                   size="sm"
                   variant="ghost"
                   icon={isIndexMgmtOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                  onClick={toggleIndexMgmt}
                   aria-label="Toggle index management"
+                  pointerEvents="none"
                 />
               </HStack>
               <Collapse in={isIndexMgmtOpen} animateOpacity>
                 <Box bg="gray.750" p={4} borderRadius="md">
-              {/* Overall Status Display */}
-              <HStack justify="center" spacing={4} mb={4}>
-                <HStack spacing={2} align="center">
-                  <Text fontSize="sm" fontWeight="bold">{t('indexStatus')}</Text>
-                  <Text fontSize="sm" color={overallStatus.color} fontWeight="bold">
-                    {overallStatus.status}
-                  </Text>
-                </HStack>
-              </HStack>
-              
-              <HStack spacing={4} justify="center" wrap="wrap">
-                <IconButton
-                  size="sm"
-                  icon={<RepeatIcon />}
-                  aria-label={t('refreshAllData')}
-                  onClick={() => {
-                    // Force reload all data sections
-                    loadDependencies(true);
-                    loadInverseDependencies(true);
-                    loadUSDProperties(true);
-                  }}
-                />
-                <Button
-                  size="sm"
-                  colorScheme="blue"
-                  onClick={() => {
-                    const url = baseKey;
-                    if (url) {
-                      triggerReindexAllPlugins?.(url);
-                    }
-                  }}
-                >
-                  {t('reindexAll')}
-                </Button>
-                <Popover>
-                  <PopoverTrigger>
+                  <HStack justify="center" spacing={4} mb={4}>
+                    <HStack spacing={2} align="center">
+                      <Text fontSize="sm" fontWeight="bold">{t('indexStatus')}</Text>
+                      <Text fontSize="sm" color={overallStatus.color} fontWeight="bold">
+                        {overallStatus.status}
+                      </Text>
+                    </HStack>
+                  </HStack>
+                  <HStack spacing={4} justify="center" wrap="wrap">
+                    <IconButton
+                      size="sm"
+                      icon={<RepeatIcon />}
+                      aria-label={t('refreshAllData')}
+                      onClick={() => {
+                        loadDependencies(true);
+                        loadInverseDependencies(true);
+                        loadUSDProperties(true);
+                      }}
+                    />
                     <Button
                       size="sm"
-                      variant="outline"
-                      rightIcon={<ChevronDownIcon />}
+                      colorScheme="blue"
+                      onClick={() => {
+                        const url = baseKey;
+                        if (url) {
+                          triggerReindexAllPlugins?.(url);
+                        }
+                      }}
                     >
-                      {t('individualPlugins')}
+                      {t('reindexAll')}
                     </Button>
-                  </PopoverTrigger>
-                  <PopoverContent>
-                    <PopoverArrow />
-                    <PopoverCloseButton />
-                    <PopoverHeader>{t('reindexIndividualPlugins')}</PopoverHeader>
-                    <PopoverBody>
-                      <PluginStatusTable 
-                        url={baseKey}
-                        plugins={plugins || { active: [], inactive: [] }}
-                        triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
-                        getHeaders={getHeaders}
-                        onStatusChange={setPluginStatuses}
-                      />
-                    </PopoverBody>
-                  </PopoverContent>
-                </Popover>
-              </HStack>
+                    <Popover>
+                      <PopoverTrigger>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          rightIcon={<ChevronDownIcon />}
+                        >
+                          {t('individualPlugins')}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent>
+                        <PopoverArrow />
+                        <PopoverCloseButton />
+                        <PopoverHeader>{t('reindexIndividualPlugins')}</PopoverHeader>
+                        <PopoverBody>
+                          <PluginStatusTable 
+                            url={baseKey}
+                            plugins={plugins || { active: [], inactive: [] }}
+                            triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
+                            getHeaders={getHeaders}
+                            onStatusChange={setPluginStatuses}
+                          />
+                        </PopoverBody>
+                      </PopoverContent>
+                    </Popover>
+                  </HStack>
                 </Box>
               </Collapse>
             </Box>
 
-            {/* Search Explanations */}
+            {/* Search Explanations (conditional) */}
             {selectedItem.metadata?.explanations && selectedItem.metadata.explanations.length > 0 && (
               <Box>
-                <HStack justify="space-between" mb={2}>
-                  <Text 
-                    fontSize="lg" 
-                    fontWeight="semibold" 
-                    color="#FFD230"
-                    cursor="pointer"
-                    onClick={toggleExplanations}
-                  >
+                <HStack
+                  justify="space-between" mb={2}
+                  onClick={toggleExplanations}
+                  cursor="pointer"
+                  px={3} mx={-3} py={1}
+                  borderRadius="md"
+                  _hover={{ bg: 'whiteAlpha.50' }}
+                  transition="background 0.15s"
+                >
+                  <Text fontSize="lg" fontWeight="semibold" color="#FFD230">
                     {t('searchMatchExplanations')}
                   </Text>
                   <IconButton
                     size="sm"
                     variant="ghost"
                     icon={isExplanationsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                    onClick={toggleExplanations}
                     aria-label="Toggle explanations"
+                    pointerEvents="none"
                   />
                 </HStack>
                 <Collapse in={isExplanationsOpen} animateOpacity>
@@ -830,26 +1340,28 @@ const AssetDetailsModal = ({
               </Box>
             )}
 
-            {/* Vision Generated Metadata */}
+            {/* AI Generated Metadata (conditional) */}
             {selectedItem.source?.vision_generated_metadata && 
              Object.keys(selectedItem.source.vision_generated_metadata).length > 0 && (
               <Box>
-                <HStack justify="space-between" mb={2}>
-                  <Text 
-                    fontSize="lg" 
-                    fontWeight="semibold" 
-                    color="#FFD230"
-                    cursor="pointer"
-                    onClick={toggleMetadata}
-                  >
+                <HStack
+                  justify="space-between" mb={2}
+                  onClick={toggleMetadata}
+                  cursor="pointer"
+                  px={3} mx={-3} py={1}
+                  borderRadius="md"
+                  _hover={{ bg: 'whiteAlpha.50' }}
+                  transition="background 0.15s"
+                >
+                  <Text fontSize="lg" fontWeight="semibold" color="#FFD230">
                     {t('aiGeneratedMetadata')}
                   </Text>
                   <IconButton
                     size="sm"
                     variant="ghost"
                     icon={isMetadataOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                    onClick={toggleMetadata}
                     aria-label="Toggle metadata"
+                    pointerEvents="none"
                   />
                 </HStack>
                 <Collapse in={isMetadataOpen} animateOpacity>
@@ -877,25 +1389,27 @@ const AssetDetailsModal = ({
               </Box>
             )}
 
-            {/* VLM Generated Metadata */}
+            {/* VLM Generated Metadata (conditional) */}
             {selectedItem.source && Object.keys(selectedItem.source).some(key => key.endsWith('_vlm_generated')) && (
               <Box>
-                <HStack justify="space-between" mb={2}>
-                  <Text 
-                    fontSize="lg" 
-                    fontWeight="semibold" 
-                    color="#FFD230"
-                    cursor="pointer"
-                    onClick={toggleVlmMetadata}
-                  >
+                <HStack
+                  justify="space-between" mb={2}
+                  onClick={toggleVlmMetadata}
+                  cursor="pointer"
+                  px={3} mx={-3} py={1}
+                  borderRadius="md"
+                  _hover={{ bg: 'whiteAlpha.50' }}
+                  transition="background 0.15s"
+                >
+                  <Text fontSize="lg" fontWeight="semibold" color="#FFD230">
                     {t('vlmMetadata')}
                   </Text>
                   <IconButton
                     size="sm"
                     variant="ghost"
                     icon={isVlmMetadataOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                    onClick={toggleVlmMetadata}
                     aria-label="Toggle VLM metadata"
+                    pointerEvents="none"
                   />
                 </HStack>
                 <Collapse in={isVlmMetadataOpen} animateOpacity>
@@ -931,8 +1445,7 @@ const AssetDetailsModal = ({
               </Box>
             )}
 
-
-            {/* AGS Data (if available) */}
+            {/* AGS Data (conditional) */}
             {selectedItem.ags_data?.root_prims && 
              selectedItem.ags_data.root_prims.length > 0 && (
               <Box>
@@ -979,325 +1492,10 @@ const AssetDetailsModal = ({
               </Box>
             )}
 
-            {/* USD Properties */}
-            <Box>
-              <HStack justify="space-between" mb={2}>
-                <Text 
-                  fontSize="lg" 
-                  fontWeight="semibold" 
-                  color="#FFD230"
-                  cursor="pointer"
-                  onClick={handleToggleUsdProps}
-                >
-                  {t('usdProperties')}
-                </Text>
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  icon={isUsdPropsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                  onClick={handleToggleUsdProps}
-                  aria-label="Toggle USD properties"
-                />
-              </HStack>
-              <Collapse in={isUsdPropsOpen} animateOpacity>
-                <Box bg="gray.750" p={4} borderRadius="md">
-                  {loadingUsdProps ? (
-                    <Box textAlign="center" py={8}>
-                      <CircularProgress isIndeterminate size="40px" />
-                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingUsdProperties')}</Text>
-                    </Box>
-                  ) : (
-                    <USDPropertiesTable
-                      usdProperties={usdProperties}
-                      expandedGroups={expandedGroups}
-                      setExpandedGroups={setExpandedGroups}
-                    />
-                  )}
-                </Box>
-              </Collapse>
-            </Box>
+              </VStack>
+            </Collapse>
+            {/* === LM CUSTOMIZATION: advanced-panels-collapse END === */}
 
-            {/* Dependencies */}
-            <Box>
-              <HStack justify="space-between" mb={2}>
-                <Text 
-                  fontSize="lg" 
-                  fontWeight="semibold" 
-                  color="#FFD230"
-                  cursor="pointer"
-                  onClick={handleToggleDeps}
-                >
-                  {t('dependencies')}
-                </Text>
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  icon={isDepsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                  onClick={handleToggleDeps}
-                  aria-label="Toggle dependencies"
-                />
-              </HStack>
-              <Collapse in={isDepsOpen} animateOpacity>
-                <Box bg="gray.750" p={4} borderRadius="md">
-                  {loadingDeps ? (
-                    <Box textAlign="center" py={8}>
-                      <CircularProgress isIndeterminate size="40px" />
-                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingDependencies')}</Text>
-                    </Box>
-                  ) : assetDependencies && (assetDependencies.nodes?.length > 0 || assetDependencies.edges?.length > 0) ? (
-                    <GraphVisualization data={assetDependencies} />
-                  ) : (
-                    <Box textAlign="center" py={8} color="gray.400">
-                      <Text>{t('noDependencies')}</Text>
-                    </Box>
-                  )}
-                </Box>
-              </Collapse>
-            </Box>
-
-            {/* Inverse Dependencies */}
-            <Box>
-              <HStack justify="space-between" mb={2}>
-                <Text 
-                  fontSize="lg" 
-                  fontWeight="semibold" 
-                  color="#FFD230"
-                  cursor="pointer"
-                  onClick={handleToggleInverseDeps}
-                >
-                  {t('inverseDependencies')}
-                </Text>
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  icon={isInverseDepsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                  onClick={handleToggleInverseDeps}
-                  aria-label="Toggle inverse dependencies"
-                />
-              </HStack>
-              <Collapse in={isInverseDepsOpen} animateOpacity>
-                <Box bg="gray.750" p={4} borderRadius="md">
-                  {loadingInverseDeps ? (
-                    <Box textAlign="center" py={8}>
-                      <CircularProgress isIndeterminate size="40px" />
-                      <Text mt={2} fontSize="sm" color="gray.400">{t('loadingInverseDependencies')}</Text>
-                    </Box>
-                  ) : assetInverseDependencies && (assetInverseDependencies.nodes?.length > 0 || assetInverseDependencies.edges?.length > 0) ? (
-                    <GraphVisualization data={assetInverseDependencies} isInverse={true} />
-                  ) : (
-                    <Box textAlign="center" py={8} color="gray.400">
-                      <Text>{t('noInverseDependencies')}</Text>
-                    </Box>
-                  )}
-                </Box>
-              </Collapse>
-            </Box>
-
-              {/* Tags */}
-              <Box>
-              <HStack justify="space-between" mb={2}>
-                <Text 
-                  fontSize="lg" 
-                  fontWeight="semibold" 
-                  color="#FFD230"
-                  cursor="pointer"
-                  onClick={toggleTags}
-                >
-                  {t('tagsSection')}
-                </Text>
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  icon={isTagsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                  onClick={toggleTags}
-                  aria-label="Toggle inverse dependencies"
-                />
-              </HStack>
-              <Collapse in={isTagsOpen} animateOpacity>
-                <Box bg="gray.750" p={4} borderRadius="md">
-                  {selectedItem.source.tags?.length > 0 ? (
-                    <Table size="sm" variant="simple">
-                    <Thead>
-                      <Tr>
-                        <Th color="gray.300">{t('tag')}</Th>
-                        <Th color="gray.300">{t('value')}</Th>
-                      </Tr>
-                    </Thead>
-                    <Tbody>
-                      {selectedItem.source.tags.map((tag) => (
-                        <Tr key={tag}>
-                          <Td fontWeight="semibold" color="gray.300" width="30%">{tag.tag}</Td>
-                          <Td fontSize="sm" fontFamily="mono">{tag.value}</Td>
-                        </Tr>
-                      ))}
-                      </Tbody>
-                    </Table>
-                  ) : (
-                    <Box textAlign="center" py={8} color="gray.400">
-                      <Text>{t('noTagsFound')}</Text>
-                    </Box>
-                  )}
-                  </Box>
-              </Collapse>
-            </Box>
-
-            {/* Details */}
-            {selectedItem.source && (
-              <Box>
-                <HStack justify="space-between" mb={2}>
-                  <Text 
-                    fontSize="lg" 
-                    fontWeight="semibold" 
-                    color="#FFD230"
-                    cursor="pointer"
-                    onClick={toggleTechnical}
-                  >
-                    {t('details')}
-                  </Text>
-                  <IconButton
-                    size="sm"
-                    variant="ghost"
-                    icon={isTechnicalOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                    onClick={toggleTechnical}
-                    aria-label="Toggle technical details"
-                  />
-                </HStack>
-                <Collapse in={isTechnicalOpen} animateOpacity>
-                  <Box bg="gray.750" p={4} borderRadius="md">
-                    <Table size="sm" variant="simple">
-                      <Thead>
-                        <Tr>
-                          <Th color="gray.300">{t('property')}</Th>
-                          <Th color="gray.300">{t('value')}</Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
-                        {/* Technical metadata fields */}
-                        {selectedItem.source.etag && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('etag')}</Td>
-                            <Td fontSize="sm" fontFamily="mono">{selectedItem.source.etag}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.hash_value && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('hashValue')}</Td>
-                            <Td fontSize="sm" fontFamily="mono">{selectedItem.source.hash_value}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.empty !== undefined && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('empty')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.empty ? t('yes') : t('no')}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.on_mount !== undefined && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('onMount')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.on_mount ? t('yes') : t('no')}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.created_by && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('createdBy')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.created_by}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.modified_by && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('modifiedBy')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.modified_by}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.content_type && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('contentType')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.content_type}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.mime_type && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('mimeType')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.mime_type}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.is_directory !== undefined && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('isDirectory')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.is_directory ? t('yes') : t('no')}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.permissions && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('permissions')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.permissions}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.checksum && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('checksum')}</Td>
-                            <Td fontSize="sm" fontFamily="mono">{selectedItem.source.checksum}</Td>
-                          </Tr>
-                        )}
-                        {selectedItem.source.version && (
-                          <Tr>
-                            <Td fontWeight="semibold" color="gray.300" width="30%">{t('version')}</Td>
-                            <Td fontSize="sm">{selectedItem.source.version}</Td>
-                          </Tr>
-                        )}
-                        {/* Additional fields that might exist */}
-                        {Object.entries(selectedItem.source).map(([key, value]) => {
-                          // Skip fields we've already shown or basic display fields
-                          const skipFields = [
-                            'base_key', 'url', 'name', 'ext', 'size', 'created_timestamp', 
-                            'modified_timestamp', 'pathType', 'status', 'image', 
-                            'vision_generated_metadata', 'usd_properties', 'etag', 
-                            'hash_value', 'empty', 'on_mount', 'created_by', 'modified_by',
-                            'content_type', 'mime_type', 'is_directory', 'permissions',
-                            'checksum', 'version', 'path', 'tags'
-                          ];
-                          
-                          if (skipFields.includes(key) || value === null || value === undefined || value === '') {
-                            return null;
-                          }
-
-                          // Translate common field names
-                          const fieldNamesMap = {
-                            'type': t('type'),
-                            'created': t('created'),
-                            'modified': t('modified'),
-                            'created_timestamp': t('created'),
-                            'modified_timestamp': t('modified'),
-                            'created_by': t('createdBy'),
-                            'modified_by': t('modifiedBy'),
-                            'ext': t('type'),
-                            'pathType': t('pathType'),
-                            'status': t('status'),
-                            'size': t('size'),
-                            'hash_value': t('hashValue'),
-                            'hash': t('hashValue'),
-                            'hash_type': t('hashType'),
-                            'checksum': t('checksum'),
-                          };
-                          const displayName = fieldNamesMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                          
-                          return (
-                            <Tr key={key}>
-                              <Td fontWeight="semibold" color="gray.300" width="30%">
-                                {displayName}
-                              </Td>
-                              <Td fontSize="sm">
-                                {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
-                              </Td>
-                            </Tr>
-                          );
-                        })}
-                      </Tbody>
-                    </Table>
-                  </Box>
-                </Collapse>
-              </Box>
-            )}
           </VStack>
         </ModalBody>
 

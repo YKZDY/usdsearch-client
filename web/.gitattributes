@@ -1,0 +1,6 @@
+# === LM CUSTOMIZATION: Git Merge Strategy ===
+# LM 定制文件：合并时以我们为准
+web/src/theme/**    merge=ours
+web/src/i18n/**     merge=ours
+web/src/brand/**    merge=ours
+scripts/**          merge=ours

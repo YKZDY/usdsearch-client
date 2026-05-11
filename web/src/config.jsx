@@ -58,6 +58,9 @@ export const IS_HTTPS = typeof window !== 'undefined' && window.location.protoco
 export const FEATURE_FLAGS = {
   // Enable/disable feedback modal - enabled by default, can be disabled via env var
   ENABLE_FEEDBACK_MODAL: process.env.REACT_APP_ENABLE_FEEDBACK_MODAL === "true",
+  // 新卡片交互模式：单击=查看详情，hover checkbox=多选
+  // 设为 false 可回退到旧版（整卡片点击=选中）
+  NEW_CARD_INTERACTION: true,
 };
 
 // Authentication configuration
@@ -94,7 +97,7 @@ export const DEFAULT_SEARCH_PARAMS = {
   file_name: "",
   exclude_file_name: "",
   file_extension_include: "",
-  file_extension_exclude: "usd*,jpg,png",
+  file_extension_exclude: "usd,usda,usdc,usdz,jpg,png",
 
   // Path & Location Filters
   search_path: "",

@@ -1,0 +1,125 @@
+/* === LM CUSTOMIZATION: Fab-style Toolbar Styles === */
+/* 对齐 Fab 实测规格（docs/Fab改造/扒取产出/）。
+   Popover 内部样式通过 Chakra 的 sx prop 覆写，不放在此文件；
+   这里仅处理 toolbar 容器与全局 Popover 层级修正。 */
+
+.fab-toolbar {
+  /* v6：三行布局 = Header 行 → 筛选按钮行 → chips 行（全部粘顶）
+     使用 CSS 变量驱动行间距，与侧边栏共享，保证两条水平对齐线精确一致 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--toolbar-row-gap, 10px);
+  padding: var(--toolbar-top-pad, 10px) 4px 8px;
+  margin-bottom: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  /* 原纯色背景 —— 不用 blur/半透明，避免与 Popover(z-index:1350) 的层叠上下文冲突导致弹窗看不清 */
+  background: #141517;
+  /* Sticky：整个 toolbar 三行全部粘顶 */
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/* v6: Header 行（结果状态） */
+.fab-toolbar-header-row {
+  min-height: var(--toolbar-header-h, 32px);
+  display: flex;
+  align-items: center;
+  /* 左 padding = 筛选按钮 HStack 首按钮的左缘（HStack spacing=2 + 无 pl，故首按钮从 0 起，
+     这里给 2px 微调视觉对齐，与筛选按钮 Box 内部内容呼应） */
+  padding: 0 4px;
+  overflow: hidden;
+}
+
+/* 移动端断点：横向滚动而非换行，避免被折叠 */
+@media (max-width: 900px) {
+  .fab-toolbar .chakra-stack {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding-bottom: 4px;
+    /* 让滚动条细一些 */
+    scrollbar-width: thin;
+  }
+}
+
+/* 下拉 select 的 option 在 Windows 上默认白色背景，
+   强制与 Popover 风格保持一致 */
+.fab-toolbar select option {
+  background: #202024; /* --colors-background-elevated-high */
+  color: #ffffff;
+}
+
+/* 确保 Popover 层级高于 Chakra 默认 Portal */
+.chakra-popover__popper {
+  z-index: 1350 !important;
+}
+
+/* === Chip 动效 === */
+@keyframes chipFadeIn {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes chipFadeOut {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.8); }
+}
+.filter-chip {
+  animation: chipFadeIn 0.2s ease forwards;
+}
+.filter-chip--removing {
+  animation: chipFadeOut 0.25s ease forwards;
+  pointer-events: none;
+}
+/* === Search/Tag decoupling v4: 搜索词 chip 已移除；只保留标签 chip 金色脉冲 === */
+@keyframes tagChipPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 210, 48, 0.35); }
+  50%  { box-shadow: 0 0 0 6px rgba(255, 210, 48, 0.10); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 210, 48, 0); }
+}
+.filter-chip--tag {
+  animation: chipFadeIn 0.2s ease forwards, tagChipPulse 0.6s ease 0.2s 1;
+}
+
+/* === Chips 条容器过渡 ===
+   v6：筛选按钮行 → chips 行使用更紧的间距（8px 而非默认 10px），
+   通过 negative margin-top 抵消父 flex gap 的差值。 */
+.chips-bar {
+  overflow: hidden;
+  transition: max-height 0.2s ease, opacity 0.2s ease, margin-top 0.2s ease, visibility 0s;
+}
+.chips-bar--visible {
+  max-height: 200px;
+  opacity: 1;
+  /* flex gap 提供 10px，chips 想要 8px，故减 2px */
+  margin-top: calc(var(--toolbar-chips-gap, 8px) - var(--toolbar-row-gap, 10px));
+  visibility: visible;
+}
+.chips-bar--hidden {
+  max-height: 0;
+  opacity: 0;
+  /* 隐藏时抵消父 flex gap，让 chips 完全不占垂直空间 */
+  margin-top: calc(-1 * var(--toolbar-row-gap, 10px));
+  visibility: hidden;
+  transition: max-height 0.2s ease, opacity 0.2s ease, margin-top 0.2s ease, visibility 0s 0.2s;
+}
+
+/* v6：原 merged-row 已移除（Header 行上移到 toolbar 顶部 .fab-toolbar-header-row） */
+
+/* === Badge pulse 动效 === */
+@keyframes badgePulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+.badge-pulse {
+  animation: badgePulse 0.3s ease;
+}
+
+/* === 清除全部按钮 hover 微弹 === */
+.clear-all-btn:hover {
+  transform: scale(1.03);
+}
+.clear-all-btn {
+  transition: transform 0.12s ease, background 0.15s ease;
+}

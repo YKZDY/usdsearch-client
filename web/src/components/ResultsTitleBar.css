@@ -1,0 +1,159 @@
+/**
+ * ResultsTitleBar styles — v6 toolbar Header 行
+ *
+ * 设计要点：
+ *   - align-items: baseline，不同字号按文字底线对齐（专业感）
+ *   - flex-wrap: nowrap + overflow: hidden，永远单行
+ *   - query 文本可被 ellipsis 截断；计数 + 分数区间 flex-shrink: 0 永远可见
+ *   - 字号分级：query 17/500（主角）· 分隔符 14/400/40%（退为灰）· 计数 14/500/55%（次要）· 分数 12/400/40%（最弱）
+ */
+
+.results-title-bar {
+  display: flex;
+  align-items: baseline;            /* 不同字号底线对齐（Apple/Stripe） */
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: var(--toolbar-header-h, 32px);
+  overflow: hidden;
+  padding: 0;
+  width: 100%;
+}
+
+/* ── segment（query 或 category 的一个整体块）── */
+.results-title-segment {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #ffffff;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* query 段：可被截断（长搜索词） */
+.results-title-segment--query {
+  max-width: 320px;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* category 段：比较短，一般不截断；防御性给 180px 上限 */
+.results-title-segment--category {
+  max-width: 180px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+/* ── 引号『』/ "" ── */
+.results-title-quote {
+  opacity: 0.55;
+  font-weight: 400;
+  flex-shrink: 0;
+}
+
+/* ── 搜索词主文本（高亮，可截断） ── */
+.results-title-query {
+  font-weight: 500;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* ── 分类名主文本（保持 Fab 风格的黄色高亮，与侧边栏选中态 #FFD230 呼应） ── */
+.results-title-category {
+  font-weight: 500;
+  color: #FFD230;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 分隔符 · ── */
+.results-title-divider {
+  font-size: 14px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+/* ── 结果计数（永远可见） ── */
+.results-title-count {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;                    /* 计数永远可见，query 被截不截计数 */
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.results-title-count-number {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+  font-variant-numeric: tabular-nums;
+  margin: 0 2px;
+}
+
+/* ── 空搜索态：只剩计数时补偿字号 ── */
+.results-title-bar--count-only .results-title-count {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.results-title-bar--count-only .results-title-count-number {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* ── 分数区间（最弱） ── */
+.results-title-score-range {
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  margin-left: 2px;
+  line-height: 1.4;
+}
+
+/* ── ✕ 移除按钮（圆形，与侧边栏 « 视觉严格区分） ── */
+.results-title-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  flex-shrink: 0;
+  position: relative;
+  top: -1px;                         /* 微调：与 baseline 对齐文字中心 */
+}
+
+.results-title-remove:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  transform: scale(1.12);
+}
+
+.results-title-remove:active {
+  transform: scale(0.95);
+}
+
+.results-title-remove:focus-visible {
+  outline: 2px solid rgba(255, 210, 48, 0.6);
+  outline-offset: 1px;
+}

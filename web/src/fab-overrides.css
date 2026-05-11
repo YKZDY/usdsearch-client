@@ -1,0 +1,81 @@
+/* === LM CUSTOMIZATION: Fab-style overrides === */
+/* 通过 CSS 覆写实现 Fab 风格，不修改 HybridSearchResults.jsx 源码
+   参考：docs/Fab改造/扒取产出/README.md §2.7-2.9 */
+
+/* ── 页面背景对齐 Fab ── */
+body {
+  background-color: #101014 !important;
+}
+
+/* ── Grid 间距对齐 ── */
+/* Fab 实测：gap 16px */
+.chakra-simple-grid,
+.chakra-grid {
+  gap: 16px !important;
+}
+
+/* ── 卡片 hover 对齐 Fab：无 transform，保留光子金色 shadow ── */
+.chakra-card:hover,
+[class*="chakra-card"]:hover {
+  transform: none !important;
+}
+
+/* ── 网格布局 — Fab 5 列自适应 ── */
+/* Fab 实测：repeat(5, ~295px), gap 16px */
+/* 使用 auto-fill + minmax 实现响应式 */
+.chakra-grid[style*="grid"] {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) !important;
+  gap: 16px !important;
+}
+
+/* ── Fab 卡片选中态保留 ── */
+/* 保持现有金色边框选中态不被 hover 覆写干扰 */
+.chakra-card[data-selected="true"],
+.chakra-card[style*="border-color: rgb(255, 210, 48)"] {
+  border-color: #FFD230 !important;
+}
+
+/* ── 占位 disabled 元素通用样式 ── */
+.fab-placeholder-disabled {
+  opacity: 0.35;
+  pointer-events: none;
+  cursor: default;
+  position: relative;
+}
+
+/* 占位 disabled 的评分星标 */
+.fab-rating-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.35;
+}
+
+/* Fab 实测：评分星标 16x16, color #ffc229 */
+.fab-rating-placeholder .fab-star-icon {
+  color: #ffc229;
+  width: 16px;
+  height: 16px;
+}
+
+/* 占位 disabled 的价格行 */
+.fab-price-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.35;
+}
+
+/* ── 卡片内缩略图区域需要 relative 定位（给 overlay 用） ── */
+.chakra-card .chakra-image,
+.chakra-card [class*="NavigableAsset"] {
+  position: relative;
+}
+
+/* ── 缩略图对齐 Fab 实测：16:9 + bg rgb(40,40,44) ── */
+.chakra-card img {
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background-color: rgb(40, 40, 44);
+}
+

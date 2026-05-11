@@ -75,7 +75,9 @@ import { CloseIcon, LockIcon, UnlockIcon, CopyIcon, InfoIcon, RepeatIcon, Chevro
 import GraphVisualization from "./Graph";
 import { apiUrl, IMAGE_SIZE, AUTH_CONFIG, DUPLICATE_REMOVAL_THRESHOLD, SEARCH_DEFAULTS } from "./config";
 import FilterByPropertiesInput from "./propertiesInput";
+// === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
+// === LM CUSTOMIZATION: i18n END ===
 
 // Shared utility function for status color mapping
 const getStatusColor = (status) => {
@@ -1034,13 +1036,16 @@ function SearchApp() {
       if (response.status == 401) {
         console.log("Unauthorized");
         setError("Unauthorized");
-        toast({
-          title: t('loginRequired'),
-          description: t('loginRequiredDescription'),
-          status: "warning",
-          duration: 8000,
-          isClosable: true,
-        });
+        // === LM CUSTOMIZATION: Auth Guard toast 去重 ===
+        if (Date.now() >= (window.__authGuardActiveUntil || 0)) {
+          toast({
+            title: t('loginRequired'),
+            description: t('loginRequiredDescription'),
+            status: "warning",
+            duration: 8000,
+            isClosable: true,
+          });
+        }
       }
       if (response.status != 200) {
         console.log("Error: ", response.status);
@@ -1098,13 +1103,16 @@ function SearchApp() {
       if (response.status == 401) {
         console.log("Unauthorized");
         setError("Unauthorized");
-        toast({
-          title: t('loginRequired'),
-          description: t('loginRequiredDescription'),
-          status: "warning",
-          duration: 8000,
-          isClosable: true,
-        });
+        // === LM CUSTOMIZATION: Auth Guard toast 去重 ===
+        if (Date.now() >= (window.__authGuardActiveUntil || 0)) {
+          toast({
+            title: t('loginRequired'),
+            description: t('loginRequiredDescription'),
+            status: "warning",
+            duration: 8000,
+            isClosable: true,
+          });
+        }
       } else {
         return await response.json();
       }
@@ -1139,13 +1147,16 @@ function SearchApp() {
       if (response.status == 401) {
         console.log("Unauthorized");
         setError("Unauthorized");
-        toast({
-          title: t('loginRequired'),
-          description: t('loginRequiredDescription'),
-          status: "warning",
-          duration: 8000,
-          isClosable: true,
-        });
+        // === LM CUSTOMIZATION: Auth Guard toast 去重 ===
+        if (Date.now() >= (window.__authGuardActiveUntil || 0)) {
+          toast({
+            title: t('loginRequired'),
+            description: t('loginRequiredDescription'),
+            status: "warning",
+            duration: 8000,
+            isClosable: true,
+          });
+        }
       } else {
         return await response.json();
       }

@@ -32,7 +32,6 @@ import {
   Button,
   Text,
   IconButton,
-  Image,
   useToast,
   useDisclosure,
   Modal,
@@ -63,13 +62,33 @@ import {
 } from "@chakra-ui/icons";
 
 import { apiUrl as defaultApiUrl, defaultEmbeddingConfig, AUTH_CONFIG, FEATURE_FLAGS, SERVER_MAPPING, SEARCH_DEFAULTS, DEFAULT_SEARCH_PARAMS } from "./config";
+// === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
-import HybridSearchConfig, { DEFAULT_HYBRID_CONFIG } from "./HybridSearchConfig";
+// === LM CUSTOMIZATION: i18n END ===
+import HybridSearchConfig, { DEFAULT_HYBRID_CONFIG, migrateLegacyWeights } from "./HybridSearchConfig";
+import { triggerReindexNow as triggerReindexNowApi } from "./services/reindexService";
 import SearchFilters from "./SearchFilters";
 import HybridSearchResults from "./HybridSearchResults";
 import VirtualizedHybridSearchResults from "./components/VirtualizedHybridSearchResults";
 import AssetDetailsModal from "./AssetDetailsModal";
 import AssetImage from "./components/AssetImage";
+// === LM CUSTOMIZATION: Fab Toolbar START ===
+import FabToolbar from "./components/FabToolbar";
+// === LM CUSTOMIZATION: Fab Toolbar END ===
+// === LM CUSTOMIZATION: Selection Mode Bar ===
+import SelectionModeBar from "./components/SelectionModeBar";
+// === V2: 批量打标签工作流 ===
+import BatchTagModal from "./components/BatchTagModal";
+import UndoToast from "./components/UndoToast";
+import useBatchTagger from "./hooks/useBatchTagger";
+import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts";
+// === LM CUSTOMIZATION: Auth Guard ===
+import { useAuthGuard } from "./hooks/useAuthGuard";
+// === LM CUSTOMIZATION: Path tree suggestions（混合静态目录 + 搜索结果聚合）===
+import { usePathSuggestions } from "./hooks/usePathSuggestions";
+// === LM CUSTOMIZATION: Search/Tag decoupling — 搜索请求反腐层 ===
+import buildSearchPayload from "./utils/buildSearchPayload";
+
 
 // Helper: shallow compare two Sets
 const areSetsEqual = (a, b) => {
@@ -99,7 +118,11 @@ const MemoizedResults = React.memo(({
   useVirtualization = true,
   selectedItems,
   onSelectionChange,
-  onCopySelectedUrls
+  onBatchSelection,
+  onCopySelectedUrls,
+  isMultiSelectMode,
+  // === LM CUSTOMIZATION: Search/Tag decoupling v4 — 结果区大标题所需数据 ===
+  titleBarProps
 }) => {
   const filteredResults = useMemo(() => 
     showOnlyWithPreviews 
@@ -128,15 +151,26 @@ const MemoizedResults = React.memo(({
       apiUrl={apiUrl}
       selectedItems={selectedItems}
       onSelectionChange={onSelectionChange}
+      onBatchSelection={onBatchSelection}
       onCopySelectedUrls={onCopySelectedUrls}
+      isMultiSelectMode={isMultiSelectMode}
+      titleBarProps={titleBarProps}
     />
   );
 }, (prevProps, nextProps) => {
   // Custom comparison - handle Set properly
   if (!areSetsEqual(prevProps.selectedItems, nextProps.selectedItems)) return false;
-  
+
+  // titleBarProps 是对象，浅比它的字段（语义等价于"committedQuery/categoryTag/... 任一变就重渲染"）
+  const ap = prevProps.titleBarProps || {};
+  const bp = nextProps.titleBarProps || {};
+  const tbKeys = ['committedQuery', 'categoryTag', 'categoryLabel', 'imageSearchActive', 'onRemoveCategory', 'onRemoveQuery'];
+  for (const k of tbKeys) {
+    if (ap[k] !== bp[k]) return false;
+  }
+
   // Compare all other props shallowly
-  const keys = Object.keys(nextProps).filter(k => k !== 'selectedItems');
+  const keys = Object.keys(nextProps).filter(k => k !== 'selectedItems' && k !== 'titleBarProps');
   for (const key of keys) {
     if (prevProps[key] !== nextProps[key]) return false;
   }
@@ -150,6 +184,18 @@ const HybridDeepSearchUI = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const deferredSearchQuery = useDeferredValue(searchQuery); // Defer heavy re-renders while typing
   const [lastSearchQuery, setLastSearchQuery] = useState(""); // Store the query used for the current results
+  // === LM CUSTOMIZATION: Search/Tag decoupling START ===
+  // committedQuery: 用户按下搜索按钮/回车后"固化"的搜索词（用于大标题展示）。
+  //                 v4 升级：不再清空 searchQuery，committedQuery 只是 searchQuery 的"已提交"快照。
+  // selectedTags:  来自标签筛选面板的用户手动标签数组（纯手动来源，chip 栏展示）。
+  // categoryTag:   来自左侧产品类型树的分类 tag（单选，string，大标题展示；不混入 selectedTags）。
+  // categoryLabel: 分类的本地化显示名（如 "通用建筑" / "General Building"），由 CategorySidebar 通过 event 透传。
+  // 这四者共同参与 buildSearchPayload 拼装成最终发给后端的 q。
+  const [committedQuery, setCommittedQuery] = useState("");
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [categoryTag, setCategoryTag] = useState("");
+  const [categoryLabel, setCategoryLabel] = useState("");
+  // === LM CUSTOMIZATION: Search/Tag decoupling END ===
   const apiUrl = defaultApiUrl;
   const [embeddingConfig, setEmbeddingConfig] = useState(() => {
     // Get initial embedding config from server mapping based on URL param or first server
@@ -243,6 +289,8 @@ const HybridDeepSearchUI = () => {
     };
   }, []);
   const [imageBase64, setImageBase64] = useState("");
+  const [imageName, setImageName] = useState(""); // 上传图片的文件名
+  const [imageError, setImageError] = useState(""); // 图片校验错误信息
   const [similarSearchAsset, setSimilarSearchAsset] = useState(null);
   const [hybridConfig, setHybridConfig] = useState(DEFAULT_HYBRID_CONFIG);
 
@@ -268,6 +316,9 @@ const HybridDeepSearchUI = () => {
   }, [embeddingConfig]);
   const [configCollapsed, setConfigCollapsed] = useState(SEARCH_DEFAULTS.configCollapsed);
   const [results, setResults] = useState([]);
+  // === LM CUSTOMIZATION: 路径目录树（混合静态 + 搜索结果聚合）===
+  // 每次 results 变化时自动重新聚合，给路径筛选注入「真实数据反馈」
+  const { tree: pathTree } = usePathSuggestions(results);
   const [isLoading, setIsLoading] = useState(false);
   // error state removed - was never rendered in JSX
   const [showScores, setShowScores] = useState(SEARCH_DEFAULTS.showScores);
@@ -280,23 +331,67 @@ const HybridDeepSearchUI = () => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [shouldAutoSearch, setShouldAutoSearch] = useState(false);
   const [showOnlyWithPreviews, setShowOnlyWithPreviews] = useState(SEARCH_DEFAULTS.showOnlyWithPreviews);
+  // === LM CUSTOMIZATION: Sort state ===
+  const [sortBy, setSortBy] = useState('relevance');
   
   const [plugins, setPlugins] = useState({ active: [], inactive: [], isLoading: false });
   const [backend, setBackend] = useState(null);
   const [selectedItems, setSelectedItems] = useState(new Set());
 
-  // Toggle item selection
-  const handleToggleSelection = useCallback((item) => {
-    const itemId = item.id || item.source?.base_key || item.source?.url;
+  // === NEW CARD INTERACTION: Multi-select mode derived state ===
+  const isMultiSelectMode = FEATURE_FLAGS.NEW_CARD_INTERACTION && selectedItems.size > 0;
+
+  // V2 批量打标签 state
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null); // { current, total, failedCount, currentItemName }
+  const [batchFailedItems, setBatchFailedItems] = useState([]); // [{ assetUrl, displayName, reason }]
+  const [failedBatchItems, setFailedBatchItems] = useState(() => new Map()); // U1 持久化到卡片
+  const [lastBatchResult, setLastBatchResult] = useState(null); // { tagName, successItems, mode } 供撤销
+  const [undoToastState, setUndoToastState] = useState(null); // { message, onAction, actionLabel, variant }
+  const lastClickedIndexRef = useRef(null); // Shift+Click 区间
+
+  // Clear all selections (exit multi-select mode)
+  const clearSelection = useCallback(() => {
+    setSelectedItems(new Set());
+    lastClickedIndexRef.current = null;
+  }, []);
+
+  // Toggle item selection（V2 支持 event + index：Shift+Click 区间选择）
+  const resultsForSelectionRef = useRef([]);
+  const handleToggleSelection = useCallback((item, event, index) => {
+    const itemId = item?.id || item?.source?.base_key || item?.source?.url;
+    if (!itemId) return;
+
+    // Shift+Click 区间选择
+    if (event?.shiftKey && typeof index === 'number' && lastClickedIndexRef.current !== null) {
+      const start = Math.min(lastClickedIndexRef.current, index);
+      const end = Math.max(lastClickedIndexRef.current, index);
+      setSelectedItems(prev => {
+        const next = new Set(prev);
+        const currentResults = resultsForSelectionRef.current || [];
+        for (let i = start; i <= end && i < currentResults.length; i++) {
+          const r = currentResults[i];
+          const id = r?.id || r?.source?.base_key || r?.source?.url;
+          if (id) next.add(id);
+        }
+        return next;
+      });
+      lastClickedIndexRef.current = index;
+      return;
+    }
+
     setSelectedItems(prev => {
       const next = new Set(prev);
-      if (next.has(itemId)) {
-        next.delete(itemId);
-      } else {
-        next.add(itemId);
-      }
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
       return next;
     });
+    if (typeof index === 'number') lastClickedIndexRef.current = index;
+  }, []);
+
+  // Batch setter for drag-select (set entire selection at once)
+  const setBatchSelection = useCallback((newSet) => {
+    setSelectedItems(newSet);
   }, []);
 
   // Helper: copy text to clipboard with toast feedback
@@ -350,6 +445,8 @@ const HybridDeepSearchUI = () => {
   // Copy selected URLs - use refs to keep callback reference stable
   const resultsRef = useRef(results);
   resultsRef.current = results;
+  // V2: 同步给 Shift+Click 区间选择 handler 使用
+  resultsForSelectionRef.current = results;
   const selectedItemsRef = useRef(selectedItems);
   selectedItemsRef.current = selectedItems;
   
@@ -368,7 +465,7 @@ const HybridDeepSearchUI = () => {
       copyToClipboard(selectedUrls);
     }
   }, [copyToClipboard]);
-  
+
   // Feedback popup state (only if feature is enabled)
   const [searchCount, setSearchCount] = useState(() => {
     if (!FEATURE_FLAGS.ENABLE_FEEDBACK_MODAL) return 0;
@@ -474,6 +571,9 @@ const HybridDeepSearchUI = () => {
     };
   }, [backend, selectedBackend]);
 
+  // === LM CUSTOMIZATION: 登录态自动检查 ===
+  useAuthGuard({ selectedBackend, apiUrl, enabled: true, checkDelay: 1500 });
+
   // Disclosures
   const { isOpen: isDetailsOpen, onClose: onDetailsClose, onOpen: onDetailsOpen } = useDisclosure();
   const { isOpen: __, onClose: ___onWelcomeClose, onOpen: onWelcomeOpen } = useDisclosure();
@@ -481,7 +581,12 @@ const HybridDeepSearchUI = () => {
   const toast = useToast();
 
   // Shared helper: show unauthorized toast (defined after useToast to avoid "before initialization" error)
+  // === LM CUSTOMIZATION: Auth Guard toast 去重 ===
+  // 当 AuthGuardModal 打开或最近 30s 内刚提示过时，跳过此 toast，避免与居中 Modal 双重提示
   const showUnauthorizedToast = useCallback(() => {
+    if (typeof window !== 'undefined' && Date.now() < (window.__authGuardActiveUntil || 0)) {
+      return;
+    }
     toast({
       title: t('loginRequired'),
       description: t('loginRequiredDescription'),
@@ -498,8 +603,18 @@ const HybridDeepSearchUI = () => {
   // Refs for values that change frequently but shouldn't recreate callbacks
   const searchQueryRef = useRef(searchQuery);
   searchQueryRef.current = searchQuery;
+  // V2: 批量 reindex 的 U8 守卫用同一份 searchQuery（声明放这里避免 TDZ）
+  const searchQueryRefForBatch = useRef('');
+  searchQueryRefForBatch.current = searchQuery;
   const imageBase64Ref = useRef(imageBase64);
   imageBase64Ref.current = imageBase64;
+  // === LM CUSTOMIZATION: Search/Tag decoupling — stable refs for handleSearch ===
+  const committedQueryRef = useRef(committedQuery);
+  committedQueryRef.current = committedQuery;
+  const selectedTagsRef = useRef(selectedTags);
+  selectedTagsRef.current = selectedTags;
+  const categoryTagRef = useRef(categoryTag);
+  categoryTagRef.current = categoryTag;
 
   // URL serialization functions (memoized to stabilize handleFindSimilar reference)
   const serializedDefaultHybridConfig = useMemo(() => JSON.stringify(DEFAULT_HYBRID_CONFIG), []);
@@ -509,9 +624,22 @@ const HybridDeepSearchUI = () => {
     // Read from refs to avoid dependency on frequently-changing values
     const currentQuery = searchQueryRef.current;
     const currentImage = imageBase64Ref.current;
-    
+    // === LM CUSTOMIZATION: Search/Tag decoupling v4 — q 只承载 committedQuery，tags 为手动标签数组 ===
+    const currentCommitted = committedQueryRef.current;
+    const currentTags = selectedTagsRef.current || [];
+
     // Basic search parameters
-    if (currentQuery) params.set('q', currentQuery);
+    // q 仅写入 committedQuery（已提交的搜索词），避免用户打字过程污染 URL；
+    // 未提交的 searchQuery 仅存在于输入框本地，不进 URL。
+    if (currentCommitted && currentCommitted.trim()) {
+      params.set('q', currentCommitted.trim());
+    }
+    // tags 单独编码为逗号分隔字符串，含空格的标签（如 "general building"）作为单个元素保留
+    if (Array.isArray(currentTags) && currentTags.length > 0) {
+      params.set('tags', currentTags.join(','));
+    }
+    // 注：categoryTag 对应的 URL 参数 ?category=<id> 由 CategorySidebar 自己管理（push/replaceState），
+    // 本函数不重复写 category，避免双写冲突。
     // Store large base64 image data in sessionStorage to avoid URL length limit / browser freeze
     if (currentImage) {
       try {
@@ -536,12 +664,14 @@ const HybridDeepSearchUI = () => {
       params.set('server', selectedBackend);
     }
     
-    // Search filters - skip values that match defaults
+    // Search filters - skip values that match defaults or are effectively empty
     Object.entries(searchParams).forEach(([key, value]) => {
-      if (value !== "" && value !== null && value !== undefined) {
-        if (DEFAULT_SEARCH_PARAMS[key] === value) return; // Skip if value matches default
-        params.set(key, value.toString());
-      }
+      if (value === "" || value === null || value === undefined) return;
+      if (DEFAULT_SEARCH_PARAMS[key] === value) return; // Skip if value matches default exactly
+      // Treat 0, "0", false, "false" as empty when default is "" (filter not active)
+      const defaultVal = DEFAULT_SEARCH_PARAMS[key];
+      if (defaultVal === "" && (value === 0 || value === "0" || value === false || value === "false")) return;
+      params.set(key, value.toString());
     });
     
     // Hybrid config serialization — use memoized strings to avoid repeated JSON.stringify
@@ -559,11 +689,38 @@ const HybridDeepSearchUI = () => {
   const deserializeFromURL = () => {
     const urlParams = new URLSearchParams(window.location.search);
     
-    // Basic search parameters
+    // === LM CUSTOMIZATION: Search/Tag decoupling v4 — 兼容新协议 (q + tags) 与旧 URL ===
+    // 规则：?q= 同时写入 searchQuery（输入框显示）与 committedQuery（大标题驱动）；
+    //       ?tags= 进 selectedTags；?category= 由 CategorySidebar.syncFromURL 负责恢复。
+    // 旧链接（?q=a+b+c 无 ?tags=）整串塞进 searchQuery+committedQuery，不自动 split 成 tag。
     const query = urlParams.get('q');
-    if (query) {
+    const tagsParam = urlParams.get('tags');
+    if (tagsParam !== null) {
+      const parsedTags = tagsParam
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      if (parsedTags.length > 0) {
+        setSelectedTags(parsedTags);
+        selectedTagsRef.current = parsedTags;
+      }
+      if (query) {
+        setSearchQuery(query);
+        searchQueryRef.current = query;
+        setCommittedQuery(query);
+        committedQueryRef.current = query;
+        setLastSearchQuery(query);
+      }
+    } else if (query) {
+      // Legacy URL：无 tags 参数，整串作为搜索词处理（向后兼容）
+      if (query.includes(' ') || query.includes('+')) {
+        console.warn('[Search] Legacy URL detected (?q= with spaces, no ?tags=); treating whole string as search query.');
+      }
       setSearchQuery(query);
-      setLastSearchQuery(query); // If loading from URL, treat this as the last search query
+      searchQueryRef.current = query;
+      setCommittedQuery(query);
+      committedQueryRef.current = query;
+      setLastSearchQuery(query);
     }
     
     const img = urlParams.get('img');
@@ -620,6 +777,9 @@ const HybridDeepSearchUI = () => {
     if (hybridConfigParam) {
       try {
         const decodedConfig = JSON.parse(atob(hybridConfigParam));
+        // [TagSearchFix P6] 自动迁移旧链接里的低 tags.tag/tags.value weight，
+        // 让带旧 hybrid_config 参数的分享链接也能搜到 tag。
+        migrateLegacyWeights(decodedConfig);
         setHybridConfig(decodedConfig);
       } catch (error) {
         console.error('Error deserializing hybrid config from URL:', error);
@@ -627,20 +787,18 @@ const HybridDeepSearchUI = () => {
     }
     
     // Auto-search if we have search parameters
-    return query || img; // Return true if we should auto-search
+    return query || img || tagsParam; // Return true if we should auto-search
   };
 
   // Initialize from URL on component mount
   useEffect(() => {
     // Add a small delay to ensure all state is initialized
     const timer = setTimeout(() => {
-      const hasAutoSearchParams = deserializeFromURL();
+      deserializeFromURL();
       setIsInitialized(true);
       
-      // Set flag to trigger auto-search after state updates
-      if (hasAutoSearchParams) {
-        setShouldAutoSearch(true);
-      }
+      // Always trigger auto-search (Fab: show all products on initial load)
+      setShouldAutoSearch(true);
     }, 100);
     
     return () => clearTimeout(timer);
@@ -648,8 +806,9 @@ const HybridDeepSearchUI = () => {
   }, []);
 
   // Auto-search when URL parameters are loaded and ready
+  // === LM CUSTOMIZATION: Remove searchQuery/imageBase64 guard — allow empty query (Fab: show all products) ===
   useEffect(() => {
-    if (shouldAutoSearch && isInitialized && (searchQuery || imageBase64)) {
+    if (shouldAutoSearch && isInitialized) {
       // Add a small delay to ensure all state updates are fully applied
       const timer = setTimeout(() => {
         handleSearch();
@@ -658,7 +817,7 @@ const HybridDeepSearchUI = () => {
       
       return () => clearTimeout(timer);
     }
-  }, [shouldAutoSearch, isInitialized, searchQuery, imageBase64]);
+  }, [shouldAutoSearch, isInitialized]);
 
   // Update URL when parameters change (only after initialization)
   // Note: searchQuery is excluded to avoid URL updates on every keystroke
@@ -681,6 +840,25 @@ const HybridDeepSearchUI = () => {
     serializedHybridConfig  // Memoized to avoid expensive JSON.stringify on every render
   ]);
 
+  // === LM CUSTOMIZATION: blur-trigger-search START ===
+  // v3: 移除 800ms debounce，改为 FabToolbar 子组件通过 onTriggerSearch 显式触发
+  // 保留 ref 避免首次渲染问题
+  const isFirstSearchParamsRender = useRef(true);
+  useEffect(() => {
+    if (!isInitialized) return;
+    if (isFirstSearchParamsRender.current) {
+      isFirstSearchParamsRender.current = false;
+    }
+  }, [serializedSearchParams, isInitialized]);
+
+  // FabToolbar 子组件调用此函数显式触发搜索
+  // 使用 setTimeout(0) 延迟到下一帧，确保 React state 更新已反映到 ref
+  const triggerSearchFromToolbar = useCallback(() => {
+    setTimeout(() => {
+      handleSearchRef.current?.();
+    }, 0);
+  }, []);
+  // === LM CUSTOMIZATION: blur-trigger-search END ===
 
   // Auth check
   useEffect(() => {
@@ -767,6 +945,212 @@ const HybridDeepSearchUI = () => {
     return headers;
   }, [selectedBackend, readAuthCredentials]);
 
+  // ─── V2 批量打标签：编排（放在 getHeaders 之后以避免 TDZ） ────────
+  // 注：searchQueryRefForBatch 已在前面（L605 附近）声明，这里复用。
+
+  const { executeBatch } = useBatchTagger({
+    getHeaders,
+    apiUrl,
+    searchQueryRef: searchQueryRefForBatch,
+  });
+
+  // 获取当前被选中的资产对象列表
+  const getSelectedAssets = useCallback(() => {
+    const list = resultsRef.current || [];
+    const ids = selectedItemsRef.current;
+    return list.filter(r => {
+      const id = r?.id || r?.source?.base_key || r?.source?.url;
+      return ids.has(id);
+    });
+  }, []);
+
+  const handleOpenBatchModal = useCallback(() => {
+    if (selectedItemsRef.current.size === 0) return;
+    setIsBatchModalOpen(true);
+  }, []);
+
+  // 先声明 ref 占位，稍后赋值（因为 runBatch 会 reference handleUndoBatchRef）
+  const handleUndoBatchRef = useRef(null);
+
+  // 实际执行批量的函数（供确认/重做/重试共用）
+  const runBatch = useCallback((params) => {
+    const { items, tagName, mode = 'add', onAllDoneExtra } = params;
+    if (!Array.isArray(items) || items.length === 0) return;
+
+    setBatchProgress({ current: 0, total: items.length, failedCount: 0, currentItemName: '' });
+    setBatchFailedItems([]);
+
+    // 把搜索对象转成 BatchTagger items
+    const batchItems = items.map(r => ({
+      assetUrl: r?.source?.url || r?.source?.base_key || r?.id,
+      serverUrl: '',
+      displayName: (r?.source?.base_key || r?.source?.url || r?.id || '').split('/').pop(),
+      existingTags: Array.isArray(r?.source?.tags) ? r.source.tags : undefined,
+    }));
+
+    executeBatch({
+      items: batchItems,
+      tagName,
+      mode,
+      onProgress: ({ done, total, item, result, reason }) => {
+        setBatchProgress(prev => ({
+          current: done,
+          total,
+          failedCount: (prev?.failedCount || 0) + (result === 'failed' ? 1 : 0),
+          currentItemName: item?.displayName || '',
+        }));
+        if (result === 'failed') {
+          setBatchFailedItems(prev => [
+            ...prev,
+            { assetUrl: item?.assetUrl, displayName: item?.displayName, reason },
+          ]);
+          // U1 持久化到卡片
+          setFailedBatchItems(prev => {
+            const next = new Map(prev);
+            next.set(item?.assetUrl, { reason, timestamp: Date.now() });
+            setTimeout(() => {
+              setFailedBatchItems(p => {
+                const n = new Map(p);
+                n.delete(item?.assetUrl);
+                return n;
+              });
+            }, 30 * 60 * 1000);
+            return next;
+          });
+        } else if (result === 'success') {
+          setFailedBatchItems(prev => {
+            if (!prev.has(item?.assetUrl)) return prev;
+            const next = new Map(prev);
+            next.delete(item?.assetUrl);
+            return next;
+          });
+        }
+      },
+      onComplete: (result) => {
+        setTimeout(() => setBatchProgress(null), 1500);
+        if (onAllDoneExtra) onAllDoneExtra(result);
+
+        if (mode === 'add') {
+          setLastBatchResult({
+            tagName,
+            successItems: result.success.map(s => items.find(r => {
+              const u = r?.source?.url || r?.source?.base_key || r?.id;
+              return u === s.assetUrl;
+            })).filter(Boolean),
+            mode,
+          });
+
+          const successCount = result.success.length;
+          if (successCount > 0) {
+            setUndoToastState({
+              message: (t('batchTagDoneToast', { count: successCount, tag: tagName })
+                || `已为 ${successCount} 个资产打上 "${tagName}"`),
+              actionLabel: t('batchTagUndo') || '撤销',
+              durationMs: 10000,
+              onAction: () => handleUndoBatchRef.current?.(),
+              variant: 'default',
+            });
+          } else {
+            setUndoToastState(null);
+          }
+        }
+      },
+    });
+  }, [executeBatch, t]);
+
+  // 撤销：对 lastBatchResult 反向操作
+  const handleUndoBatch = useCallback(() => {
+    if (!lastBatchResult || lastBatchResult.mode !== 'add') return;
+    const { tagName, successItems } = lastBatchResult;
+    setUndoToastState(null);
+    runBatch({
+      items: successItems,
+      tagName,
+      mode: 'remove',
+      onAllDoneExtra: (undoResult) => {
+        const undoneCount = undoResult.success.length;
+        if (undoneCount > 0) {
+          setUndoToastState({
+            message: (t('batchTagUndoneToast', { count: undoneCount }) || `已撤销 ${undoneCount} 项`),
+            actionLabel: t('batchTagRedo') || '重做',
+            durationMs: 5000,
+            variant: 'neutral',
+            onAction: () => {
+              setUndoToastState(null);
+              runBatch({ items: successItems, tagName, mode: 'add' });
+            },
+          });
+        }
+      },
+    });
+  }, [lastBatchResult, runBatch, t]);
+  useEffect(() => { handleUndoBatchRef.current = handleUndoBatch; }, [handleUndoBatch]);
+
+  const handleBatchRetry = useCallback((failedItem) => {
+    const failedList = failedItem ? [failedItem] : batchFailedItems;
+    if (!failedList || failedList.length === 0) return;
+    const list = resultsRef.current || [];
+    const itemsToRetry = failedList
+      .map(f => list.find(r => (r?.source?.url || r?.source?.base_key || r?.id) === f.assetUrl))
+      .filter(Boolean);
+    if (itemsToRetry.length === 0 || !lastBatchResult?.tagName) return;
+    runBatch({ items: itemsToRetry, tagName: lastBatchResult.tagName, mode: 'add' });
+  }, [batchFailedItems, lastBatchResult, runBatch]);
+
+  const handleRetryFailedFromCard = useCallback((resultObj) => {
+    const url = resultObj?.source?.url || resultObj?.source?.base_key || resultObj?.id;
+    const tagName = lastBatchResult?.tagName;
+    if (!url || !tagName) return;
+    runBatch({ items: [resultObj], tagName, mode: 'add' });
+  }, [lastBatchResult, runBatch]);
+
+  const handleBatchConfirm = useCallback(({ tagName, items }) => {
+    setIsBatchModalOpen(false);
+    runBatch({ items, tagName, mode: 'add' });
+  }, [runBatch]);
+
+  // ─── V2 键盘快捷键（E5 + U4 + U7） ──────────────────────────────
+  const selectVisible = useCallback(() => {
+    try {
+      const cards = document.querySelectorAll('[data-card-index]');
+      const visible = [];
+      const viewportH = window.innerHeight || document.documentElement.clientHeight;
+      cards.forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (r.bottom > 0 && r.top < viewportH) {
+          const idx = parseInt(el.dataset.cardIndex, 10);
+          if (!Number.isNaN(idx)) visible.push(idx);
+        }
+      });
+      const list = resultsRef.current || [];
+      const next = new Set(selectedItemsRef.current);
+      visible.forEach(i => {
+        const r = list[i];
+        const id = r?.id || r?.source?.base_key || r?.source?.url;
+        if (id) next.add(id);
+      });
+      setSelectedItems(next);
+    } catch (_) { /* noop */ }
+  }, []);
+
+  const selectAllResults = useCallback(() => {
+    const list = resultsRef.current || [];
+    const next = new Set();
+    list.forEach(r => {
+      const id = r?.id || r?.source?.base_key || r?.source?.url;
+      if (id) next.add(id);
+    });
+    setSelectedItems(next);
+  }, []);
+
+  useKeyboardShortcuts({
+    isMultiSelectMode: () => selectedItemsRef.current.size > 0,
+    isBatchModalOpen: () => isBatchModalOpen,
+    selectVisible,
+    selectAll: selectAllResults,
+    clearSelection,
+    openBatchModal: handleOpenBatchModal,
+  });
 
   const fetchPluginsInfo = async () => {
     try {
@@ -826,38 +1210,31 @@ const HybridDeepSearchUI = () => {
   };
 
   // Re-indexing functions
+  // [TagSearchFix] 改为内部调用 reindexService.triggerReindexNow（toast 模式），
+  // 自动补齐 refresh_tags/refresh_metadata/refresh_plugins=true 参数；外部调用签名不变。
   const triggerReindexAllPlugins = useCallback(async (url) => {
-    try {
-      const headers = getHeaders();
-      const params = new URLSearchParams();
-      params.append('url', url);
-      
-      const response = await fetch(`${apiUrl}/process/asset?${params.toString()}`, {
-        method: "GET",
-        headers: headers
+    const res = await triggerReindexNowApi(apiUrl, url, getHeaders, {
+      silent: false,
+      poll: false, // 全资产 reindex 较慢，不阻塞 toast 反馈
+    });
+    if (res.status === 401) {
+      toast({
+        title: t('loginRequired'),
+        description: t('loginRequiredDescription'),
+        status: "warning",
+        duration: 8000,
+        isClosable: true,
       });
-      
-      if (response.status === 401) {
-        toast({
-          title: t('loginRequired'),
-          description: t('loginRequiredDescription'),
-          status: "warning",
-          duration: 8000,
-          isClosable: true,
-        });
-      } else if (response.ok) {
-        toast({
-          title: t('reindexingStarted'),
-          description: t('allPluginsReindex'),
-          status: "success",
-          duration: 3000,
-          isClosable: true,
-        });
-      } else {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    } catch (err) {
-      console.error("Error triggering re-index:", err);
+    } else if (res.success || res.status === 200) {
+      toast({
+        title: t('reindexingStarted'),
+        description: t('allPluginsReindex'),
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } else {
+      console.error("Error triggering re-index:", res);
       toast({
         title: t('error'),
         description: t('failedTriggerReindex'),
@@ -869,11 +1246,15 @@ const HybridDeepSearchUI = () => {
   }, [apiUrl, getHeaders, toast, t]);
 
   const triggerReindexIndividualPlugin = useCallback(async (url, pluginName) => {
+    // 单 plugin 路径：附加 plugins 参数。reindexService 默认只带通用参数，这里直接 fetch 以保留 plugin 维度。
     try {
       const headers = getHeaders();
       const params = new URLSearchParams();
       params.append('url', url);
       params.append('plugins', pluginName);
+      params.append('refresh_tags', 'true');
+      params.append('refresh_metadata', 'true');
+      params.append('refresh_plugins', 'true');
       
       const response = await fetch(`${apiUrl}/process/asset?${params.toString()}`, {
         method: "GET",
@@ -936,6 +1317,8 @@ const HybridDeepSearchUI = () => {
   // Refs for values used in handleFindSimilar to reduce dependency chain
   const searchParamsRef = useRef(searchParams);
   searchParamsRef.current = searchParams;
+  const sortByRef = useRef(sortBy);
+  sortByRef.current = sortBy;
   const hybridConfigRef = useRef(hybridConfig);
   hybridConfigRef.current = hybridConfig;
   const embeddingConfigRef = useRef(embeddingConfig);
@@ -967,6 +1350,7 @@ const HybridDeepSearchUI = () => {
       return_metadata: true,
       return_vision_generated_metadata: true,
       return_usd_properties: true,
+      return_usd_dimensions: true,
       return_tags: true,
       
       // Hybrid search configuration
@@ -984,6 +1368,14 @@ const HybridDeepSearchUI = () => {
         Object.entries(currentSearchParams).filter(([_, value]) => value !== "" && value !== null && value !== undefined)
       ),
     };
+
+    // bbox 参数转 float
+    ['min_bbox_x', 'max_bbox_x', 'min_bbox_y', 'max_bbox_y', 'min_bbox_z', 'max_bbox_z'].forEach(key => {
+      if (key in requestBody) {
+        const num = parseFloat(requestBody[key]);
+        if (!isNaN(num)) requestBody[key] = num; else delete requestBody[key];
+      }
+    });
 
     // Clear existing results and start loading
     setIsLoading(true);
@@ -1013,6 +1405,18 @@ const HybridDeepSearchUI = () => {
           });
           setIsLoading(false);
           return Promise.reject(new Error('__auth_required__'));
+        }
+        if (response.status === 422) {
+          // 422 通常是筛选条件导致无法处理，友好提示用户
+          toast({
+            title: t('noResultsFound') || '未搜到结果',
+            description: t('similarSearch422Hint') || '当前筛选条件下无匹配结果，请尝试清除筛选条件后重试',
+            status: "warning",
+            duration: 5000,
+            isClosable: true,
+          });
+          setIsLoading(false);
+          return Promise.reject(new Error('__no_results__'));
         }
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -1046,7 +1450,7 @@ const HybridDeepSearchUI = () => {
         }
       })
       .catch(error => {
-        if (error.message === '__auth_required__') return; // Already handled above
+        if (error.message === '__auth_required__' || error.message === '__no_results__') return;
         console.error("Similar search error:", error);
         toast({
           title: t('similarSearchFailed'),
@@ -1066,27 +1470,43 @@ const HybridDeepSearchUI = () => {
     if (file) {
       // Reset the input value so re-selecting the same file still triggers onChange
       e.target.value = "";
+      setImageName(file.name || "image");
+      // 校验文件大小 >10MB
+      if (file.size > 10 * 1024 * 1024) {
+        setImageError(t('imageTooLarge') || '图片过大(>10MB)，请压缩后重试');
+        setImageBase64(""); // 不加载过大的图片
+        return;
+      }
+      setImageError("");
       const reader = new FileReader();
       reader.onload = (event) => {
         setImageBase64(event.target.result);
-        setSimilarSearchAsset(null); // Auto-close similar search box when image is uploaded
+        setSimilarSearchAsset(null);
       };
       reader.readAsDataURL(file);
     }
-  }, []);
+  }, [t]);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
     if (file && file.type.startsWith("image/")) {
+      setImageName(file.name || "image");
+      // 校验文件大小 >10MB
+      if (file.size > 10 * 1024 * 1024) {
+        setImageError(t('imageTooLarge') || '图片过大(>10MB)，请压缩后重试');
+        setImageBase64("");
+        return;
+      }
+      setImageError("");
       const reader = new FileReader();
       reader.onload = (event) => {
         setImageBase64(event.target.result);
-        setSimilarSearchAsset(null); // Auto-close similar search box when image is dropped
+        setSimilarSearchAsset(null);
       };
       reader.readAsDataURL(file);
     }
-  }, []);
+  }, [t]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -1101,6 +1521,14 @@ const HybridDeepSearchUI = () => {
         const imageType = item.types.find(type => type.startsWith('image/'));
         if (imageType) {
           const blob = await item.getType(imageType);
+          setImageName("clipboard_image." + (imageType.split('/')[1] || 'png'));
+          // 校验文件大小 >10MB
+          if (blob.size > 10 * 1024 * 1024) {
+            setImageError(t('imageTooLarge') || '图片过大(>10MB)，请压缩后重试');
+            setImageBase64("");
+            return;
+          }
+          setImageError("");
           const reader = new FileReader();
           reader.onload = (event) => {
             setImageBase64(event.target.result);
@@ -1138,18 +1566,78 @@ const HybridDeepSearchUI = () => {
 
   const handleClearImage = useCallback(() => {
     setImageBase64("");
+    setImageName("");
+    setImageError("");
     setSimilarSearchAsset(null);
     sessionStorage.removeItem('search_image_base64');
+    // 清除图片后自动触发搜索，回到浏览全部模式
+    setTimeout(() => handleSearchRef.current?.(), 100);
   }, []);
+
+  // === LM CUSTOMIZATION: Sync image state with TopSearchBar START ===
+  // 监听从 TopSearchBar 上传/清除的图片
+  useEffect(() => {
+    const handleTopImage = (e) => {
+      const base64 = e.detail?.imageBase64 || '';
+      const name = e.detail?.imageName || '';
+      const error = e.detail?.imageError || '';
+      setImageBase64(base64);
+      setImageName(name);
+      setImageError(error);
+      if (base64) {
+        setSimilarSearchAsset(null);
+      }
+    };
+    window.addEventListener('top-image-uploaded', handleTopImage);
+    return () => window.removeEventListener('top-image-uploaded', handleTopImage);
+  }, []);
+
+  // 当 imageBase64 变化时通知 TopSearchBar 更新缩略图
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('image-state-synced', {
+      detail: { imageBase64: imageBase64 || '' }
+    }));
+  }, [imageBase64]);
+
+  // TopSearchBar 挂载后主动请求当前图片状态
+  useEffect(() => {
+    const handleRequestImageState = () => {
+      window.dispatchEvent(new CustomEvent('image-state-synced', {
+        detail: { imageBase64: imageBase64 || '' }
+      }));
+    };
+    window.addEventListener('request-image-state', handleRequestImageState);
+    return () => window.removeEventListener('request-image-state', handleRequestImageState);
+  });
+  // === LM CUSTOMIZATION: Sync image state with TopSearchBar END ===
 
   // Search handling
   const handleSearch = useCallback(async () => {
-    const currentQuery = searchQueryRef.current;
+    // === LM CUSTOMIZATION: Search/Tag decoupling v4 — committedQuery 仅作快照，不再清空搜索框 ===
+    // 把输入框当前文本固化为 committedQuery（供大标题使用），但保留搜索框文字不变——
+    // 与 Fab/Google 一致：回车后搜索词仍留在输入框里，光标由 TopSearchBar 做 select()。
+    const liveQuery = (searchQueryRef.current || '').trim();
+    if (liveQuery !== (committedQueryRef.current || '')) {
+      committedQueryRef.current = liveQuery;
+      setCommittedQuery(liveQuery);
+    }
+
+    // buildSearchPayload 把 committedQuery / searchQuery / categoryTag / selectedTags 四路合并成
+    // 当前后端能消费的 q 字符串。未来后端就绪后只改 buildSearchPayload。
+    // 注：committedQuery 此刻已是 liveQuery，searchQuery 一并传入时会被 trim+dedup 效果等价。
+    const payload = buildSearchPayload({
+      committedQuery: liveQuery,
+      // searchQuery 与 committedQuery 在 v4 里通常相同，不再重复传避免 q 中出现"abc abc"
+      searchQuery: '',
+      categoryTag: categoryTagRef.current,
+      selectedTags: selectedTagsRef.current,
+    });
+    const currentQuery = payload.q;
     const currentImage = imageBase64Ref.current;
     const currentSearchParams = searchParamsRef.current;
     const currentHybridConfig = hybridConfigRef.current;
     const currentEmbeddingConfig = embeddingConfigRef.current;
-    
+
     setIsLoading(true);
     setSimilarSearchAsset(null); // Clear similar search when doing regular search
     setLastSearchQuery(currentQuery); // Store the query being used for this search
@@ -1170,13 +1658,19 @@ const HybridDeepSearchUI = () => {
         return_metadata: true,
         return_vision_generated_metadata: true,
         return_usd_properties: true,
+        return_usd_dimensions: true,
         return_tags: true,
         
-        // Hybrid search configuration
-        scoring_config: currentHybridConfig,
-        
-        // Main search query
-        hybrid_text_query: currentQuery || null,
+        // === LM CUSTOMIZATION: 空 query 时使用浏览模式（不发 text/vector query） ===
+        ...(currentQuery ? {
+          // 有搜索词：正常 hybrid 搜索
+          scoring_config: currentHybridConfig,
+          hybrid_text_query: currentQuery,
+        } : {
+          // 无搜索词：浏览全部产品模式（仅靠 file_extension_include 获取所有正常资产）
+          ...(currentImage ? { scoring_config: currentHybridConfig } : {}),
+          file_extension_include: 'uasset,fbx',
+        }),
         
         // Vector queries (for image and text-to-vector search)
         vector_queries: (() => {
@@ -1227,9 +1721,22 @@ const HybridDeepSearchUI = () => {
           return vectorQueries;
         })(),
         
-        // Legacy filters
+        // Legacy filters (exclude client-side-only filter fields that backend handles incorrectly)
         ...Object.fromEntries(
-          Object.entries(currentSearchParams).filter(([_, value]) => value !== "" && value !== null && value !== undefined)
+          Object.entries(currentSearchParams).filter(([key, value]) => {
+            if (value === "" || value === null || value === undefined) return false;
+            // 仅 file_name/exclude_file_name/精度阈值 不发后端（后端不支持或做精确匹配导致0结果）
+            // 其他字段（file_extension_exclude 等）后端能正确处理，继续发送
+            const clientOnlyFields = [
+              'file_name', 'exclude_file_name', 'similarity_threshold', 'cutoff_threshold',
+              'file_size_greater_than', 'file_size_less_than',
+              'file_extension_include', 'file_extension_exclude',
+              'created_after', 'created_before', 'modified_after', 'modified_before',
+              'created_by', 'exclude_created_by', 'modified_by', 'exclude_modified_by',
+              'search_path', 'exclude_search_path', 'search_in_scene', 'filter_url_regexp',
+            ];
+            return !clientOnlyFields.includes(key);
+          })
         ),
       };
 
@@ -1239,6 +1746,23 @@ const HybridDeepSearchUI = () => {
           delete requestBody[key];
         }
       });
+
+      // bbox 参数需要转为 float（后端 API 要求 float 类型）
+      const bboxKeys = ['min_bbox_x', 'max_bbox_x', 'min_bbox_y', 'max_bbox_y', 'min_bbox_z', 'max_bbox_z'];
+      bboxKeys.forEach(key => {
+        if (key in requestBody && requestBody[key] !== undefined) {
+          const num = parseFloat(requestBody[key]);
+          if (!isNaN(num)) {
+            requestBody[key] = num;
+          } else {
+            delete requestBody[key];
+          }
+        }
+      });
+      // 浏览模式（空 query）：移除 file_extension_exclude 避免与 include 冲突
+      if (!currentQuery && !currentImage && requestBody.file_extension_include) {
+        delete requestBody.file_extension_exclude;
+      }
 
       const response = await fetch(`${apiUrl}/search_hybrid`, {
         method: "POST",
@@ -1265,12 +1789,172 @@ const HybridDeepSearchUI = () => {
       const data = await response.json();
       
       // Handle V3 response format
-      if (data.hits) {
-        setResults(data.hits);
-      } else {
-        // Fallback to V2 format if needed
-        setResults(data || []);
+      const hits = data.hits || data || [];
+
+      // === LM CUSTOMIZATION: 客户端过滤（后端暂不支持筛选参数执行） ===
+      const filteredHits = (() => {
+        let result = hits;
+        const params = currentSearchParams;
+
+        // 文件名包含
+        if (params.file_name) {
+          const terms = params.file_name.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (terms.length) {
+            result = result.filter(h => {
+              const name = (h.source?.name || h.source?.base_key || '').toLowerCase();
+              return terms.some(t => name.includes(t));
+            });
+          }
+        }
+        // 文件名排除
+        if (params.exclude_file_name) {
+          const terms = params.exclude_file_name.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (terms.length) {
+            result = result.filter(h => {
+              const name = (h.source?.name || h.source?.base_key || '').toLowerCase();
+              return !terms.some(t => name.includes(t));
+            });
+          }
+        }
+        // 扩展名包含
+        if (params.file_extension_include) {
+          const exts = params.file_extension_include.split(',').map(s => s.trim().toLowerCase().replace(/^\./, '')).filter(Boolean);
+          if (exts.length) {
+            result = result.filter(h => {
+              const ext = (h.source?.ext || '').toLowerCase();
+              return exts.some(e => {
+                if (e.includes('*')) { const re = new RegExp('^' + e.replace(/\*/g, '.*') + '$'); return re.test(ext); }
+                return ext === e;
+              });
+            });
+          }
+        }
+        // 扩展名排除
+        if (params.file_extension_exclude) {
+          const exts = params.file_extension_exclude.split(',').map(s => s.trim().toLowerCase().replace(/^\./, '')).filter(Boolean);
+          if (exts.length) {
+            result = result.filter(h => {
+              const ext = (h.source?.ext || '').toLowerCase();
+              if (!ext) return true; // 没有扩展名的保留
+              return !exts.some(e => {
+                if (e.includes('*')) {
+                  const re = new RegExp('^' + e.replace(/\*/g, '.*') + '$');
+                  // 保护 uasset/fbx 等主要 3D 资产格式不被 usd* 等通配符误杀
+                  if (e.startsWith('usd') && (ext === 'uasset' || ext === 'fbx')) return false;
+                  return re.test(ext);
+                }
+                return ext === e;
+              });
+            });
+          }
+        }
+        // 路径包含
+        if (params.search_path) {
+          const paths = params.search_path.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (paths.length) {
+            result = result.filter(h => {
+              const p = (h.source?.path || h.source?.base_key || '').toLowerCase();
+              return paths.some(t => p.includes(t));
+            });
+          }
+        }
+        // 路径排除
+        if (params.exclude_search_path) {
+          const paths = params.exclude_search_path.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (paths.length) {
+            result = result.filter(h => {
+              const p = (h.source?.path || h.source?.base_key || '').toLowerCase();
+              return !paths.some(t => p.includes(t));
+            });
+          }
+        }
+        // 文件大小过滤（用户输入单位为 KB，source.size 单位为 bytes）
+        if (params.file_size_greater_than) {
+          const minSizeKB = parseFloat(params.file_size_greater_than);
+          if (!isNaN(minSizeKB)) result = result.filter(h => (h.source?.size || 0) >= minSizeKB * 1024);
+        }
+        if (params.file_size_less_than) {
+          const maxSizeKB = parseFloat(params.file_size_less_than);
+          if (!isNaN(maxSizeKB)) result = result.filter(h => (h.source?.size || Infinity) <= maxSizeKB * 1024);
+        }
+        // 日期过滤（created 与 modified 为 OR 关系，满足其一即显示）
+        {
+          const hasAfter = params.modified_after || params.created_after;
+          const hasBefore = params.modified_before || params.created_before;
+          if (hasAfter || hasBefore) {
+            result = result.filter(h => {
+              const mt = h.source?.modified_timestamp || '';
+              const ct = h.source?.created_timestamp || '';
+              // after 条件：modified >= after OR created >= after
+              if (hasAfter) {
+                const afterDate = params.modified_after || params.created_after;
+                const passModified = mt && mt >= afterDate;
+                const passCreated = ct && ct >= afterDate;
+                if (!passModified && !passCreated) return false;
+              }
+              // before 条件：modified <= before OR created <= before
+              if (hasBefore) {
+                const beforeDate = (params.modified_before || params.created_before) + 'T23:59:59';
+                const passModified = mt && mt <= beforeDate;
+                const passCreated = ct && ct <= beforeDate;
+                if (!passModified && !passCreated) return false;
+              }
+              return true;
+            });
+          }
+        }
+        // 用户过滤
+        if (params.created_by) {
+          const users = params.created_by.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (users.length) {
+            result = result.filter(h => users.includes((h.source?.created_by || '').toLowerCase()));
+          }
+        }
+        if (params.modified_by) {
+          const users = params.modified_by.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (users.length) {
+            result = result.filter(h => users.includes((h.source?.modified_by || '').toLowerCase()));
+          }
+        }
+        // === LM CUSTOMIZATION: 精度过滤（前端基于 score 百分位过滤） ===
+        // 相似度阈值 → 保留 top N% 结果（0.75 = 保留前 75%）
+        // 截断阈值 → 最大保留比例（0.5 = 最多保留前 50%），取两者更严格的
+        if (result.length > 1 && (params.similarity_threshold || params.cutoff_threshold)) {
+          const simThreshold = params.similarity_threshold ? parseFloat(params.similarity_threshold) : 1;
+          const cutThreshold = params.cutoff_threshold ? parseFloat(params.cutoff_threshold) : 1;
+          
+          if (!isNaN(simThreshold) && !isNaN(cutThreshold)) {
+            // 取更严格（更小）的比例
+            const keepRatio = Math.min(
+              simThreshold > 0 && simThreshold < 1 ? simThreshold : 1,
+              cutThreshold > 0 && cutThreshold < 1 ? cutThreshold : 1
+            );
+            
+            if (keepRatio < 1) {
+              const keepCount = Math.max(1, Math.ceil(result.length * keepRatio));
+              if (keepCount < result.length) {
+                // 按 score 降序，保留前 keepCount 条
+                const sorted = [...result].sort((a, b) => (b.score || 0) - (a.score || 0));
+                const keepIds = new Set(sorted.slice(0, keepCount).map(h => h.id));
+                result = result.filter(h => keepIds.has(h.id));
+              }
+            }
+          }
+        }
+        // === LM CUSTOMIZATION: 精度过滤 END ===
+        return result;
+      })();
+      // === LM CUSTOMIZATION: 客户端过滤 END ===
+
+      setResults(filteredHits);
+
+      // === LM CUSTOMIZATION: 搜索完成后按当前排序重排结果 ===
+      const currentSort = sortByRef.current;
+      if (currentSort && currentSort !== 'relevance') {
+        // 延迟一个 tick，等 state 写入后再重排
+        setTimeout(() => onSortChange(currentSort), 0);
       }
+      // === LM CUSTOMIZATION: Sort after search END ===
 
       // Handle feedback popup after successful search
       handleSearchComplete();
@@ -1354,6 +2038,63 @@ const HybridDeepSearchUI = () => {
     if (e.key === "Enter") handleSearchRef.current();
   }, []);
 
+  // === LM CUSTOMIZATION: Category sidebar + Top search bar integration START ===
+  // 🔥 v4（2026-05 结果区大标题版）：
+  //   - 分类选中 → 写入 categoryTag（单值，替换而非追加）；不再混入 selectedTags。
+  //   - 分类清除 → 清空 categoryTag；selectedTags 不受影响。
+  //   - 顶部搜索框输入 → 只更新 searchQuery（输入框受控）；回车/搜索时 handleSearch 会同步 committedQuery 快照并保留搜索框文字。
+  //   - 大标题由 committedQuery + categoryTag 驱动；chip 栏只含用户手动 selectedTags。
+  useEffect(() => {
+    const handleCategorySelected = (e) => {
+      const tag = (e.detail?.searchTag || '').trim();
+      const label = (e.detail?.categoryLabel || '').trim() || tag;
+      if (!tag) return;
+      categoryTagRef.current = tag;
+      setCategoryTag(tag);
+      setCategoryLabel(label);
+      setTimeout(() => handleSearchRef.current?.(), 50);
+    };
+
+    const handleCategoryCleared = () => {
+      // 清空分类（selectedTags / searchQuery 不受影响）
+      categoryTagRef.current = '';
+      setCategoryTag('');
+      setCategoryLabel('');
+      setTimeout(() => handleSearchRef.current?.(), 50);
+    };
+
+    // 顶栏搜索框输入同步（仅影响 searchQuery，视觉零联动标签筛选）
+    const handleTopSearch = (e) => {
+      const q = e.detail?.query ?? '';
+      setSearchQuery(q);
+      searchQueryRef.current = q;
+    };
+
+    // === FIX: 监听 trigger-search 事件，让顶栏箭头按钮和 Enter 键能触发搜索 ===
+    const handleTriggerSearch = () => {
+      handleSearchRef.current?.();
+    };
+
+    window.addEventListener('category-selected', handleCategorySelected);
+    window.addEventListener('category-cleared', handleCategoryCleared);
+    window.addEventListener('top-search-query-changed', handleTopSearch);
+    window.addEventListener('trigger-search', handleTriggerSearch);
+    return () => {
+      window.removeEventListener('category-selected', handleCategorySelected);
+      window.removeEventListener('category-cleared', handleCategoryCleared);
+      window.removeEventListener('top-search-query-changed', handleTopSearch);
+      window.removeEventListener('trigger-search', handleTriggerSearch);
+    };
+  }, []);
+
+  // 搜索词变化时同步回顶栏搜索框（仅用于"外部显式清空搜索框"这一类重置场景）
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('search-query-synced', {
+      detail: { query: searchQuery }
+    }));
+  }, [searchQuery]);
+  // === LM CUSTOMIZATION: Category sidebar + Top search bar integration END ===
+
   // Stable callbacks for Switch/Toggle controls to avoid inline functions in JSX
   const onShowOnlyWithPreviewsChange = useCallback((e) => {
     setShowOnlyWithPreviews(e.target.checked);
@@ -1367,7 +2108,106 @@ const HybridDeepSearchUI = () => {
   const onSetViewModeGrid = useCallback(() => setViewMode("grid"), []);
   const onToggleGridSize = useCallback(() => setGridSize(prev => prev === "L" ? "S" : "L"), []);
 
-  const onSimilarSearchClear = useCallback(() => setSimilarSearchAsset(null), []);
+  // === LM CUSTOMIZATION: Sort handler — 客户端排序，选择后自动重排结果 ===
+  const onSortChange = useCallback((value) => {
+    setSortBy(value);
+    if (value === 'relevance') {
+      // 相关度 → 重新搜索恢复后端默认排序
+      setTimeout(() => handleSearchRef.current?.(), 50);
+      return;
+    }
+    setResults(prev => {
+      if (prev.length <= 1) return prev; // 只有 0-1 条结果无需排序
+      const sorted = [...prev];
+      switch (value) {
+        case 'newest':
+          sorted.sort((a, b) => {
+            const da = a.source?.modified_timestamp || a.source?.created_timestamp || '';
+            const db = b.source?.modified_timestamp || b.source?.created_timestamp || '';
+            return db.localeCompare(da);
+          });
+          break;
+        case 'oldest':
+          sorted.sort((a, b) => {
+            const da = a.source?.modified_timestamp || a.source?.created_timestamp || '';
+            const db = b.source?.modified_timestamp || b.source?.created_timestamp || '';
+            return da.localeCompare(db);
+          });
+          break;
+        case 'name-asc':
+          sorted.sort((a, b) => {
+            const na = (a.source?.base_key || a.source?.url || '').split('/').pop().toLowerCase();
+            const nb = (b.source?.base_key || b.source?.url || '').split('/').pop().toLowerCase();
+            return na.localeCompare(nb);
+          });
+          break;
+        case 'name-desc':
+          sorted.sort((a, b) => {
+            const na = (a.source?.base_key || a.source?.url || '').split('/').pop().toLowerCase();
+            const nb = (b.source?.base_key || b.source?.url || '').split('/').pop().toLowerCase();
+            return nb.localeCompare(na);
+          });
+          break;
+        case 'tagHitFirst': {
+          // V2 E6: 命中 tag 的项前移（stable sort 不破坏原相对顺序）
+          const isTagHit = (r) => {
+            const explanations = r?.metadata?.explanations || [];
+            return explanations.some(exp =>
+              Array.isArray(exp?.matched_terms) &&
+              exp.matched_terms.some(term => typeof term === 'string' && term.includes('tags.tag'))
+            );
+          };
+          sorted.sort((a, b) => {
+            const ha = isTagHit(a) ? 1 : 0;
+            const hb = isTagHit(b) ? 1 : 0;
+            return hb - ha;
+          });
+          break;
+        }
+        default: break;
+      }
+      return sorted;
+    });
+  }, []);
+  // === LM CUSTOMIZATION: Sort handler END ===
+
+  const onSimilarSearchClear = useCallback(() => {
+    setSimilarSearchAsset(null);
+    // 清除后自动触发正常搜索，回到默认浏览状态
+    setTimeout(() => handleSearchRef.current?.(), 100);
+  }, []);
+
+  // === LM CUSTOMIZATION: ResultsTitleBar — 大标题相关回调与 props 打包 ===
+  // 移除搜索词：清空 committedQuery + searchQuery + URL ?q=
+  const onRemoveCommittedQuery = useCallback(() => {
+    committedQueryRef.current = '';
+    searchQueryRef.current = '';
+    setCommittedQuery('');
+    setSearchQuery('');
+    setTimeout(() => handleSearchRef.current?.(), 50);
+  }, []);
+
+  // 移除分类：清 categoryTag + 同步 CategorySidebar URL（删 ?category=）
+  const onRemoveCategoryTag = useCallback(() => {
+    categoryTagRef.current = '';
+    setCategoryTag('');
+    setCategoryLabel('');
+    const url = new URL(window.location);
+    url.searchParams.delete('category');
+    window.history.pushState({}, '', url);
+    // 派发 category-cleared 让 CategorySidebar 同步清除 selectedId 高亮（它内部监听 popstate + 本事件）
+    window.dispatchEvent(new CustomEvent('category-cleared', { detail: { searchTag: '' } }));
+    setTimeout(() => handleSearchRef.current?.(), 50);
+  }, []);
+
+  const titleBarProps = useMemo(() => ({
+    committedQuery,
+    categoryTag,
+    categoryLabel,
+    imageSearchActive: !!imageBase64,
+    onRemoveQuery: onRemoveCommittedQuery,
+    onRemoveCategory: onRemoveCategoryTag,
+  }), [committedQuery, categoryTag, categoryLabel, imageBase64, onRemoveCommittedQuery, onRemoveCategoryTag]);
 
   // Memoized active filter count for sidebar badge
   const activeFilterCount = useMemo(() => {
@@ -1379,12 +2219,19 @@ const HybridDeepSearchUI = () => {
   }, [searchParams]);
 
   return (
-    <Box minH="100vh" bg="#141517" color="white" p={4}>
-      <VStack spacing={6} align="stretch" maxW="100%" mx="auto">
+    <Box
+      h="calc(100vh - 72px)"
+      bg="#141517"
+      color="white"
+      p={4}
+      overflow="hidden"
+    >
+      <VStack spacing={6} align="stretch" maxW="100%" mx="auto" h="100%" overflow="hidden">
         {/* Main Search Area */}
         <VStack spacing={4} align="stretch">
-          {/* Search Input + Image Preview Row */}
-          <HStack align="center">
+          {/* === LM CUSTOMIZATION: Hide search bar (moved to top bar) START === */}
+          {/* 搜索输入行保留在 DOM 中但隐藏，保持数据流不变 */}
+          <HStack align="center" display="none">
             <InputGroup size="lg" flex={1} minWidth="200px">
               <Input
                 placeholder={t('searchPlaceholder')}
@@ -1449,122 +2296,51 @@ const HybridDeepSearchUI = () => {
               {t('search')}
             </Button>
           </HStack>
+          {/* === LM CUSTOMIZATION: Hide search bar (moved to top bar) END === */}
 
-          {/* Controls under search button */}
-          <HStack justify="flex-end" spacing={8}>
-            <FormControl display="flex" alignItems="center" size="sm" w="auto">
-              <HStack spacing={1}>
-                <FormLabel htmlFor="remove-duplicates" mb="0" fontSize="sm">
-                  {t('removeDuplicates')}
-                </FormLabel>
-                <Tooltip label={t('removeDuplicatesHelp')} placement="top">
-                  <InfoIcon color="gray.400" boxSize={3} />
-                </Tooltip>
-              </HStack>
-              <Switch
-                id="remove-duplicates"
-                isChecked={searchParams.deduplicate_by_hash}
-                onChange={handleRemoveDuplicatesChange}
-                colorScheme="yellow"
-                ml={3}
-              />
-            </FormControl>
-            <FormControl display="flex" alignItems="center" size="sm" w="auto">
-              <HStack spacing={1}>
-                <FormLabel htmlFor="with-previews" mb="0" fontSize="sm">
-                  {t('withPreviews')}
-                </FormLabel>
-                <Tooltip label={t('withPreviewsHelp')} placement="top">
-                  <InfoIcon color="gray.400" boxSize={3} />
-                </Tooltip>
-              </HStack>
-              <Switch
-                id="with-previews"
-                isChecked={showOnlyWithPreviews}
-                onChange={onShowOnlyWithPreviewsChange}
-                colorScheme="yellow"
-                ml={3}
-              />
-            </FormControl>
-            <FormControl display="flex" alignItems="center" size="sm" w="auto">
-              <FormLabel htmlFor="show-scores" mb="0" fontSize="sm" mr={3}>
-                {t('showScores')}
-              </FormLabel>
-              <Switch
-                id="show-scores"
-                isChecked={showScores}
-                onChange={onShowScoresChange}
-                colorScheme="yellow"
-              />
-            </FormControl>
-            <FormControl display="flex" alignItems="center" size="sm" w="auto">
-              <FormLabel htmlFor="view-mode" mb="0" fontSize="sm" mr={3}>
-                {t('view')}
-              </FormLabel>
-              <HStack spacing={1} bg="gray.700" borderRadius="md" p={1}>
-                <IconButton
-                  size="xs"
-                  variant={viewMode === "list" ? "solid" : "ghost"}
-                  colorScheme={viewMode === "list" ? "yellow" : "gray"}
-                  icon={<HamburgerIcon />}
-                  onClick={onSetViewModeList}
-                  aria-label={t('view')}
-                />
-                <IconButton
-                  size="xs"
-                  variant={viewMode === "grid" ? "solid" : "ghost"}
-                  colorScheme={viewMode === "grid" ? "yellow" : "gray"}
-                  icon={<ViewIcon />}
-                  onClick={onSetViewModeGrid}
-                  aria-label={t('view')}
-                />
-                {viewMode === "grid" && (
-                  <IconButton
-                    size="xs"
-                    variant="ghost"
-                    colorScheme="gray"
-                    icon={gridSize === "L" ? <MinusIcon /> : <AddIcon />}
-                    onClick={onToggleGridSize}
-                    aria-label="Toggle grid size"
-                    title={gridSize === "L" ? t('switchToCompactGrid') : t('switchToLargeGrid')}
-                  />
-                )}
-              </HStack>
-            </FormControl>
-          </HStack>
+          {/* === LM CUSTOMIZATION: Image upload now integrated into TopSearchBar (camera icon) === */}
 
-          {/* Image Preview - positioned below controls row, right-aligned */}
-          {imageBase64 && (
-            <HStack justify="flex-end">
-              <Box
-                position="relative"
-                bg="gray.800"
-                border="1px solid"
-                borderColor="gray.600"
-                borderRadius="12px"
-                p={3}
-                transition="all 0.2s ease"
-                _hover={{ borderColor: "#FFD230", boxShadow: "0 0 12px rgba(255, 210, 48, 0.15)" }}
-                maxW="360px"
-              >
-                <HStack spacing={4} align="center">
-                  {/* Image thumbnail */}
-                  <Box
-                    position="relative"
-                    flexShrink={0}
-                    borderRadius="8px"
-                    overflow="hidden"
-                    boxShadow="0 2px 8px rgba(0,0,0,0.4)"
-                    bg="gray.900"
-                  >
-                    <Image
+          {/* === LM CUSTOMIZATION: Controls moved into FabToolbar settings popover === */}
+
+          {/* === LM CUSTOMIZATION: Image search preview card (similar to "Find Similar" style) === */}
+          {/* 正常态：显示缩略图+文件名+搜索状态；异常态：显示警告 */}
+          {(imageBase64 || imageError) && (
+            <Box
+              position="relative"
+              bg="gray.800"
+              border="1px solid"
+              borderColor={imageError ? "orange.400" : "gray.600"}
+              borderRadius="12px"
+              p={3}
+              transition="all 0.2s ease"
+              _hover={{ borderColor: imageError ? "orange.300" : "green.400", boxShadow: imageError ? "0 0 12px rgba(237, 137, 54, 0.15)" : "0 0 12px rgba(118, 230, 80, 0.15)" }}
+              maxW="520px"
+            >
+              <HStack spacing={4} align="center">
+                {/* Image thumbnail */}
+                <Box
+                  position="relative"
+                  flexShrink={0}
+                  borderRadius="8px"
+                  overflow="hidden"
+                  boxShadow="0 2px 8px rgba(0,0,0,0.4)"
+                  bg="gray.900"
+                  w="120px"
+                  h="90px"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                >
+                  {imageBase64 ? (
+                    <img
                       src={imageBase64}
-                      alt="Search image"
-                      w="120px"
-                      h="90px"
-                      objectFit="cover"
+                      alt="Uploaded"
+                      style={{ width: '120px', height: '90px', objectFit: 'cover', display: 'block' }}
                     />
-                    {/* Subtle gradient overlay */}
+                  ) : (
+                    <Text fontSize="xl">⚠️</Text>
+                  )}
+                  {imageBase64 && (
                     <Box
                       position="absolute"
                       bottom={0}
@@ -1575,38 +2351,68 @@ const HybridDeepSearchUI = () => {
                       borderBottomRadius="8px"
                       pointerEvents="none"
                     />
-                  </Box>
+                  )}
+                </Box>
 
-                  {/* Info section */}
-                  <VStack align="start" spacing={2} flex={1} minW={0}>
-                    <HStack spacing={2}>
-                      <Box w="6px" h="6px" borderRadius="full" bg="#76E650" flexShrink={0} />
-                      <Text fontSize="xs" color="#76E650" fontWeight="600" letterSpacing="0.5px" textTransform="uppercase">
-                        {t('imageSearchActive')}
+                {/* Info section */}
+                <VStack align="start" spacing={1} flex={1} minW={0}>
+                  {imageError ? (
+                    <>
+                      {/* 异常态 */}
+                      <Text fontSize="xs" color="orange.300" fontWeight="600" noOfLines={1}>
+                        {imageName || 'image'}
                       </Text>
-                    </HStack>
-                    <Text fontSize="xs" color="gray.400">
-                      {t('imageUploadedHint')}
-                    </Text>
-                  </VStack>
+                      <Text fontSize="xs" color="orange.200" noOfLines={1}>
+                        {imageError}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      {/* 正常态 / 完成态 */}
+                      <HStack spacing={2}>
+                        <Box w="6px" h="6px" borderRadius="full" bg={isLoading ? "yellow.400" : "#76E650"} flexShrink={0} />
+                        <Text fontSize="xs" color={isLoading ? "yellow.300" : "#76E650"} fontWeight="600" letterSpacing="0.5px">
+                          {isLoading ? (t('searchingEllipsis') || '搜索中...') : t('imageSearchActive')}
+                        </Text>
+                      </HStack>
+                      {imageName && (
+                        <Text fontSize="xs" color="gray.300" noOfLines={1} title={imageName}>
+                          {imageName}
+                        </Text>
+                      )}
+                      <Text fontSize="xs" color="gray.400" noOfLines={1}>
+                        {isLoading
+                          ? (t('imageSearchingHint') || '正在搜索相似资产...')
+                          : results.length > 0
+                            ? (t('foundSimilarAssets') || `找到 ${results.length} 个相似资产`).replace('{count}', results.length)
+                            : (t('imageSearchHint') || '正在使用图片搜索相似资产')
+                        }
+                      </Text>
+                      {lastSearchQuery && (
+                        <Text fontSize="xs" color="gray.500" noOfLines={1} fontFamily="mono">
+                          + "{lastSearchQuery}"
+                        </Text>
+                      )}
+                    </>
+                  )}
+                </VStack>
 
-                  {/* Close button */}
-                  <IconButton
-                    size="xs"
-                    icon={<CloseIcon boxSize="8px" />}
-                    onClick={handleClearImage}
-                    aria-label="Remove image"
-                    variant="ghost"
-                    color="gray.400"
-                    _hover={{ color: "white", bg: "whiteAlpha.200" }}
-                    borderRadius="full"
-                    position="absolute"
-                    top={2}
-                    right={2}
-                  />
-                </HStack>
-              </Box>
-            </HStack>
+                {/* Close button */}
+                <IconButton
+                  size="xs"
+                  icon={<CloseIcon boxSize="8px" />}
+                  onClick={handleClearImage}
+                  aria-label={t('clearImage') || 'Clear image'}
+                  variant="ghost"
+                  color="gray.400"
+                  _hover={{ color: "white", bg: "whiteAlpha.200" }}
+                  borderRadius="full"
+                  position="absolute"
+                  top={2}
+                  right={2}
+                />
+              </HStack>
+            </Box>
           )}
 
           {/* Similar Search Asset Preview */}
@@ -1689,10 +2495,10 @@ const HybridDeepSearchUI = () => {
 
         </VStack>
 
-        {/* Main Content Grid */}
-        <Grid templateColumns={(filtersCollapsed && configSidebarCollapsed) ? "auto 1fr" : "360px 1fr"} gap={6} align="start" minH="calc(100vh - 350px)">
-          {/* Left Sidebar - Filters & Config as independent collapsible panels */}
-          <GridItem>
+        {/* === LM CUSTOMIZATION: Single column layout (filters in FabToolbar) START === */}
+        {/* 过滤器和配置侧栏隐藏（功能已移植到 FabToolbar Popover 按钮）*/}
+        <Grid templateColumns="1fr" gap={6} align="start" flex={1} minH={0} overflow="hidden">
+          <GridItem display="none">
             <VStack spacing={3} align="stretch" position="sticky" top="4">
               {/* === Search Filters Panel === */}
               {filtersCollapsed ? (
@@ -1831,7 +2637,88 @@ const HybridDeepSearchUI = () => {
           </GridItem>
 
           {/* Right Content - Results */}
-          <GridItem>
+          <GridItem overflow="hidden" display="flex" flexDirection="column" h="100%">
+            {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar 互斥显示 === */}
+            {isMultiSelectMode ? (
+              <Box className="selection-bar-wrapper" px="4px" py="12px" mb="8px" borderBottom="1px solid rgba(255, 255, 255, 0.05)">
+                <SelectionModeBar
+                  selectedCount={selectedItems.size}
+                  onCopySelectedUrls={copySelectedUrls}
+                  onSelectAll={selectAllResults}
+                  onClearSelection={clearSelection}
+                  t={t}
+                  onBatchTag={handleOpenBatchModal}
+                  canBatch={selectedItems.size <= 100}
+                  batchLimitTip={t('batchTagLimitTip') || '请先缩小范围至 100 个以内'}
+                  batchProgress={batchProgress}
+                  batchFailedItems={batchFailedItems}
+                  onBatchRetry={handleBatchRetry}
+                />
+              </Box>
+            ) : (
+              <FabToolbar
+                searchParams={searchParams}
+                handleChange={handleFilterChange}
+                setSearchParams={setSearchParams}
+                onTriggerSearch={triggerSearchFromToolbar}
+                sortBy={sortBy}
+                onSortChange={onSortChange}
+                showScores={showScores}
+                onShowScoresChange={onShowScoresChange}
+                showOnlyWithPreviews={showOnlyWithPreviews}
+                pathTree={pathTree}
+                onShowOnlyWithPreviewsChange={onShowOnlyWithPreviewsChange}
+                viewMode={viewMode}
+                onSetViewModeList={onSetViewModeList}
+                onSetViewModeGrid={onSetViewModeGrid}
+                gridSize={gridSize}
+                onToggleGridSize={onToggleGridSize}
+                deduplicateByHash={searchParams.deduplicate_by_hash}
+                onRemoveDuplicatesChange={handleRemoveDuplicatesChange}
+                onOpenHybridConfig={() => setConfigSidebarCollapsed(prev => !prev)}
+                searchQuery={searchQuery}
+                onSearchQueryChange={(newQuery) => {
+                  setSearchQuery(newQuery);
+                  searchQueryRef.current = newQuery;
+                  setTimeout(() => handleSearchRef.current?.(), 50);
+                }}
+                // === LM CUSTOMIZATION: Search/Tag decoupling — 新增独立 tag / committedQuery props ===
+                committedQuery={committedQuery}
+                onCommittedQueryChange={(nextVal) => {
+                  committedQueryRef.current = nextVal;
+                  setCommittedQuery(nextVal);
+                  setTimeout(() => handleSearchRef.current?.(), 50);
+                }}
+                selectedTags={selectedTags}
+                onSelectedTagsChange={(nextTags) => {
+                  const arr = Array.isArray(nextTags) ? nextTags : [];
+                  selectedTagsRef.current = arr;
+                  setSelectedTags(arr);
+                  setTimeout(() => handleSearchRef.current?.(), 50);
+                }}
+                // === LM CUSTOMIZATION: Search/Tag decoupling v4 — 分类 tag + 一键清除全部 ===
+                categoryTag={categoryTag}
+                onCategoryTagChange={(nextVal) => {
+                  const v = typeof nextVal === 'string' ? nextVal : '';
+                  categoryTagRef.current = v;
+                  setCategoryTag(v);
+                  if (!v) setCategoryLabel('');
+                  if (!v) {
+                    // 同步 CategorySidebar（删 URL ?category + 派发 event）
+                    const url = new URL(window.location);
+                    url.searchParams.delete('category');
+                    window.history.pushState({}, '', url);
+                    window.dispatchEvent(new CustomEvent('category-cleared', { detail: { searchTag: '' } }));
+                  }
+                  setTimeout(() => handleSearchRef.current?.(), 50);
+                }}
+                results={results}
+                // === v5 合并行：TitleBar + 结果计数内嵌 toolbar ===
+                titleBarProps={titleBarProps}
+                resultCount={showOnlyWithPreviews ? (results?.filter(r => r.thumbnail_exists === true)?.length || 0) : (results?.length || 0)}
+              />
+            )}
+            {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar 互斥显示 END === */}
             <MemoizedResults
               results={results}
               showOnlyWithPreviews={showOnlyWithPreviews}
@@ -1847,10 +2734,16 @@ const HybridDeepSearchUI = () => {
               apiUrl={apiUrl}
               selectedItems={selectedItems}
               onSelectionChange={handleToggleSelection}
+              onBatchSelection={setBatchSelection}
               onCopySelectedUrls={copySelectedUrls}
+              isMultiSelectMode={isMultiSelectMode}
+              failedBatchItems={failedBatchItems}
+              onRetryFailed={handleRetryFailedFromCard}
+              titleBarProps={titleBarProps}
             />
           </GridItem>
         </Grid>
+        {/* === LM CUSTOMIZATION: Single column layout (filters in FabToolbar) END === */}
       </VStack>
 
       {/* Asset Details Modal */}
@@ -1864,10 +2757,41 @@ const HybridDeepSearchUI = () => {
           plugins={plugins}
           getHeaders={getHeaders}
           apiUrl={apiUrl}
+          serverUrl={selectedBackend}
           triggerReindexAllPlugins={triggerReindexAllPlugins}
           triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
         />
       )}
+
+      {/* V2: 批量打标签弹框 */}
+      <BatchTagModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        selectedAssets={getSelectedAssets()}
+        defaultTag={searchQuery || ''}
+        onConfirm={handleBatchConfirm}
+        onDeselect={(key) => {
+          setSelectedItems(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
+        }}
+        getHeaders={getHeaders}
+        t={t}
+      />
+
+      {/* V2: 批量完成/撤销 Toast */}
+      <UndoToast
+        isOpen={!!undoToastState}
+        message={undoToastState?.message}
+        actionLabel={undoToastState?.actionLabel}
+        onAction={undoToastState?.onAction}
+        durationMs={undoToastState?.durationMs || 10000}
+        variant={undoToastState?.variant || 'default'}
+        placement="top"
+        onExpire={() => setUndoToastState(null)}
+      />
 
       {/* Feedback Popup */}
       {FEATURE_FLAGS.ENABLE_FEEDBACK_MODAL && showFeedbackPopup && (

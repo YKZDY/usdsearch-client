@@ -1,0 +1,24 @@
+/* CardSelectCheckbox - 默认隐藏，hover 卡片时淡入 */
+.card-select-checkbox {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+/* 多选模式下始终显示 */
+.card-select-checkbox.always-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 已选中时始终显示 */
+.card-select-checkbox.checked {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 鼠标悬浮在卡片上时显示 checkbox */
+.chakra-card:hover .card-select-checkbox {
+  opacity: 1;
+  visibility: visible;
+}

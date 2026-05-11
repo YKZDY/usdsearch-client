@@ -34,12 +34,21 @@ const VirtualizedResults = ({
   itemsPerRow = 1,
   itemWidth = 280,
   gap = 16,
+  scrollContainerRef,
+  onMouseDown,
   ...props
 }) => {
   const [scrollTop, setScrollTop] = useState(0);
   const [containerSize, setContainerSize] = useState({ width: 0, height: typeof containerHeight === 'string' ? 600 : containerHeight });
   const scrollElementRef = useRef(null);
   const resizeObserverRef = useRef(null);
+
+  // Sync external ref
+  useEffect(() => {
+    if (scrollContainerRef) {
+      scrollContainerRef.current = scrollElementRef.current;
+    }
+  });
 
   // Calculate dimensions based on mode
   const { 
@@ -136,6 +145,8 @@ const VirtualizedResults = ({
       const availableWidth = containerSize.width;
       const effectiveItemsPerRow = Math.max(1, Math.floor((availableWidth + gap) / (itemWidth + gap)));
       const rowHeight = itemHeight + gap;
+      // Calculate actual column width to fill container (like CSS Grid auto-fill minmax)
+      const actualColWidth = (availableWidth - (effectiveItemsPerRow - 1) * gap) / effectiveItemsPerRow;
 
       for (let i = visibleStartIndex; i <= visibleEndIndex; i++) {
         if (i >= items.length) break;
@@ -149,8 +160,8 @@ const VirtualizedResults = ({
           style: {
             position: 'absolute',
             top: row * rowHeight,
-            left: col * (itemWidth + gap),
-            width: itemWidth,
+            left: col * (actualColWidth + gap),
+            width: actualColWidth,
             height: itemHeight
           }
         });
@@ -182,6 +193,7 @@ const VirtualizedResults = ({
       height={containerHeight}
       overflowY="auto"
       onScroll={handleScroll}
+      onMouseDown={onMouseDown}
       position="relative"
       {...props}
     >
@@ -193,7 +205,7 @@ const VirtualizedResults = ({
       >
         {/* Visible items */}
         {visibleItems.map(({ index, item, style }) => (
-          <Box key={index} style={style}>
+          <Box key={index} style={style} data-card-index={index}>
             {renderItem(item, index)}
           </Box>
         ))}

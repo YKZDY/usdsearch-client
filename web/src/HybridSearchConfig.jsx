@@ -53,7 +53,9 @@ import {
   CardBody,
 } from "@chakra-ui/react";
 import { InfoIcon } from "@chakra-ui/icons";
+// === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
+// === LM CUSTOMIZATION: i18n END ===
 
 // Field display name mapping
 const getFieldDisplayName = (fieldName) => {
@@ -87,8 +89,10 @@ const DEFAULT_HYBRID_CONFIG = {
       { field: "name.standard", nested: false, enabled: true, weight: 2.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
       { field: "usd_properties.value", nested: true, enabled: true, weight: 1.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
       { field: "usd_properties.key", nested: true, enabled: true, weight: 1.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
-      { field: "tags.tag", nested: true, enabled: true, weight: 1.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
-      { field: "tags.value", nested: true, enabled: true, weight: 1.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
+      // [TagSearchFix P5] tags.tag: 1.0 → 30.0; tags.value: 1.0 → 18.0
+      // 实测 weight=20 是 5 个查询词全通过的最低阈值；30 多 50% 安全边际应对未来数据增长
+      { field: "tags.tag", nested: true, enabled: true, weight: 30.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
+      { field: "tags.value", nested: true, enabled: true, weight: 18.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
       { field: "path", nested: false, enabled: true, weight: 1.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
       { field: "path.tree", nested: false, enabled: true, weight: 1.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
       { field: "path.tree_reverse", nested: false, enabled: true, weight: 1.0, match_type: "fuzzy", fuzzy_max_expansions: 1, wildcard: true },
@@ -570,3 +574,28 @@ const HybridSearchConfig = ({ value = DEFAULT_HYBRID_CONFIG, onChange, isCollaps
 
 export default React.memo(HybridSearchConfig);
 export { DEFAULT_HYBRID_CONFIG };
+
+/**
+ * [TagSearchFix P6] 旧 URL 链接（带 hybrid_config 查询参数）的 weight 自动迁移。
+ *
+ * 背景：之前默认 tags.tag/tags.value weight=1.0 会让"打 tag 搜不到"。
+ * 一些用户分享了带 hybrid_config 的旧链接给同事，里面记录的是旧的低 weight。
+ * 反序列化时发现 tags.tag weight < 5 视为"旧版"，自动 patch 到新值 30.0；
+ * tags.value < 3 patch 到 18.0，让旧链接也能享受修复。
+ *
+ * 注意：原地修改入参 config，并返回同一引用。
+ */
+export function migrateLegacyWeights(config) {
+  const fields = config?.hybrid_text?.fields;
+  if (!Array.isArray(fields)) return config;
+  for (const f of fields) {
+    if (!f || typeof f !== "object") continue;
+    if (f.field === "tags.tag" && typeof f.weight === "number" && f.weight < 5) {
+      f.weight = 30.0;
+    }
+    if (f.field === "tags.value" && typeof f.weight === "number" && f.weight < 3) {
+      f.weight = 18.0;
+    }
+  }
+  return config;
+}

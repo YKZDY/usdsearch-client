@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, { memo, useMemo } from "react";
+import React, { memo, useMemo, useRef, useCallback } from "react";
 import {
   Box,
   VStack,
@@ -48,12 +48,18 @@ import {
   SearchIcon,
 } from "@chakra-ui/icons";
 import SearchExplanations from "./SearchExplanations";
-import SmartAssetImage from "./components/SmartAssetImage";
 import NavigableAssetImage from "./components/NavigableAssetImage";
 import { useSmartImageLoader } from "./hooks/useSmartImageLoader";
-import { formatFileSize, formatDate } from "./utils/formatUtils";
+import { formatFileSize } from "./utils/formatUtils";
+// === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
-import { SEARCH_DEFAULTS } from "./config";
+// === LM CUSTOMIZATION: i18n END ===
+import { SEARCH_DEFAULTS, FEATURE_FLAGS } from "./config";
+import CardSelectCheckbox from "./components/shared/CardSelectCheckbox";
+import EmptySearchHint from "./components/EmptySearchHint";
+import { useDragSelect } from "./hooks/useDragSelect";
+import TaggedBadge from "./components/TaggedBadge";
+import FailedBadge from "./components/FailedBadge";
 
 const HighlightedText = ({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
   const truncateProps = {};
@@ -114,7 +120,7 @@ const QueryMatchBadges = memo(({ explanations = [], showScores = SEARCH_DEFAULTS
   return (
     <VStack spacing={2} align="stretch">
       {explanations.map((explanation, index) => {
-        const { search_type, matched_terms = [], matched_vectors = [] } = explanation;
+        const { search_type, matched_terms = [] } = explanation;
         
         if (search_type === 'text_to_vector' || search_type === 'image_to_vector' || search_type === 'vector') {
           // For vector searches, show simple badge
@@ -325,7 +331,10 @@ const HybridSearchResultGridItem = memo(({
   registerImageElement,
   getHeaders,
   apiUrl,
-  isSelected = false
+  isSelected = false,
+  isMultiSelectMode = false,
+  failedReason = null,
+  onRetryFailed,
 }) => {
   const { t } = useTranslation();
   
@@ -333,65 +342,242 @@ const HybridSearchResultGridItem = memo(({
   const baseKey = result.source?.base_key || result.source?.url || result.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
+  // Tooltip text based on mode
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+    ? (isMultiSelectMode ? t('clickToSelect') : t('clickToViewDetails'))
+    : '';
+
+  const defaultBorderColor = isMultiSelectMode && !isSelected
+    ? "rgba(255, 210, 48, 0.15)"
+    : "rgba(255, 255, 255, 0.05)";
+
+  // [TagSearchFix P3] 识别"是否因 tag 命中而被搜出"，并提取命中的 tag 文本，
+  // 用于在 category badge 上优先展示并加主题色描边——让用户秒懂"打过这个 tag 才搜到"。
+  const tagHitInfo = useMemo(() => {
+    const explanations = result.metadata?.explanations || [];
+    const tagFieldHit = explanations.some(exp =>
+      Array.isArray(exp?.matched_terms) &&
+      exp.matched_terms.some(term => typeof term === 'string' && term.includes('tags.tag'))
+    );
+    if (!tagFieldHit) return { isTagHit: false, matchedTag: null };
+    // 从 source.tags 中找出与当前查询词相关的 tag（优先 includes 匹配，否则取首个）
+    const tags = result.source?.tags || [];
+    const tagNames = tags.map(t => typeof t === 'string' ? t : (t?.tag || t?.name || ''));
+    const q = (searchQuery || '').trim().toLowerCase();
+    let matched = null;
+    if (q) {
+      matched = tagNames.find(n => n.toLowerCase().includes(q)) || null;
+    }
+    if (!matched) matched = tagNames[0] || null;
+    return { isTagHit: true, matchedTag: matched };
+  }, [result.metadata?.explanations, result.source?.tags, searchQuery]);
+
   return (
+    <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>
     <Card 
-      bg={isSelected ? "#2a2b1e" : "#1C1D20"} 
-      borderColor={isSelected ? "#FFD230" : "#383838"} 
-      _hover={{ borderColor: "#FFD230", shadow: "0 0 20px rgba(255,210,48,0.08)" }}
+      /* Fab 实测：bg rgba(255,255,255,0.05), border rgba(255,255,255,0.05) */
+      bg={isSelected ? "#2a2b1e" : "rgba(255, 255, 255, 0.05)"} 
+      borderColor={isSelected ? "#FFD230" : defaultBorderColor} 
+      borderWidth="1px"
+      /* V2 U6: 命中态外发光仅在非选中时渲染（避免三层金色视觉过载） */
+      boxShadow={tagHitInfo.isTagHit && !isSelected ? "0 0 16px rgba(255, 210, 48, 0.25)" : undefined}
+      /* 光子品牌色：hover 金色边框 + 微光（Fab overlay 行为由 CSS 单独控制）；命中态 hover 加强 */
+      _hover={{
+        borderColor: "#FFD230",
+        shadow: tagHitInfo.isTagHit && !isSelected
+          ? "0 0 24px rgba(255,210,48,0.4)"
+          : "0 0 20px rgba(255,210,48,0.08)",
+      }}
       transition="all 0.25s"
       cursor="pointer"
-      onClick={() => onSelectionChange?.(result)}
+      onClick={(e) => {
+        if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
+          onSelectionChange?.(result, e, index);
+        } else if (isMultiSelectMode) {
+          onSelectionChange?.(result, e, index);
+        } else {
+          // 非多选模式下 Shift+Click 直接进入多选（常规交互）
+          if (e?.shiftKey) {
+            onSelectionChange?.(result, e, index);
+          } else {
+            onItemClick?.(result);
+          }
+        }
+      }}
       h="100%"
       borderRadius="12px"
+      overflow="hidden"
       position="relative"
     >
-      {/* Selection indicator */}
-      {isSelected && (
-        <Box
-          position="absolute"
-          top={2}
-          left={2}
-          zIndex={10}
-          bg="#FFD230"
-          color="black"
-          borderRadius="full"
-          boxSize="20px"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          fontSize="xs"
-          fontWeight="bold"
-        >
-          &#10003;
-        </Box>
+      {/* V2 Q1-A: 命中角标（左上角） */}
+      {tagHitInfo.isTagHit && (
+        <TaggedBadge size={gridSize === 'S' ? 'sm' : 'md'} />
       )}
-      <CardBody p={gridSize === "S" ? 2 : 3}>
-        <VStack spacing={gridSize === "S" ? 2 : 3} align="stretch" h="100%">
-          {/* Image */}
-          <NavigableAssetImage
-            result={result}
-            index={index}
-            getHeaders={getHeaders}
-            apiUrl={apiUrl}
-            width="100%"
-            height={gridSize === "S" ? "128px" : "256px"}
-            borderRadius="md"
-          />
+      {/* V2 U1: 批量失败角标（右上角，优先级最高） */}
+      {failedReason && (
+        <FailedBadge
+          reason={failedReason}
+          onRetry={() => onRetryFailed?.(result)}
+        />
+      )}
+      {/* NEW CARD INTERACTION: Checkbox */}
+      {FEATURE_FLAGS.NEW_CARD_INTERACTION ? (
+        <CardSelectCheckbox
+          isSelected={isSelected}
+          isMultiSelectMode={isMultiSelectMode}
+          onToggle={() => onSelectionChange?.(result)}
+        />
+      ) : (
+        isSelected && (
+          <Box
+            position="absolute"
+            top={2}
+            left={2}
+            zIndex={10}
+            bg="#FFD230"
+            color="black"
+            borderRadius="full"
+            boxSize="20px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            fontSize="xs"
+            fontWeight="bold"
+          >
+            &#10003;
+          </Box>
+        )
+      )}
+      {/* Fab 实测：信息区 padding 8px 12px */}
+      <CardBody px="12px" py="8px">
+        <VStack spacing={gridSize === "S" ? 2 : 2} align="stretch" h="100%">
+          {/* === LM CUSTOMIZATION: Fab-style image with hover overlay START === */}
+          {/* Fab 实测：缩略图 16:9 比例, bg rgb(40,40,44) */}
+          <Box position="relative" overflow="hidden" borderRadius="md">
+            <NavigableAssetImage
+              result={result}
+              index={index}
+              getHeaders={getHeaders}
+              apiUrl={apiUrl}
+              width="100%"
+              height="auto"
+              borderRadius="md"
+              style={{ aspectRatio: "16/9", objectFit: "cover", backgroundColor: "rgb(40, 40, 44)" }}
+            />
+            {/* Hover overlay — Fab: white bg, opacity 0→0.1 */}
+            <Box
+              className="fab-hover-overlay"
+              position="absolute"
+              inset={0}
+              bg="white"
+              opacity={0}
+              transition="opacity 0.15s ease"
+              pointerEvents="none"
+              borderRadius="md"
+              sx={{ ".chakra-card:hover &": { opacity: 0.1 } }}
+            />
+            {/* Bottom-left badges — Fab: category + engine icons on hover */}
+            {gridSize !== "S" && (
+              <HStack
+                className="fab-hover-badges"
+                position="absolute"
+                bottom={2}
+                left={2}
+                right={2}
+                spacing={2}
+                opacity={0}
+                visibility="hidden"
+                transition="opacity 0.2s ease, visibility 0.2s ease"
+                pointerEvents="none"
+                sx={{ ".chakra-card:hover &": { opacity: 1, visibility: "visible" } }}
+              >
+                {/* Category badge — 优先展示命中的 tag，命中时主题色描边（P3） */}
+                {(tagHitInfo.matchedTag || result.source?.tags?.[0]) && (
+                  <Badge
+                    bg={tagHitInfo.isTagHit ? 'rgba(255, 210, 48, 0.18)' : 'rgba(48, 48, 52, 0.7)'}
+                    backdropFilter="blur(50px)"
+                    color={tagHitInfo.isTagHit ? '#FFD230' : 'white'}
+                    border={tagHitInfo.isTagHit ? '1px solid #FFD230' : '1px solid transparent'}
+                    borderRadius="9999px"
+                    px={3}
+                    py="2px"
+                    fontSize="12px"
+                    fontWeight={tagHitInfo.isTagHit ? '500' : '400'}
+                    h="24px"
+                    display="flex"
+                    alignItems="center"
+                    title={tagHitInfo.isTagHit ? (t('matchedByTag') || '匹配标签') : undefined}
+                  >
+                    {tagHitInfo.matchedTag
+                      || (typeof result.source.tags[0] === 'string'
+                          ? result.source.tags[0]
+                          : (result.source.tags[0].tag || result.source.tags[0].value || ''))}
+                  </Badge>
+                )}
+                {/* TODO: Engine compatibility icons — backend has no engine field yet */}
+                {/* Placeholder: will render engine badges here when data is available */}
+              </HStack>
+            )}
+          </Box>
+          {/* === LM CUSTOMIZATION: Fab-style image with hover overlay END === */}
 
           {/* Content */}
           <VStack spacing={gridSize === "S" ? 1 : 2} align="stretch" flex={1}>
-            {/* Title */}
-            <Tooltip label={baseKey} placement="top">
-              <Text 
-                fontSize={gridSize === "S" ? "xs" : "sm"}
-                fontWeight="semibold" 
-                noOfLines={gridSize === "S" ? 1 : 2}
-                lineHeight="1.4"
-                title={filename}
+            {/* Title + Rating row — Fab layout: title left, rating right, gap 20px */}
+            <HStack justify="space-between" align="center" gap="20px">
+              <Tooltip label={baseKey} placement="top">
+                <Text 
+                  fontSize="12px"
+                  fontWeight="700" 
+                  noOfLines={1}
+                  lineHeight="15.6px"
+                  letterSpacing="0.36px"
+                  color="white"
+                  fontFamily="'Inter', sans-serif"
+                  title={filename}
+                  flex={1}
+                  minW={0}
+                >
+                  {filename}
+                </Text>
+              </Tooltip>
+              {/* === LM CUSTOMIZATION: Fab-style rating 已隐藏（MT 反馈目前不需要）=== */}
+              {/* TODO: 后续接入评分数据后取消注释恢复
+              {gridSize !== "S" && (
+                <HStack spacing={1} flexShrink={0} className="fab-rating-placeholder" title={t('fabCardRatingDisabled')}>
+                  <Box as="span" color="#ffc229" fontSize="16px" lineHeight="1" w="16px" h="16px" display="flex" alignItems="center" justifyContent="center">★</Box>
+                  <Text fontSize="12px" fontWeight="400" color="white">—</Text>
+                  <Text fontSize="12px" fontWeight="400" color="rgba(255,255,255,0.65)">(—)</Text>
+                </HStack>
+              )}
+              */}
+            </HStack>
+
+            {/* === LM CUSTOMIZATION: Fab-style author row START === */}
+            {gridSize !== "S" && (
+              <Text
+                fontSize="12px"
+                fontWeight="400"
+                color="rgba(255,255,255,0.65)"
+                noOfLines={1}
+                lineHeight="15.6px"
               >
-                {filename}
+                {result.source?.created_by || result.source?.modified_by || '—'}
               </Text>
-            </Tooltip>
+            )}
+            {/* === LM CUSTOMIZATION: Fab-style author row END === */}
+
+            {/* === LM CUSTOMIZATION: Fab-style price 已隐藏（MT 反馈目前不需要）=== */}
+            {/* TODO: 后续接入价格数据后取消注释恢复
+            {gridSize !== "S" && (
+              <HStack spacing={1} className="fab-price-placeholder" title={t('fabCardPriceDisabled')}>
+                <Text fontSize="12px" fontWeight="400" color="rgba(255,255,255,0.65)">
+                  {t('fabCardStartingPrice')}
+                </Text>
+                <Text fontSize="12px" fontWeight="400" color="white">—</Text>
+              </HStack>
+            )}
+            */}
 
             {/* Score Badges */}
             {showScores && (
@@ -410,7 +596,7 @@ const HybridSearchResultGridItem = memo(({
               </HStack>
             )}
 
-            {/* Query Match Badges - hide in compact view */}
+            {/* Query Match Badges */}
             {gridSize !== "S" && (
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
             )}
@@ -428,7 +614,7 @@ const HybridSearchResultGridItem = memo(({
             {/* Actions */}
             <HStack justify={gridSize === "S" ? "center" : "space-between"} pt={gridSize === "S" ? 1 : 2}>
               {gridSize === "S" ? (
-                // Compact view - copy + find similar + view details
+                // Compact view - copy + find similar (+ view details in legacy mode)
                 <HStack spacing={1}>
                   {copyToClipboard && (
                     <Tooltip label={t('copyUrl')}>
@@ -457,18 +643,20 @@ const HybridSearchResultGridItem = memo(({
                       colorScheme="purple"
                     />
                   </Tooltip>
-                  <Tooltip label={t('viewDetails')}>
-                    <IconButton
-                      size="xs"
-                      variant="ghost"
-                      icon={<ExternalLinkIcon />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onItemClick?.(result);
-                      }}
-                      aria-label={t('viewDetails')}
-                    />
-                  </Tooltip>
+                  {!FEATURE_FLAGS.NEW_CARD_INTERACTION && (
+                    <Tooltip label={t('viewDetails')}>
+                      <IconButton
+                        size="xs"
+                        variant="ghost"
+                        icon={<ExternalLinkIcon />}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onItemClick?.(result);
+                        }}
+                        aria-label={t('viewDetails')}
+                      />
+                    </Tooltip>
+                  )}
                 </HStack>
               ) : (
                 // Full view - all actions
@@ -502,18 +690,20 @@ const HybridSearchResultGridItem = memo(({
                       />
                     </Tooltip>
                   </HStack>
-                  <Tooltip label={t('viewDetails')}>
-                    <IconButton
-                      size="xs"
-                      variant="ghost"
-                      icon={<ExternalLinkIcon />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onItemClick?.(result);
-                      }}
-                      aria-label={t('viewDetails')}
-                    />
-                  </Tooltip>
+                  {!FEATURE_FLAGS.NEW_CARD_INTERACTION && (
+                    <Tooltip label={t('viewDetails')}>
+                      <IconButton
+                        size="xs"
+                        variant="ghost"
+                        icon={<ExternalLinkIcon />}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onItemClick?.(result);
+                        }}
+                        aria-label={t('viewDetails')}
+                      />
+                    </Tooltip>
+                  )}
                 </>
               )}
             </HStack>
@@ -521,6 +711,7 @@ const HybridSearchResultGridItem = memo(({
         </VStack>
       </CardBody>
     </Card>
+    </Tooltip>
   );
 });
 
@@ -539,7 +730,10 @@ const HybridSearchResultItem = memo(({
   registerImageElement,
   getHeaders,
   apiUrl,
-  isSelected = false
+  isSelected = false,
+  isMultiSelectMode = false,
+  failedReason = null,
+  onRetryFailed,
 }) => {
   const { t } = useTranslation();
   const { isOpen, onToggle } = useDisclosure();
@@ -553,36 +747,87 @@ const HybridSearchResultItem = memo(({
   const baseKey = result.source?.base_key || result.source?.url || result.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
+  // Tooltip text based on mode
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+    ? (isMultiSelectMode ? t('clickToSelect') : t('clickToViewDetails'))
+    : '';
+
+  const defaultBorderColor = isMultiSelectMode && !isSelected
+    ? "rgba(255, 210, 48, 0.15)"
+    : "#383838";
+
+  // V2 Q1-A: 同 Grid 版本的命中识别
+  const listTagHit = useMemo(() => {
+    const explanations = result.metadata?.explanations || [];
+    return explanations.some(exp =>
+      Array.isArray(exp?.matched_terms) &&
+      exp.matched_terms.some(term => typeof term === 'string' && term.includes('tags.tag'))
+    );
+  }, [result.metadata?.explanations]);
+
   return (
+    <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>
     <Card 
       bg={isSelected ? "#2a2b1e" : "#1C1D20"} 
-      borderColor={isSelected ? "#FFD230" : "#383838"} 
-      _hover={{ borderColor: "#FFD230", shadow: "0 0 20px rgba(255,210,48,0.08)" }}
+      borderColor={isSelected ? "#FFD230" : defaultBorderColor} 
+      boxShadow={listTagHit && !isSelected ? "0 0 16px rgba(255, 210, 48, 0.25)" : undefined}
+      _hover={{
+        borderColor: "#FFD230",
+        shadow: listTagHit && !isSelected
+          ? "0 0 24px rgba(255,210,48,0.4)"
+          : "0 0 20px rgba(255,210,48,0.08)",
+      }}
       transition="all 0.25s"
       cursor="pointer"
-      onClick={() => onSelectionChange?.(result)}
+      onClick={(e) => {
+        if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
+          onSelectionChange?.(result, e, index);
+        } else if (isMultiSelectMode) {
+          onSelectionChange?.(result, e, index);
+        } else {
+          if (e?.shiftKey) {
+            onSelectionChange?.(result, e, index);
+          } else {
+            onItemClick?.(result);
+          }
+        }
+      }}
       borderRadius="12px"
       position="relative"
     >
-      {/* Selection indicator */}
-      {isSelected && (
-        <Box
-          position="absolute"
-          top={2}
-          left={2}
-          zIndex={10}
-          bg="#FFD230"
-          color="black"
-          borderRadius="full"
-          boxSize="20px"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          fontSize="xs"
-          fontWeight="bold"
-        >
-          &#10003;
-        </Box>
+      {/* V2 Q1-A: 命中角标（List 视图同样） */}
+      {listTagHit && <TaggedBadge size="sm" />}
+      {/* V2 U1: 失败角标 */}
+      {failedReason && (
+        <FailedBadge reason={failedReason} onRetry={() => onRetryFailed?.(result)} />
+      )}
+      {/* NEW CARD INTERACTION: Checkbox */}
+      {FEATURE_FLAGS.NEW_CARD_INTERACTION ? (
+        <CardSelectCheckbox
+          isSelected={isSelected}
+          isMultiSelectMode={isMultiSelectMode}
+          onToggle={() => onSelectionChange?.(result)}
+        />
+      ) : (
+        isSelected && (
+          <Box
+            position="absolute"
+            top={2}
+            left={2}
+            zIndex={10}
+            bg="#FFD230"
+            color="black"
+            borderRadius="full"
+            boxSize="20px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            fontSize="xs"
+            fontWeight="bold"
+          >
+            &#10003;
+          </Box>
+        )
       )}
       <CardBody p={4}>
         <Grid templateColumns="200px 1fr auto" gap={4} alignItems="start">
@@ -657,18 +902,20 @@ const HybridSearchResultItem = memo(({
                       colorScheme="purple"
                     />
                   </Tooltip>
-                  <Tooltip label={t('viewDetails')}>
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      icon={<ExternalLinkIcon />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onItemClick?.(result);
-                      }}
-                      aria-label={t('viewDetails')}
-                    />
-                  </Tooltip>
+                  {!FEATURE_FLAGS.NEW_CARD_INTERACTION && (
+                    <Tooltip label={t('viewDetails')}>
+                      <IconButton
+                        size="sm"
+                        variant="ghost"
+                        icon={<ExternalLinkIcon />}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onItemClick?.(result);
+                        }}
+                        aria-label={t('viewDetails')}
+                      />
+                    </Tooltip>
+                  )}
                 </HStack>
               </HStack>
 
@@ -730,6 +977,7 @@ const HybridSearchResultItem = memo(({
         </Collapse>
       </CardBody>
     </Card>
+    </Tooltip>
   );
 });
 
@@ -748,9 +996,33 @@ const HybridSearchResults = ({
   apiUrl,
   selectedItems,
   onSelectionChange,
-  onCopySelectedUrls
+  onBatchSelection,
+  onCopySelectedUrls,
+  isMultiSelectMode = false,
+  // V2 U1: 批量失败持久化到卡片
+  failedBatchItems = null, // Map<assetUrl, { reason, timestamp }>
+  onRetryFailed,
 }) => {
   const { t } = useTranslation();
+
+  // === Drag select (must be before any early return) ===
+  const scrollContainerRef = useRef(null);
+  const getItemId = useCallback((item) => {
+    return item?.id || item?.source?.base_key || item?.source?.url;
+  }, []);
+  const handleDragSelectionChange = useCallback((newSet) => {
+    onBatchSelection?.(newSet);
+  }, [onBatchSelection]);
+
+  const { isDragging, selectionRect, handleMouseDown } = useDragSelect({
+    containerRef: scrollContainerRef,
+    items: results,
+    getItemId,
+    onSelectionChange: handleDragSelectionChange,
+    baseSelection: selectedItems,
+    enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+  });
+
   // Smart image loading for visible + buffer items
   const { getLoadingState, registerImageElement } = useSmartImageLoader(
     results,
@@ -784,94 +1056,105 @@ const HybridSearchResults = ({
   }
 
   if (isEmpty || results.length === 0) {
-    return (
-      <Box textAlign="center" py={8}>
-        <Text fontSize="md" color="gray.300">
-          {t('noResultsMessage')}
-        </Text>
-      </Box>
-    );
+    return <EmptySearchHint searchQuery={searchQuery} />;
   }
 
   return (
-    <VStack spacing={4} align="stretch">
-      {/* Results Summary */}
-      <HStack justify="space-between" wrap="wrap">
-        <HStack spacing={4}>
-          <Text fontSize="sm" color="gray.300">
-            {t('resultsFound', { count: results.length })}
-          </Text>
-          {copyToClipboard && (
-            <Button
-              size="sm"
-              leftIcon={<CopyIcon />}
-              onClick={onCopySelectedUrls}
-              variant="outline"
-              colorScheme="blue"
-              isDisabled={!selectedItems || selectedItems.size === 0}
-            >
-              {t('copySelectedUrls')}
-            </Button>
-          )}
-        </HStack>
-        <HStack>
-          <Text fontSize="xs" color="gray.400">
-            {t('scoreRange', { min: minScore.toFixed(3), max: maxScore.toFixed(3) })}
-          </Text>
-        </HStack>
-      </HStack>
+    <VStack spacing={2} align="stretch" flex={1} minH={0} overflow="hidden">
+      {/* === v5: TitleBar + 结果计数已移入 FabToolbar 合并行，此处不再独立渲染 === */}
 
-      {/* Results Display */}
-      {viewMode === "grid" ? (
-        <Grid 
-          templateColumns={`repeat(auto-fill, minmax(${gridSize === "S" ? "140px" : "280px"}, 1fr))`}
-          gap={gridSize === "S" ? 2 : 4}
-          w="100%"
-        >
-          {results.map((result, index) => (
-            <GridItem key={result.id || index}>
-              <HybridSearchResultGridItem
-                result={result}
-                index={index}
-                onSelectionChange={onSelectionChange}
-                onItemClick={onItemClick}
-                copyToClipboard={copyToClipboard}
-                onFindSimilar={onFindSimilar}
-                showScores={showScores}
-                gridSize={gridSize}
-                searchQuery={searchQuery}
-                getLoadingState={getLoadingState}
-                registerImageElement={registerImageElement}
-                getHeaders={getHeaders}
-                apiUrl={apiUrl}
-                isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
-              />
-            </GridItem>
-          ))}
-        </Grid>
-      ) : (
-        <VStack spacing={4} align="stretch">
-          {results.map((result, index) => (
-            <HybridSearchResultItem
-              key={result.id || index}
-              result={result}
-              index={index}
-              onSelectionChange={onSelectionChange}
-              onItemClick={onItemClick}
-              copyToClipboard={copyToClipboard}
-              onFindSimilar={onFindSimilar}
-              showScores={showScores}
-              maxScore={maxScore}
-              minScore={minScore}
-              searchQuery={searchQuery}
-              getLoadingState={getLoadingState}
-              registerImageElement={registerImageElement}
-              getHeaders={getHeaders}
-              apiUrl={apiUrl}
-              isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
-            />
-          ))}
-        </VStack>
+      {/* Results Display - scrollable content area */}
+      <Box
+        flex={1}
+        minH={0}
+        overflowY="auto"
+        position="relative"
+        ref={scrollContainerRef}
+        onMouseDown={handleMouseDown}
+        style={{ userSelect: isDragging ? 'none' : 'auto' }}
+      >
+        {viewMode === "grid" ? (
+          <Grid 
+            templateColumns={`repeat(auto-fill, minmax(${gridSize === "S" ? "140px" : "280px"}, 1fr))`}
+            gap={gridSize === "S" ? 2 : 4}
+            w="100%"
+          >
+            {results.map((result, index) => {
+              const assetUrl = result.source?.url || result.source?.base_key || result.id;
+              const failedEntry = failedBatchItems?.get?.(assetUrl);
+              return (
+              <GridItem key={result.id || index} data-card-index={index}>
+                <HybridSearchResultGridItem
+                  result={result}
+                  index={index}
+                  onSelectionChange={onSelectionChange}
+                  onItemClick={onItemClick}
+                  copyToClipboard={copyToClipboard}
+                  onFindSimilar={onFindSimilar}
+                  showScores={showScores}
+                  gridSize={gridSize}
+                  searchQuery={searchQuery}
+                  getLoadingState={getLoadingState}
+                  registerImageElement={registerImageElement}
+                  getHeaders={getHeaders}
+                  apiUrl={apiUrl}
+                  isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
+                  isMultiSelectMode={isMultiSelectMode}
+                  failedReason={failedEntry?.reason || null}
+                  onRetryFailed={onRetryFailed}
+                />
+              </GridItem>
+              );
+            })}
+          </Grid>
+        ) : (
+          <VStack spacing={4} align="stretch">
+            {results.map((result, index) => {
+              const assetUrl = result.source?.url || result.source?.base_key || result.id;
+              const failedEntry = failedBatchItems?.get?.(assetUrl);
+              return (
+              <Box key={result.id || index} data-card-index={index}>
+                <HybridSearchResultItem
+                  result={result}
+                  index={index}
+                  onSelectionChange={onSelectionChange}
+                  onItemClick={onItemClick}
+                  copyToClipboard={copyToClipboard}
+                  onFindSimilar={onFindSimilar}
+                  showScores={showScores}
+                  maxScore={maxScore}
+                  minScore={minScore}
+                  searchQuery={searchQuery}
+                  getLoadingState={getLoadingState}
+                  registerImageElement={registerImageElement}
+                  getHeaders={getHeaders}
+                  apiUrl={apiUrl}
+                  isSelected={selectedItems ? selectedItems.has(result.id || result.source?.base_key || result.source?.url) : false}
+                  isMultiSelectMode={isMultiSelectMode}
+                  failedReason={failedEntry?.reason || null}
+                  onRetryFailed={onRetryFailed}
+                />
+              </Box>
+              );
+            })}
+          </VStack>
+        )}
+      </Box>
+      {/* Drag selection rectangle overlay */}
+      {isDragging && selectionRect && (
+        <Box
+          position="fixed"
+          left={`${selectionRect.x}px`}
+          top={`${selectionRect.y}px`}
+          width={`${selectionRect.width}px`}
+          height={`${selectionRect.height}px`}
+          bg="rgba(255, 210, 48, 0.10)"
+          border="1.5px solid rgba(255, 210, 48, 0.6)"
+          borderRadius="4px"
+          pointerEvents="none"
+          zIndex={9999}
+          boxShadow="0 0 0 1px rgba(0,0,0,0.2)"
+        />
       )}
     </VStack>
   );

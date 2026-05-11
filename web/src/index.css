@@ -24,9 +24,46 @@
 /* LightArt-inspired global styles */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
 
+/* === LM CUSTOMIZATION: Fab fonts import START ===
+ * 引入 Fab 使用的 Inter + Inter Tight 字体。详见 brand/fabFonts.css
+ * 合入英伟达新版本时：保留此 import 行
+ */
+@import url('./brand/fabFonts.css');
+/* === LM CUSTOMIZATION: Fab fonts import END === */
+
+/* === LM CUSTOMIZATION: Fab overrides import START ===
+ * Fab 风格的卡片和网格覆写。详见 fab-overrides.css
+ * 合入英伟达新版本时：保留此 import 行
+ */
+@import url('./fab-overrides.css');
+/* === LM CUSTOMIZATION: Fab overrides import END === */
+
+/* === LM CUSTOMIZATION: v6 对齐变量（全局，保证 CategorySidebar 也能继承）===
+ * 这些变量同时被 .fab-toolbar（右侧工具栏）和 .category-sidebar（左侧，由 index.js 渲染，不是
+ * HybridDeepSearchUI 的子元素）使用，因此必须挂到 :root。
+ *
+ * 对齐原理：
+ *   - 主区 toolbar 相对于视口顶栏（72px）下方还有 40px 偏移（Box p={4}=16 + VStack spacing={6}=24）
+ *   - 侧边栏 position:fixed top:72，若 padding-top=10，则其内容从 82 开始；
+ *     而主区 toolbar 内容从 72+40+10=122 开始 → 差 40px
+ *   - 故侧边栏顶部 padding = 10 + 40 = 50px，保证两侧内容水平对齐
+ */
+:root {
+  --page-top-offset: 40px;              /* Box p={4}(16) + VStack spacing={6}(24) */
+  --toolbar-top-pad: 10px;              /* toolbar 顶部 padding（= Header 行到顶栏距离） */
+  --toolbar-header-h: 32px;             /* Header 行最小高度 */
+  --toolbar-row-gap: 10px;              /* toolbar 行间距 */
+  --toolbar-chips-gap: 8px;             /* 筛选按钮 → chips 更紧间距 */
+  --sidebar-top-pad: calc(var(--page-top-offset) + var(--toolbar-top-pad)); /* = 50px */
+  --sidebar-header-h: 32px;             /* 侧边栏 ✕ 行高 = 右侧 Header 行高 */
+  --sidebar-header-gap: 10px;           /* ✕ 行 → 产品类型间距 = toolbar 行间距 */
+}
+/* === END v6 对齐变量 === */
+
 body {
   margin: 0;
   font-family:
+    "Inter",
     "Noto Sans SC",
     "NVIDIA Sans",
     -apple-system,

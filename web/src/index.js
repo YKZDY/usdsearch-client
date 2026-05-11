@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useRef} from 'react';
 import * as ReactDOMClient from 'react-dom/client';
 import {
     ChakraProvider,
@@ -46,255 +46,35 @@ import {
 } from '@chakra-ui/react';
 import { LockIcon, UnlockIcon, InfoIcon, ExternalLinkIcon, ChevronDownIcon, LinkIcon } from '@chakra-ui/icons';
 import { motion } from 'framer-motion';
+// === LM CUSTOMIZATION: i18n START ===
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
+// === LM CUSTOMIZATION: i18n END ===
 
-import {extendTheme, ColorModeScript} from '@chakra-ui/react';
-import {mode} from '@chakra-ui/theme-tools';
+import {ColorModeScript} from '@chakra-ui/react';
 import SearchApp from "./HybridDeepSearchUI";
-import {StyleFunctionProps} from "@chakra-ui/react";
-import logo from "./img/lm_logo.png";
+
+// === LM CUSTOMIZATION: Brand START ===
+import logo from './brand/logo';
+// === LM CUSTOMIZATION: Brand END ===
+// === LM CUSTOMIZATION: Sidebar START ===
+import CategorySidebar from './components/CategorySidebar';
+// === LM CUSTOMIZATION: Sidebar END ===
+// === LM CUSTOMIZATION: TopSearchBar START ===
+import TopSearchBar from './components/TopSearchBar';
+// === LM CUSTOMIZATION: TopSearchBar END ===
 import { apiUrl as defaultApiUrl, SERVER_MAPPING, defaultEmbeddingConfig } from "./config";
 import GraphVisualization from "./Graph";
 import persistentCache from "./utils/persistentImageCache";
 import { useDeviceFlowAuth, getServerHttpsUrl, AuthStatus, createApiToken } from "./nucleus";
+// === LM CUSTOMIZATION: Auth Guard utils ===
+import { clearAuthByUserAction } from "./utils/authStorage";
 
-// LightArt-inspired dark theme color tokens
-const LA = {
-    primary: '#FFD230',       // Golden yellow primary
-    primaryHover: '#F6C80F',  // Darker gold for hover
-    primaryDim: 'rgba(246,200,15,0.15)', // Subtle gold bg
-    bg: '#141517',            // Near-black background
-    bgCard: '#1C1D20',       // Card background
-    bgElevated: '#232428',   // Elevated surfaces (popover, dropdown)
-    bgInput: '#1C1D20',      // Input background
-    border: '#383838',       // Border color
-    borderHover: '#FFD230',  // Border hover = gold
-    text: '#FFFFFF',         // Primary text
-    textSecondary: '#E5E5E5',// Secondary text
-    textTertiary: '#D8D8D8', // Tertiary text
-    textMuted: '#ABABAB',    // Muted text
-    textDim: '#6B6B6B',      // Very dim text
-    success: '#52C41A',      // Green for success
-    danger: '#FF4D4F',       // Red for danger
-    info: '#1890FF',         // Blue for info
-    purple: '#B37FEB',       // Purple accent
-};
-
-const theme = extendTheme({
-    colors: {
-        brand: {
-            50: '#FFF9E0',
-            100: '#FFECB3',
-            200: '#FFE082',
-            300: '#FFD54F',
-            400: '#FFD230',
-            500: '#F6C80F',
-            600: '#E8B800',
-            700: '#C49A00',
-            800: '#9C7B00',
-            900: '#745C00',
-        },
-        gray: {
-            900: LA.bg,
-            800: LA.bgCard,
-            700: LA.bgElevated,
-            600: LA.border,
-            500: '#3A3A3A',
-            400: '#6B6B6B',
-            300: LA.textMuted,
-            200: LA.textTertiary,
-            100: LA.textSecondary,
-            50: LA.text,
-        }
-    },
-    fonts: {
-        heading: `'Noto Sans SC', 'NVIDIA Sans Bold', -apple-system, BlinkMacSystemFont, sans-serif`,
-        body: `'Noto Sans SC', 'NVIDIA Sans', -apple-system, BlinkMacSystemFont, sans-serif`,
-    },
-    components: {
-        Input: {
-            defaultProps: {
-                focusBorderColor: LA.primary,
-            },
-            baseStyle: {
-                field: {
-                    bg: LA.bgInput,
-                    borderColor: LA.border,
-                    _hover: { borderColor: LA.primary },
-                    _focus: { borderColor: LA.primary, boxShadow: `0 0 0 1px ${LA.primary}` },
-                }
-            }
-        },
-        Select: {
-            defaultProps: {
-                focusBorderColor: LA.primary,
-            }
-        },
-        Button: {
-            variants: {
-                solid: (props) => {
-                    if (props.colorScheme === 'green' || props.colorScheme === 'brand') {
-                        return {
-                            bg: LA.primary,
-                            color: '#000000',
-                            fontWeight: '600',
-                            _hover: { bg: LA.primaryHover, transform: 'translateY(-1px)', boxShadow: `0 4px 12px rgba(255,210,48,0.3)` },
-                            _active: { bg: '#D4A800', transform: 'translateY(0)' },
-                        };
-                    }
-                    return {};
-                },
-                outline: (props) => {
-                    if (props.colorScheme === 'green' || props.colorScheme === 'brand') {
-                        return {
-                            borderColor: LA.primary,
-                            color: LA.primary,
-                            _hover: { bg: LA.primaryDim },
-                        };
-                    }
-                    return {};
-                },
-                ghost: {
-                    _hover: { bg: 'rgba(255,255,255,0.06)' },
-                },
-            }
-        },
-        Card: {
-            baseStyle: {
-                container: {
-                    bg: LA.bgCard,
-                    borderColor: LA.border,
-                    borderWidth: '1px',
-                    borderRadius: '12px',
-                    transition: 'all 0.25s ease',
-                    _hover: {
-                        borderColor: LA.primary,
-                        boxShadow: `0 0 20px rgba(255,210,48,0.08)`,
-                    },
-                },
-            },
-        },
-        Modal: {
-            baseStyle: {
-                dialog: {
-                    bg: LA.bgCard,
-                    borderColor: LA.border,
-                    borderWidth: '1px',
-                    borderRadius: '16px',
-                },
-                header: {
-                    color: LA.text,
-                    borderBottomColor: LA.border,
-                },
-                closeButton: {
-                    color: LA.textMuted,
-                    _hover: { color: LA.text },
-                },
-            },
-        },
-        Popover: {
-            baseStyle: {
-                content: {
-                    bg: LA.bgElevated,
-                    borderColor: LA.border,
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                },
-                header: {
-                    borderBottomColor: LA.border,
-                    color: LA.text,
-                },
-            },
-        },
-        Tooltip: {
-            baseStyle: {
-                bg: LA.bgElevated,
-                color: LA.text,
-                borderRadius: '8px',
-                px: 3,
-                py: 2,
-                fontSize: 'sm',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-            },
-        },
-        Switch: {
-            defaultProps: {
-                colorScheme: 'yellow',
-            },
-        },
-        Badge: {
-            baseStyle: {
-                borderRadius: '6px',
-                fontWeight: '500',
-                px: 2,
-                py: 0.5,
-            },
-        },
-        Accordion: {
-            baseStyle: {
-                container: {
-                    borderColor: LA.border,
-                },
-                button: {
-                    _hover: { bg: 'rgba(255,255,255,0.04)' },
-                },
-            },
-        },
-        Divider: {
-            baseStyle: {
-                borderColor: LA.border,
-            },
-        },
-        Table: {
-            variants: {
-                simple: {
-                    th: {
-                        borderColor: LA.border,
-                        color: LA.textMuted,
-                    },
-                    td: {
-                        borderColor: LA.border,
-                    },
-                },
-            },
-        },
-    },
-    shadows: {outline: `0 0 0 3px rgba(255,210,48,0.4)`},
-    config: {
-        initialColorMode: 'dark',
-        useSystemColorMode: false,
-    },
-    styles: {
-        global: (props) => ({
-            body: {
-                fontFamily: 'body',
-                color: LA.text,
-                bg: LA.bg,
-                lineHeight: 'base',
-            },
-            // Custom scrollbar styling
-            '::-webkit-scrollbar': {
-                width: '6px',
-                height: '6px',
-            },
-            '::-webkit-scrollbar-track': {
-                bg: 'transparent',
-            },
-            '::-webkit-scrollbar-thumb': {
-                bg: LA.border,
-                borderRadius: '3px',
-                _hover: { bg: '#555' },
-            },
-            // Selection color
-            '::selection': {
-                bg: 'rgba(255,210,48,0.3)',
-                color: LA.text,
-            },
-        }),
-    },
-});
+// === LM CUSTOMIZATION: Theme START ===
+import theme, { LA } from './theme/laTheme';
+// === LM CUSTOMIZATION: Theme END ===
 
 // Authentication Form Component
-const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
+const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) => {
     const { t } = useTranslation();
     const [authMethod, setAuthMethod] = useState(() => {
         if (auth.username) return 'basic';
@@ -306,6 +86,12 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
     const { isOpen: isDeviceFlowOpen, onOpen: onDeviceFlowOpen, onClose: onDeviceFlowClose } = useDisclosure();
     const deviceFlowAuth = useDeviceFlowAuth();
     const toast = useToast();
+
+    // === LM CUSTOMIZATION: AuthGuard 自动触发 Device Flow ===
+    // 监听 useAuthGuard 派发的 auth-auto-device-flow 事件 → 自动调用 handleStartDeviceFlow
+    // 等待 backend 探测完成（避免 noServerDetected 拦截）；若已认证则忽略
+    const pendingAutoStartRef = useRef(false);
+    const autoStartTriggeredRef = useRef(false);
 
     // Helper function to check if backend is S3
     const isS3Backend = (backendString) => {
@@ -445,18 +231,13 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
     };
 
     const handleClear = () => {
-        localStorage.removeItem(getServerStorageKey("api_key"));
-        localStorage.removeItem(getServerStorageKey("username"));
-        localStorage.removeItem(getServerStorageKey("password"));
-        // Mark that the user explicitly cleared credentials for this server
-        localStorage.setItem(getServerStorageKey("auth_cleared"), "true");
+        // === LM CUSTOMIZATION: 使用统一的用户主动清除工具函数（写 auth_cleared=true） ===
+        clearAuthByUserAction(selectedServer);
         setAuth({
             api_key: "",
             username: "",
             password: "",
         });
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new Event('auth-updated'));
     };
 
     // Start Nucleus device flow authentication
@@ -486,6 +267,67 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
             });
         }
     };
+
+    // === LM CUSTOMIZATION: 监听 auth-auto-device-flow 事件，自动启动 Device Flow ===
+    // 流程：
+    //  1) 收到事件 → 若用户已认证则忽略；否则标记 pendingAutoStart
+    //  2) 若 backend 已就绪且是 Nucleus 后端 → 立即启动
+    //  3) 否则等待 backend useEffect 链路探测完毕，再由下面的 effect 触发
+    useEffect(() => {
+        const handleAutoDeviceFlow = () => {
+            if (autoStartTriggeredRef.current) return;
+            // 已认证则无需重复启动
+            if (auth?.password || auth?.api_key) return;
+            pendingAutoStartRef.current = true;
+            // 如果 backend 已就绪且是 Nucleus 后端，立即启动
+            if (backend && isNucleusBackend(backend) && !isDeviceFlowOpen) {
+                autoStartTriggeredRef.current = true;
+                pendingAutoStartRef.current = false;
+                handleStartDeviceFlow();
+            }
+        };
+        window.addEventListener('auth-auto-device-flow', handleAutoDeviceFlow);
+        return () => window.removeEventListener('auth-auto-device-flow', handleAutoDeviceFlow);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [backend, auth, isDeviceFlowOpen]);
+
+    // 当 backend 延迟就绪后触发 pending 的自动启动
+    useEffect(() => {
+        if (!pendingAutoStartRef.current) return;
+        if (autoStartTriggeredRef.current) return;
+        if (!backend) return;
+        if (!isNucleusBackend(backend)) {
+            // 非 Nucleus 后端：清除 pending，不自动启动（用户手动填用户名密码）
+            pendingAutoStartRef.current = false;
+            return;
+        }
+        if (auth?.password || auth?.api_key) {
+            pendingAutoStartRef.current = false;
+            return;
+        }
+        autoStartTriggeredRef.current = true;
+        pendingAutoStartRef.current = false;
+        handleStartDeviceFlow();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [backend]);
+
+    // Device Flow 成功完成 / 用户关闭 → 复位允许下次 auth-auto-device-flow 再次触发
+    useEffect(() => {
+        if (!isDeviceFlowOpen) {
+            // Modal 关闭后等 1s 重置，避免同一流程内重复触发
+            const t = setTimeout(() => {
+                autoStartTriggeredRef.current = false;
+            }, 1000);
+            // 清除底部 toast 去重窗口
+            if (typeof window !== 'undefined') window.__authGuardActiveUntil = 0;
+            return () => clearTimeout(t);
+        }
+        // Device Flow Modal 打开时屏蔽底部 loginRequired toast（30s 窗口）
+        if (typeof window !== 'undefined') {
+            window.__authGuardActiveUntil = Date.now() + 30 * 1000;
+        }
+        return undefined;
+    }, [isDeviceFlowOpen]);
 
     // Handle successful device flow authentication - create API token
     useEffect(() => {
@@ -523,6 +365,15 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                     // Save to localStorage
                     localStorage.setItem(getServerStorageKey("username"), '$omni-api-token');
                     localStorage.setItem(getServerStorageKey("password"), apiTokenResult.api_token);
+                    // Save tokens for tagging operations (API Token may lack write permissions)
+                    if (deviceFlowAuth.authResult.refresh_token) {
+                      localStorage.setItem(getServerStorageKey("nucleus_refresh_token"), deviceFlowAuth.authResult.refresh_token);
+                    }
+                    if (deviceFlowAuth.authResult.access_token) {
+                      localStorage.setItem(getServerStorageKey("nucleus_access_token"), deviceFlowAuth.authResult.access_token);
+                      // access_token 通常 30 分钟有效，存到期时间
+                      localStorage.setItem(getServerStorageKey("nucleus_access_token_expiry"), String(Date.now() + 25 * 60 * 1000));
+                    }
                     // Clear the auth_cleared flag since user just authenticated
                     localStorage.removeItem(getServerStorageKey("auth_cleared"));
                     window.dispatchEvent(new Event('storage'));
@@ -616,15 +467,10 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey }) => {
                                         variant="outline"
                                         colorScheme="red"
                                         onClick={() => {
+                                            // === LM CUSTOMIZATION: 使用统一的用户主动清除工具函数 ===
                                             const newAuth = { ...auth, username: '', password: '' };
                                             setAuth(newAuth);
-                                            localStorage.removeItem(getServerStorageKey("api_key"));
-                                            localStorage.removeItem(getServerStorageKey("username"));
-                                            localStorage.removeItem(getServerStorageKey("password"));
-                                            // Mark that the user explicitly cleared credentials for this server
-                                            localStorage.setItem(getServerStorageKey("auth_cleared"), "true");
-                                            window.dispatchEvent(new Event('storage'));
-                                            window.dispatchEvent(new Event('auth-updated'));
+                                            clearAuthByUserAction(selectedServer);
                                         }}
                                     >
                                         {t('clearToken')}
@@ -892,6 +738,15 @@ const HeaderIcons = () => {
     
     // Use disclosure for auth popover - always starts closed
     const { isOpen: isAuthOpen, onOpen: onAuthOpen, onClose: onAuthClose, onToggle: onAuthToggle } = useDisclosure();
+
+    // 监听 AuthGuard 事件：自动打开登录弹窗
+    useEffect(() => {
+        const handleAuthGuardOpen = () => {
+            onAuthOpen();
+        };
+        window.addEventListener('auth-guard-open', handleAuthGuardOpen);
+        return () => window.removeEventListener('auth-guard-open', handleAuthGuardOpen);
+    }, [onAuthOpen]);
         
     const [plugins, setPlugins] = useState({ active: [], inactive: [] });
     const [backend, setBackend] = useState(null);
@@ -1175,7 +1030,7 @@ const HeaderIcons = () => {
                                             {auth.api_key || (auth.username && auth.password) ? <LockIcon color="#FFD230" /> : <UnlockIcon color="#FF4D4F" />}
                                         </HStack>
                                     </HStack>
-                                    <AuthForm auth={auth} setAuth={setAuth} getServerStorageKey={getServerStorageKey} />
+                                    <AuthForm auth={auth} setAuth={setAuth} getServerStorageKey={getServerStorageKey} selectedServer={selectedServer} />
                                 </Box>
                             </VStack>
                         </PopoverBody>
@@ -1308,7 +1163,7 @@ const HeaderIcons = () => {
                         <PopoverCloseButton />
                         <PopoverHeader>{t('authenticationStatus')}</PopoverHeader>
                         <PopoverBody>
-                            <AuthForm auth={auth} setAuth={setAuth} getServerStorageKey={getServerStorageKey} />
+                            <AuthForm auth={auth} setAuth={setAuth} getServerStorageKey={getServerStorageKey} selectedServer={selectedServer} />
                         </PopoverBody>
                     </PopoverContent>
                 </Popover>
@@ -1502,6 +1357,10 @@ const LanguageSwitcher = () => {
 
 // App wrapper to initialize persistent cache
 const App = () => {
+    // === LM CUSTOMIZATION: Sidebar state START ===
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    // === LM CUSTOMIZATION: Sidebar state END ===
+
     useEffect(() => {
         // Initialize persistent image cache on app startup
         persistentCache.init().then(supported => {
@@ -1512,31 +1371,45 @@ const App = () => {
     }, []);
 
     return (
+        // === LM CUSTOMIZATION: Provider START ===
         <LanguageProvider>
         <ChakraProvider theme={theme}>
+            {/* === LM CUSTOMIZATION: Fab-style top bar START === */}
             <Box 
                 w="100%" 
-                h="66px" 
-                bg="#141517"
-                borderBottom="1px solid #383838"
+                h="72px" 
+                bg="transparent"
+                borderBottom="1px solid rgba(255,255,255,0.05)"
                 position="sticky"
                 top={0}
-                zIndex={1000}
+                zIndex={1100}
                 backdropFilter="blur(12px)"
+                backgroundColor="rgba(16,16,20,0.85)"
             >
-                <Flex h="100%" alignItems="center" flexDir="row" justify="space-between" px={6}>
-                    <Flex alignItems="center" gap={3}>
-                        <Image src={logo} alt="LIGHT MARKET" h="42px" filter="brightness(1.1)"/>
-                        <Flex alignItems={"baseline"} gap={2}>
-                            <Heading fontSize="xl" fontWeight="600" color="white" letterSpacing="-0.01em">DeepSearch Explorer</Heading>
-                            <Text fontSize="xs" color="#ABABAB" fontWeight="400">v 1.3.0</Text>
-                        </Flex>
-                    </Flex>
+                <Flex h="100%" alignItems="center" px={6} gap={4}>
+                    {/* 左侧：仅 Logo（移除标题文字和版本号，Fab 风格） */}
+                    <Image src={logo} alt="LIGHT MARKET" h="42px" filter="brightness(1.1)" flexShrink={0} cursor="pointer" onClick={() => window.location.href = '/'} />
+                    
+                    {/* 中间：胶囊搜索框（Fab 风格 radius 9999px） */}
+                    <TopSearchBar style={{ margin: '0 auto' }} />
+                    
+                    {/* 右侧：功能图标（保持不变） */}
                     <HeaderIcons handleSearch={() => window.dispatchEvent(new Event('trigger-search'))} />
                 </Flex>
             </Box>
+            {/* === LM CUSTOMIZATION: Fab-style top bar END === */}
             <ColorModeScript initialColorMode={theme.config.initialColorMode}/>
-            <SearchApp/>
+            {/* === LM CUSTOMIZATION: Layout START === */}
+            <Flex>
+                <CategorySidebar
+                    collapsed={sidebarCollapsed}
+                    onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+                />
+                <Box flex="1" minW={0} ml={sidebarCollapsed ? 0 : '320px'} transition="margin-left 0.2s ease">
+                    <SearchApp/>
+                </Box>
+            </Flex>
+            {/* === LM CUSTOMIZATION: Layout END === */}
         </ChakraProvider>
         </LanguageProvider>
     );

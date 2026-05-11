@@ -1,0 +1,96 @@
+/* === LM CUSTOMIZATION: Fab card hover overlay styles === */
+/* 对齐 Fab 实测：docs/Fab改造/扒取产出/fab-card-structure.json */
+
+/* --- 根容器：覆盖整个缩略图区域 --- */
+.fab-card-overlay-root {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  /* hover 态由父级 .chakra-card:hover 触发 */
+}
+
+/* --- 白色半透明 overlay --- */
+.fab-card-overlay-bg {
+  position: absolute;
+  inset: 0;
+  background: rgb(255, 255, 255);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  border-radius: inherit;
+}
+
+/* hover 时 overlay 出现（Fab 实测 opacity: 0.1） */
+.chakra-card:hover .fab-card-overlay-bg {
+  opacity: 0.1;
+}
+
+/* --- 左下角 Badge 区 --- */
+.fab-card-overlay-badges {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+/* hover 时 Badge 出现 */
+.chakra-card:hover .fab-card-overlay-badges {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* --- 毛玻璃 Badge 通用样式 --- */
+.fab-card-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(48, 48, 52, 0.7);
+  backdrop-filter: blur(50px);
+  -webkit-backdrop-filter: blur(50px);
+  border-radius: 9999px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* 分类 Badge（文字） */
+.fab-card-badge--category {
+  height: 24px;
+  padding: 2px 12px;
+}
+
+/* 引擎图标 Badge（仅图标） */
+.fab-card-badge--engine {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+/* 引擎图标容器 */
+.fab-card-badge-engines {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Badge 间分隔符 */
+.fab-card-badge-spacer {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+/* 引擎文字 fallback（无图标时） */
+.fab-card-badge-engine-text {
+  font-size: 10px;
+  text-transform: uppercase;
+}
