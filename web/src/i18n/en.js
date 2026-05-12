@@ -81,6 +81,12 @@ const en = {
   copiedToClipboard: "Copied to clipboard",
   copyFailed: "Copy failed",
   copyFailedDescription: "Unable to access clipboard. Please ensure you are using HTTPS or localhost.",
+  // === LM CUSTOMIZATION: Copy Deploy Fix - Manual Copy Modal ===
+  manualCopyTitle: "Copy URL manually",
+  manualCopyHint: "The browser or deployment policy blocked auto-copy. Press Ctrl+C / ⌘+C to copy the text below.",
+  manualCopyRetry: "Try again",
+  manualCopyOpenInTab: "Open in new tab",
+  manualCopyClose: "Close",
   searchUrlCopied: "Search URL copied!",
   shareSearchUrl: "Share this URL to reproduce the exact same search",
   shareCurrentSearch: "Share current search configuration",

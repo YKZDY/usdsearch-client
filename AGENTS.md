@@ -74,7 +74,7 @@ usdsearch-client/
 1. **搜索请求**：`HybridDeepSearchUI.jsx` 构造 `DeepSearchSearchRequestV2` → POST `/search_hybrid` → 后端返回 `{hits, total}`
 2. **图片加载**：搜索结果中 `thumbnail_exists=true` → `useSmartImageLoader` hook → 三级缓存（内存 → IndexedDB `persistentImageCache` → GET `/image?url=...`）
 3. **认证**：`HeaderIcons` 管理多服务器认证 → localStorage 按 `${serverName}_username/password` 隔离 → `x-usdsearch-storage-backend` header 指定后端
-4. **服务器切换**：`SERVER_MAPPING`（从 `REACT_APP_SERVER_MAPPING` JSON 解析）→ URL 参数 `?server=xxx` → `CustomEvent('server-changed')` 通知全局
+4. **服务器切换**：`SERVER_MAPPING`（从 `REACT_APP_SERVER_MAPPING` JSON 解析，例如 `{"nucleus":{"name":"OV.QQ.COM","host":"ov.qq.com"}}`）→ URL 参数 `?server=nucleus` → `CustomEvent('server-changed')` 通知全局。老 URL `?server=omniverse` 仍然兼容；`serializeToURL` 会把所有等价 server 归一化写成 `nucleus`，让分享出去的链接形态干净。
 5. **Mock 模式**：`setupProxy.js` 作为 CRA middleware 自动拦截所有 API 路由返回随机数据，删除此文件即禁用
 
 ### Python SDK 高级封装层

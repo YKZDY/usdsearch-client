@@ -905,6 +905,8 @@ const VirtualizedHybridSearchResults = ({
   // V2 U1: 批量失败持久化
   failedBatchItems = null,
   onRetryFailed,
+  // 空白处单击（无拖拽）触发：通常用于退出多选；由父级传入 clearSelection
+  onEmptyAreaClick,
 }) => {
   const { t } = useTranslation();
 
@@ -920,6 +922,13 @@ const VirtualizedHybridSearchResults = ({
     }
   }, [onBatchSelection]);
 
+  // 仅在多选模式下响应空白点击退出，避免无意义触发
+  const handleEmptyClick = useCallback(() => {
+    if (isMultiSelectMode && onEmptyAreaClick) {
+      onEmptyAreaClick();
+    }
+  }, [isMultiSelectMode, onEmptyAreaClick]);
+
   const { isDragging, selectionRect, handleMouseDown } = useDragSelect({
     containerRef: scrollContainerRef,
     items: results,
@@ -927,6 +936,7 @@ const VirtualizedHybridSearchResults = ({
     onSelectionChange: handleDragSelectionChange,
     baseSelection: selectedItems,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    onEmptyClick: handleEmptyClick,
   });
 
   // Calculate score range for normalization

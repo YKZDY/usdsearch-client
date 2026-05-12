@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { cloneStaticPathTree } from '../data/pathTree';
+import { isNoisePath, isNoiseSegment } from '../utils/pathFilters';
 
 /**
  * usePathSuggestions
@@ -28,6 +29,22 @@ export function usePathSuggestions(hits, opts = {}) {
       ? JSON.parse(JSON.stringify(liveTree))
       : cloneStaticPathTree();
 
+    // [calvingu 2026-05] 防御性骨架净化：万一 liveTree 缓存里残留 .thumbs / __pycache__
+    // 这种噪声节点（旧版本 listing 没过滤就缓存的），这里递归清掉，保证树里
+    // 永远不会出现噪声路径。
+    const purgeNoise = (nodes) => {
+      if (!Array.isArray(nodes)) return;
+      for (let i = nodes.length - 1; i >= 0; i--) {
+        const n = nodes[i];
+        if (isNoiseSegment(n?.name) || isNoisePath(n?.path || '')) {
+          nodes.splice(i, 1);
+          continue;
+        }
+        if (Array.isArray(n.children)) purgeNoise(n.children);
+      }
+    };
+    purgeNoise(tree);
+
     const liveCounts = new Map(); // path -> count
 
     // 1. 扫描结果聚合
@@ -41,10 +58,17 @@ export function usePathSuggestions(hits, opts = {}) {
         if (!cleaned.startsWith('/')) cleaned = '/' + cleaned;
 
         // 剥离文件名（最后一段如果带扩展名，视为文件）
+        // ⚠️ 用 lastIndexOf('.') > 0 而不是 includes('.')，否则 ".thumbs" 这种
+        // "整段就是以点开头的目录名"会被误判为文件名而剥掉，导致 noise 过滤漏判。
         const lastSlash = cleaned.lastIndexOf('/');
         const tail = cleaned.slice(lastSlash + 1);
-        if (tail.includes('.')) cleaned = cleaned.slice(0, lastSlash);
+        if (tail.lastIndexOf('.') > 0) cleaned = cleaned.slice(0, lastSlash);
         if (!cleaned) continue;
+
+        // [calvingu 2026-05] 噪声路径整条丢弃 —— .thumbs / .system / __pycache__ 等
+        // 不计入路径树徽章。配合 HybridDeepSearchUI 里 visibleResults 的同款过滤，
+        // 保证：visibleResults.length === Σ pathTree[*].deepCount。
+        if (isNoisePath(cleaned)) continue;
 
         // 按段累加：/A/B/C → /A, /A/B, /A/B/C 各 +1
         const segs = cleaned.split('/').filter(Boolean);

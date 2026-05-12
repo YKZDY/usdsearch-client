@@ -28,6 +28,7 @@
 import { apiUrl } from '../config';
 import { getStoredAuth } from '../utils/authStorage';
 import * as cache from '../utils/nucleusTreeCache';
+import { isNoisePath, isNoiseSegment } from '../utils/pathFilters';
 
 const DEFAULT_LIMIT = 500;        // 单次反推取多少 hits
 const DEFAULT_TIMEOUT_MS = 5000;  // listing 请求超时 5s
@@ -59,16 +60,26 @@ function extractDirectChildren(hits, prefix) {
     let cleaned = String(raw).replace(/^[a-z]+:\/+/i, '/').replace(/\/+/g, '/');
     if (!cleaned.startsWith('/')) cleaned = '/' + cleaned;
     // 文件名识别：最后一段含 . 即视为文件，剥掉
+    // ⚠️ 但是"以 . 开头的目录段"（.thumbs / .system）虽然也含 .，
+    // 必须保留为目录段以便后续 isNoisePath 识别并整体丢弃这条 hit；
+    // 这里的判断是「最后一段是否带扩展名」—— 我们用 lastIndexOf('.') > 0 排除掉
+    // ".thumbs" 这种"以点开头但整段就是名字"的目录情形。
     const lastSlash = cleaned.lastIndexOf('/');
     const tail = cleaned.slice(lastSlash + 1);
-    if (tail.includes('.')) cleaned = cleaned.slice(0, lastSlash);
+    if (tail.lastIndexOf('.') > 0) cleaned = cleaned.slice(0, lastSlash);
     if (!cleaned) continue;
+
+    // [calvingu 2026-05] 路径噪声过滤：任何段命中 .xxx / __xxx → 整条 hit 不计入
+    // 必须在子目录提取之前丢弃，否则 .thumbs 下的资产会被算到 /Library 的命中里，
+    // 导致路径树徽章数 ≠ 卡片列表数。
+    if (isNoisePath(cleaned)) continue;
 
     // 必须严格在 prefix 下
     if (p === '/') {
       // 顶层：取第一段
       const segs = cleaned.split('/').filter(Boolean);
       if (segs.length === 0) continue;
+      if (isNoiseSegment(segs[0])) continue; // 防御性：理论上 isNoisePath 已拦截
       counts.set(segs[0], (counts.get(segs[0]) || 0) + 1);
     } else {
       // 子目录：cleaned 必须以 p + '/' 开头，或正好等于 p（叶子）
@@ -77,6 +88,7 @@ function extractDirectChildren(hits, prefix) {
       const rest = cleaned.slice(p.length + 1);
       const child = rest.split('/')[0];
       if (!child) continue;
+      if (isNoiseSegment(child)) continue; // 防御性：理论上 isNoisePath 已拦截
       counts.set(child, (counts.get(child) || 0) + 1);
     }
   }

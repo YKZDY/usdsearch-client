@@ -70,7 +70,7 @@ All methods are async and follow the pattern: `async with ApiClient(Configuratio
 1. **Search**: `HybridDeepSearchUI.jsx` constructs `DeepSearchSearchRequestV2` → POST `/search_hybrid` → backend returns `{hits, total}`
 2. **Image loading**: `thumbnail_exists=true` in results → `useSmartImageLoader` hook → three-tier cache (memory → IndexedDB `persistentImageCache` → GET `/image?url=...`)
 3. **Auth**: `HeaderIcons` manages multi-server auth → localStorage keyed by `${serverName}_username/password` → `x-usdsearch-storage-backend` header
-4. **Server switching**: `SERVER_MAPPING` (from `REACT_APP_SERVER_MAPPING` JSON) → URL param `?server=xxx` → `CustomEvent('server-changed')` global notification
+4. **Server switching**: `SERVER_MAPPING` (from `REACT_APP_SERVER_MAPPING` JSON, e.g. `{"nucleus":{"name":"OV.QQ.COM","host":"ov.qq.com"}}`) → URL param `?server=nucleus` → `CustomEvent('server-changed')` global notification. Legacy `?server=omniverse` aliases are kept for backward compat; `serializeToURL` normalizes any equivalent server back to `nucleus` so shared URLs stay clean.
 5. **Mock mode**: `setupProxy.js` as CRA middleware intercepts all API routes with random data; delete the file to disable
 
 ### Frontend Stack

@@ -34,16 +34,25 @@ export const defaultEmbeddingConfig = {
 };
 
 // Server name to URL mapping configuration
-// Expects a JSON string in format: {"server1": "http://url1", "server2": "http://url2"}
+// Expects a JSON string in format: {"server1": {"name":"...","apiUrl":"","host":"..."}, ...}
 //
 // [Tag Deploy Fix - 防线 3]
 // 内置兜底映射：即使部署环境忘配 REACT_APP_SERVER_MAPPING，常用别名也能解析为真实 host。
 // env 配置优先级最高，会覆盖兜底；这层只在 env 缺/坏时生效。
 // 历史踩坑：部署环境 SERVER_MAPPING 为 {} → selectedBackend="omniverse" 直接被当作 host
 //           拼成 wss://omniverse/... → 浏览器无法解析 → tag 增删全部静默失败。
+//
+// v2 别名升级（保持向后兼容）：
+//   - 'nucleus'                 ← 新主 key，URL 默认形态 ?server=nucleus
+//   - 'omniverse'               ← 老链接兼容入口（旧书签仍可用）
+//   - 'omniverse://ov.qq.com'   ← 兼容生产 env 既有形态（保留以免老登录用户掉线）
+// 三个 key 共享同一 NUCLEUS_CONFIG 引用，渲染时按引用去重只显示一行。
+// host 字段提供给 resolveNucleusHost 优先读取，链路更短更可靠。
+const NUCLEUS_CONFIG = { name: "OV.QQ.COM", apiUrl: "", host: "ov.qq.com" };
 const SERVER_MAPPING_FALLBACK = {
-  // 业务约定：URL ?server=omniverse://ov.qq.com 的 "omniverse" 应解析到这里
-  omniverse: "omniverse://ov.qq.com",
+  nucleus: NUCLEUS_CONFIG,
+  omniverse: NUCLEUS_CONFIG,
+  "omniverse://ov.qq.com": NUCLEUS_CONFIG,
 };
 
 let serverMapping = {};
@@ -59,6 +68,17 @@ try {
 export const SERVER_MAPPING = serverMapping;
 
 /**
+ * 取默认 server key —— 多组件共用，避免出现 HeaderIcons 选 nucleus、HybridDeepSearchUI 选 omniverse 的撕裂状态。
+ * 优先级：nucleus（v2 主别名） → omniverse（兼容） → Object.keys()[0]（兜底，env 顺序不稳但好过空）
+ */
+export function getDefaultServerKey() {
+  if (Object.prototype.hasOwnProperty.call(serverMapping, 'nucleus')) return 'nucleus';
+  if (Object.prototype.hasOwnProperty.call(serverMapping, 'omniverse')) return 'omniverse';
+  const keys = Object.keys(serverMapping);
+  return keys.length > 0 ? keys[0] : '';
+}
+
+/**
  * [Tag Deploy Fix - 防线 3] 把任意 server 标识规范化为合法 nucleus host
  *
  * 输入示例 → 输出：
@@ -67,6 +87,7 @@ export const SERVER_MAPPING = serverMapping;
  *   "https://ov.qq.com"      → "ov.qq.com"
  *   "ov.qq.com"              → "ov.qq.com"
  *   "omniverse"              → 查 SERVER_MAPPING['omniverse'] 递归解析 → "ov.qq.com"
+ *   "nucleus"                → 同上 → "ov.qq.com"
  *   ""/null/undefined        → ""
  *
  * 注意：本函数只做字符串规范化，不做合法性判断（合法性校验交给
@@ -78,11 +99,18 @@ export function resolveNucleusHost(input) {
   if (!s) return '';
 
   // 1) 别名查表（防止 "omniverse" 这种裸 key 直接当 host）
-  //    递归一次：mapping 的 value 可能仍是 omniverse:// URL
+  //    优先读富对象的 host 字段；否则递归一次（mapping 的 value 也可能是 omniverse:// URL string）
   if (Object.prototype.hasOwnProperty.call(serverMapping, s)) {
     const mapped = serverMapping[s];
-    if (mapped && typeof mapped === 'string' && mapped !== s) {
-      s = mapped;
+    if (mapped) {
+      // v2 富对象形态：{ name, apiUrl, host }
+      if (typeof mapped === 'object' && typeof mapped.host === 'string' && mapped.host.trim()) {
+        return mapped.host.trim();
+      }
+      // 兼容旧 string 形态
+      if (typeof mapped === 'string' && mapped !== s) {
+        s = mapped;
+      }
     }
   }
 

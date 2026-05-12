@@ -5,14 +5,16 @@
  * 替换 AssetDetailsModal 中原有的只读 Tags Table
  */
 
-import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import {
   Box, Wrap, WrapItem, Tag, TagLabel, TagCloseButton,
   Input, IconButton, Tooltip, Text, useToast,
   List, ListItem, Spinner,
-  Popover, PopoverTrigger, PopoverContent, PopoverBody, Portal,
+  Popover, PopoverTrigger, PopoverContent, PopoverBody, PopoverHeader,
+  PopoverArrow, PopoverCloseButton, Portal,
+  Button, Divider, Code, HStack, VStack,
 } from '@chakra-ui/react';
-import { AddIcon } from '@chakra-ui/icons';
+import { AddIcon, InfoOutlineIcon, WarningTwoIcon } from '@chakra-ui/icons';
 import { keyframes } from '@emotion/react';
 import { useTranslation } from '../i18n/LanguageContext';
 import useTagManager from '../hooks/useTagManager';
@@ -54,7 +56,54 @@ const EditableTagsPanel = memo(function EditableTagsPanel({
     addTag, addMultipleTags, removeTag, undoRemove,
     loadSuggestions, filterSuggestions,
     reindexState, reindexUrl,
+    // [TagFailureSurface] 错误诊断 API
+    lastError, clearLastError, retryFailedTag, diagnosticsContext,
   } = useTagManager({ serverUrl, assetPath, initialTags, getHeaders, apiUrl, assetUrl });
+
+  // ─── [TagFailureSurface] lastError → 分类 toast ────────────────
+  // 根据 err.kind 选择文案，每次 lastError 变化（at 戳变）触发一次。
+  // useTagManager 内部已有 8s 同 kind 去抖，这里直接根据 at 触发。
+  const lastErrorAtRef = useRef(0);
+  useEffect(() => {
+    if (!lastError) {
+      lastErrorAtRef.current = 0;
+      return;
+    }
+    if (lastError.at === lastErrorAtRef.current) return;
+    lastErrorAtRef.current = lastError.at;
+
+    // 文案映射（i18n 优先，本地兜底）
+    const fallbackByKind = {
+      auth: '需要重新登录 Nucleus（标签写入被拒绝）',
+      network: '无法连接标签服务，请检查网络后重试',
+      'server-rejected': '服务端拒绝了本次标签修改',
+      'invalid-host': '后端地址配置异常，无法发起标签请求',
+      timeout: '标签服务响应超时',
+      unknown: '标签操作失败，请稍后重试',
+    };
+    const i18nKeyByKind = {
+      auth: 'tagErrorAuth',
+      network: 'tagErrorNetwork',
+      'server-rejected': 'tagErrorServerRejected',
+      'invalid-host': 'tagErrorInvalidHost',
+      timeout: 'tagErrorTimeout',
+      unknown: 'tagErrorUnknown',
+    };
+    const kind = lastError.kind || 'unknown';
+    const i18nKey = i18nKeyByKind[kind] || 'tagErrorUnknown';
+    const i18nText = t(i18nKey);
+    const title = (i18nText && i18nText !== i18nKey) ? i18nText : (fallbackByKind[kind] || fallbackByKind.unknown);
+    const description = lastError.method ? `${lastError.method} · ${kind}/${lastError.stage}` : `${kind}/${lastError.stage}`;
+
+    toast({
+      title,
+      description,
+      status: kind === 'auth' ? 'warning' : 'error',
+      duration: 5000,
+      isClosable: true,
+      position: 'bottom',
+    });
+  }, [lastError, t, toast]);
 
   // ─── [TagSearchFix] reindex 超时时手动重试 ─────────────────────
   const handleManualReindexRetry = useCallback(() => {
@@ -226,6 +275,7 @@ const EditableTagsPanel = memo(function EditableTagsPanel({
               tag={tag}
               hasWritePermission={hasWritePermission}
               onRemove={handleRemove}
+              onRetry={retryFailedTag}
             />
           </WrapItem>
         ))}
@@ -338,6 +388,19 @@ const EditableTagsPanel = memo(function EditableTagsPanel({
             <Text fontSize="13px" color="whiteAlpha.300">
               {t('noTagsFound') || '暂无标签'}
             </Text>
+          </WrapItem>
+        )}
+
+        {/* [TagFailureSurface] 诊断按钮：有失败 或 无写权限 时显示 */}
+        {(lastError || !hasWritePermission) && (
+          <WrapItem>
+            <DiagnosticsButton
+              lastError={lastError}
+              hasWritePermission={hasWritePermission}
+              diagnosticsContext={diagnosticsContext}
+              onClear={clearLastError}
+              t={t}
+            />
           </WrapItem>
         )}
       </Wrap>
@@ -497,10 +560,39 @@ const EditableTagsPanel = memo(function EditableTagsPanel({
 });
 
 // ─── TagChip 子组件 ──────────────────────────────────────────────
-const TagChip = memo(function TagChip({ tag, hasWritePermission, onRemove }) {
+const TagChip = memo(function TagChip({ tag, hasWritePermission, onRemove, onRetry }) {
   const isPending = tag.status === 'pending';
   const isRemoving = tag.status === 'removing';
+  const isFailed = tag.status === 'failed';
   const displayName = tag.name.length > 16 ? `${tag.name.slice(0, 16)}…` : tag.name;
+
+  // [TagFailureSurface] failed 状态：红色描边 + tooltip 显示重试提示 + 点击重试
+  if (isFailed) {
+    return (
+      <Tooltip
+        label="保存失败，点击重试"
+        fontSize="12px" placement="top" hasArrow openDelay={150}
+      >
+        <Tag
+          size="md"
+          variant="subtle"
+          bg="rgba(229, 62, 62, 0.12)"
+          color="red.200"
+          border="1px solid"
+          borderColor="rgba(229, 62, 62, 0.5)"
+          borderRadius="6px"
+          px={3} py={1.5} minH="28px"
+          cursor="pointer"
+          transition="all 0.15s ease"
+          _hover={{ bg: 'rgba(229, 62, 62, 0.2)', borderColor: 'rgba(229, 62, 62, 0.7)' }}
+          onClick={(e) => { e.stopPropagation(); onRetry && onRetry(tag.name); }}
+        >
+          <WarningTwoIcon mr={1.5} fontSize="11px" color="red.300" />
+          <TagLabel fontSize="13px">{displayName}</TagLabel>
+        </Tag>
+      </Tooltip>
+    );
+  }
 
   return (
     <Tooltip
@@ -534,6 +626,255 @@ const TagChip = memo(function TagChip({ tag, hasWritePermission, onRemove }) {
         )}
       </Tag>
     </Tooltip>
+  );
+});
+
+// ─── DiagnosticsButton 子组件 ──────────────────────────────────
+// [TagFailureSurface] tag 写入失败 / 无写权限时显示一个低调的 "ⓘ" 按钮，
+// 点击展开 Popover，列出 hostUsed / tokenSource / closeCode / serverCode /
+// jwtExp / clockSkewSuspected / userAgent / protocol / clientNow 等诊断字段，
+// 并提供"复制诊断信息"按钮（剪贴板内容不含 token）。
+//
+// 设计意图：让 Calvin 这样的远程用户能直接截图/复制 → 操作者凭一行字符串即可定位根因，
+// 不需要让对方跑脚本或开 DevTools Network 面板。
+const DiagnosticsButton = memo(function DiagnosticsButton({ lastError, hasWritePermission, diagnosticsContext, onClear, t }) {
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+
+  // 把状态汇总成一个可读的诊断字符串（一行式，方便聊天工具粘贴）
+  const diagnosticString = useMemo(() => {
+    const ctx = diagnosticsContext || {};
+    const err = lastError || {};
+    const env = err.env || {};
+    // [TagStorageKeyFix] storageKeys 同步快照（仅存在性，不含 token 值）
+    let keysStr = '';
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const host = ctx.effectiveServerUrl || ctx.host || '';
+        const aliases = Array.isArray(ctx.storageKeyAliases) ? ctx.storageKeyAliases : [];
+        const parts = [];
+        if (host) parts.push(`${host}=${localStorage.getItem(`${host}_nucleus_access_token`) ? 1 : 0}`);
+        for (const a of aliases) {
+          if (!a || a === host) continue;
+          parts.push(`${a}=${localStorage.getItem(`${a}_nucleus_access_token`) ? 1 : 0}`);
+        }
+        parts.push(`bare=${localStorage.getItem('nucleus_access_token') ? 1 : 0}`);
+        keysStr = parts.join(',');
+      }
+    } catch (_) { /* ignore */ }
+    const fields = [
+      `kind=${err.kind || (hasWritePermission ? 'none' : 'no-write-permission')}`,
+      err.stage && `stage=${err.stage}`,
+      err.method && `method=${err.method}`,
+      `host=${err.hostUsed || ctx.host || ''}`,
+      `tokenSource=${err.tokenSource || ctx.tokenSource || 'none'}`,
+      err.sourceAliasMatched && `aliasHit=${err.sourceAliasMatched}`,
+      keysStr && `keys={${keysStr}}`,
+      typeof err.closeCode === 'number' && `closeCode=${err.closeCode}`,
+      typeof err.serverCode === 'number' && `serverCode=${err.serverCode}`,
+      typeof err.jwtExp === 'number' && `jwtExp=${err.jwtExp}`,
+      err.clockSkewSuspected && 'clockSkewSuspected=true',
+      env.protocol && `protocol=${env.protocol}`,
+      env.clientNow && `clientNow=${env.clientNow}`,
+      env.userAgent && `ua=${env.userAgent}`,
+    ].filter(Boolean);
+    return `[TagDiagnostics] ${fields.join(' | ')}`;
+  }, [lastError, hasWritePermission, diagnosticsContext]);
+
+  // 建议操作（根据 kind 给一句话提示）
+  const suggestion = useMemo(() => {
+    if (!lastError) {
+      return hasWritePermission ? '当前无错误' : '当前 token 没有标签写入权限，请重新登录 Nucleus（DeviceFlow）';
+    }
+    switch (lastError.kind) {
+      case 'auth': return '建议：重新登录 Nucleus（DeviceFlow），或检查本机时钟是否偏差过大';
+      case 'network': return '建议：检查公司内网/VPN 连通性，确认浏览器允许 wss 到 Nucleus 域名';
+      case 'server-rejected': return '建议：服务端拒绝了请求，请联系管理员查看 Nucleus 侧日志';
+      case 'invalid-host': return '建议：检查 URL ?server= 参数或 SERVER_MAPPING 部署配置';
+      case 'timeout': return '建议：Nucleus 服务可能繁忙，稍后重试；若持续请联系管理员';
+      default: return '建议：刷新页面后重试；若仍失败请把下方诊断信息发给管理员';
+    }
+  }, [lastError, hasWritePermission]);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(diagnosticString);
+      } else {
+        // fallback：execCommand
+        const ta = document.createElement('textarea');
+        ta.value = diagnosticString;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      toast({
+        title: t('diagnosticsCopied') === 'diagnosticsCopied' ? '诊断信息已复制' : t('diagnosticsCopied'),
+        status: 'success',
+        duration: 1500,
+        isClosable: true,
+        position: 'bottom',
+      });
+    } catch (_) {
+      toast({
+        title: t('copyFailed') === 'copyFailed' ? '复制失败' : t('copyFailed'),
+        status: 'error',
+        duration: 2000,
+        isClosable: true,
+      });
+    }
+  }, [diagnosticString, toast, t]);
+
+  const ctx = diagnosticsContext || {};
+  const err = lastError || {};
+  const env = err.env || {};
+
+  // [TagStorageKeyFix] storageKeys 状态：同步读 localStorage，仅展示存在性，不显示 token 值
+  // 让排查时一眼看出"到底是哪个前缀的 key 命中"，不用翻 F12 Application 面板
+  const storageKeysSnapshot = useMemo(() => {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      const host = ctx.effectiveServerUrl || ctx.host || '';
+      const aliases = Array.isArray(ctx.storageKeyAliases) ? ctx.storageKeyAliases : [];
+      const items = [];
+      if (host) {
+        items.push({
+          label: `${host}_*`,
+          present: !!localStorage.getItem(`${host}_nucleus_access_token`),
+          tag: 'host',
+        });
+      }
+      for (const a of aliases) {
+        if (!a || a === host) continue;
+        items.push({
+          label: `${a}_*`,
+          present: !!localStorage.getItem(`${a}_nucleus_access_token`),
+          tag: 'alias',
+        });
+      }
+      items.push({
+        label: 'bare',
+        present: !!localStorage.getItem('nucleus_access_token'),
+        tag: 'bare',
+      });
+      return items;
+    } catch (_) {
+      return null;
+    }
+    // 故意每次 render 重算（无副作用），保证打开 Popover 时是最新值
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.effectiveServerUrl, ctx.host, ctx.storageKeyAliases, lastError]);
+
+
+  return (
+    <Popover placement="bottom-start" isLazy>
+      <PopoverTrigger>
+        <IconButton
+          icon={<InfoOutlineIcon />}
+          size="xs"
+          variant="ghost"
+          aria-label="标签诊断信息"
+          color={lastError ? 'red.300' : 'whiteAlpha.400'}
+          _hover={{ color: lastError ? 'red.200' : 'whiteAlpha.700', bg: 'whiteAlpha.100' }}
+          height="28px"
+          width="28px"
+        />
+      </PopoverTrigger>
+      <Portal>
+        <PopoverContent bg="rgba(20, 24, 29, 0.96)" backdropFilter="blur(20px)" borderColor="whiteAlpha.200" maxW="420px">
+          <PopoverArrow bg="rgba(20, 24, 29, 0.96)" />
+          <PopoverCloseButton color="whiteAlpha.700" />
+          <PopoverHeader borderColor="whiteAlpha.200" fontSize="13px" fontWeight="600" color="whiteAlpha.900">
+            {lastError ? `标签操作失败 · ${lastError.kind}` : '标签写入权限不可用'}
+          </PopoverHeader>
+          <PopoverBody>
+            <VStack align="stretch" spacing={2} fontSize="12px">
+              <Text color="whiteAlpha.800">{suggestion}</Text>
+              <Divider borderColor="whiteAlpha.200" />
+
+              <DiagField label="Host" value={err.hostUsed || ctx.host || '-'} />
+              <DiagField label="Token 来源" value={
+                err.tokenSource || ctx.tokenSource
+                  ? `${err.tokenSource || ctx.tokenSource}${err.sourceAliasMatched ? ` (alias=${err.sourceAliasMatched})` : ''}`
+                  : 'none'
+              } />
+              {err.method && <DiagField label="Method" value={err.method} />}
+              {err.stage && <DiagField label="Stage" value={err.stage} />}
+              {typeof err.closeCode === 'number' && <DiagField label="WS Close Code" value={String(err.closeCode)} />}
+              {typeof err.serverCode === 'number' && <DiagField label="Server Code" value={`0x${err.serverCode.toString(16)}`} />}
+              {typeof err.jwtExp === 'number' && (
+                <DiagField label="JWT exp" value={`${err.jwtExp} (${new Date(err.jwtExp * 1000).toISOString()})`} />
+              )}
+              {storageKeysSnapshot && storageKeysSnapshot.length > 0 && (
+                <DiagField
+                  label="Storage Keys"
+                  value={storageKeysSnapshot.map(it => `${it.label}=${it.present ? '✓' : '✗'}`).join('  ')}
+                  truncate
+                />
+              )}
+              {err.clockSkewSuspected && (
+                <Text color="orange.300" fontSize="11px">⚠ 检测到客户端时钟可能偏差，请校准系统时间</Text>
+              )}
+
+              {env.protocol === 'http:' && (
+                <Text color="orange.300" fontSize="11px">⚠ 当前页面为 http://，浏览器混合内容策略可能拦截 wss 请求</Text>
+              )}
+
+              <Divider borderColor="whiteAlpha.200" />
+              <Text color="whiteAlpha.500" fontSize="11px">环境</Text>
+              {env.protocol && <DiagField label="Protocol" value={env.protocol} />}
+              {env.clientNow && <DiagField label="客户端时间" value={env.clientNow} />}
+              {env.userAgent && <DiagField label="UA" value={env.userAgent} truncate />}
+
+              <Divider borderColor="whiteAlpha.200" />
+              <HStack spacing={2} pt={1}>
+                <Button size="xs" colorScheme="yellow" variant="solid" onClick={handleCopy} flex={1}>
+                  {copied ? '已复制 ✓' : '复制诊断信息'}
+                </Button>
+                {lastError && (
+                  <Button size="xs" variant="outline" color="whiteAlpha.700" borderColor="whiteAlpha.300" onClick={onClear}>
+                    清除
+                  </Button>
+                )}
+              </HStack>
+              <Code
+                fontSize="10px"
+                p={1.5}
+                bg="blackAlpha.500"
+                color="whiteAlpha.600"
+                borderRadius="3px"
+                whiteSpace="pre-wrap"
+                wordBreak="break-all"
+              >
+                {diagnosticString}
+              </Code>
+            </VStack>
+          </PopoverBody>
+        </PopoverContent>
+      </Portal>
+    </Popover>
+  );
+});
+
+// 单行字段展示
+const DiagField = memo(function DiagField({ label, value, truncate }) {
+  return (
+    <HStack spacing={2} align="start">
+      <Text color="whiteAlpha.500" fontSize="11px" minW="80px" flexShrink={0}>{label}</Text>
+      <Text
+        color="whiteAlpha.900"
+        fontSize="11px"
+        fontFamily="mono"
+        noOfLines={truncate ? 2 : undefined}
+        wordBreak="break-all"
+        flex={1}
+      >
+        {value}
+      </Text>
+    </HStack>
   );
 });
 

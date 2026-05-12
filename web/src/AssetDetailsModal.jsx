@@ -725,6 +725,8 @@ const AssetDetailsModal = ({
                           wordBreak="break-all"
                           flex={1}
                           fontFamily="mono"
+                          userSelect="all"
+                          cursor="text"
                         >
                           {baseKey}
                         </Text>
@@ -1503,10 +1505,10 @@ const AssetDetailsModal = ({
           <HStack>
             <Button 
               colorScheme="yellow" 
-              leftIcon={<CopyIcon />}
-              onClick={() => copyToClipboard?.(baseKey)}
+              leftIcon={isUrlJustCopied ? <CheckIcon color="green.300" /> : <CopyIcon />}
+              onClick={handleCopyUrlInline}
             >
-              {t('copyUrl')}
+              {isUrlJustCopied ? t('urlCopied') : t('copyUrl')}
             </Button>
           </HStack>
         </ModalFooter>

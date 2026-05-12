@@ -48,6 +48,7 @@ import {
   Tooltip,
   Grid,
   GridItem,
+  Textarea,
 } from "@chakra-ui/react";
 import {
   SearchIcon,
@@ -61,7 +62,7 @@ import {
   MinusIcon,
 } from "@chakra-ui/icons";
 
-import { apiUrl as defaultApiUrl, defaultEmbeddingConfig, AUTH_CONFIG, FEATURE_FLAGS, SERVER_MAPPING, SEARCH_DEFAULTS, DEFAULT_SEARCH_PARAMS, resolveNucleusHost } from "./config";
+import { apiUrl as defaultApiUrl, defaultEmbeddingConfig, AUTH_CONFIG, FEATURE_FLAGS, SERVER_MAPPING, SEARCH_DEFAULTS, DEFAULT_SEARCH_PARAMS, resolveNucleusHost, getDefaultServerKey } from "./config";
 // === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
 // === LM CUSTOMIZATION: i18n END ===
@@ -77,6 +78,8 @@ import FabToolbar from "./components/FabToolbar";
 // === LM CUSTOMIZATION: Fab Toolbar END ===
 // === LM CUSTOMIZATION: Selection Mode Bar ===
 import SelectionModeBar from "./components/SelectionModeBar";
+// === LM CUSTOMIZATION: 全局空白点击退出多选（无涟漪反馈，依赖 Bar 自身淡出动画） ===
+import useExitMultiSelectOnEmptyClick from "./hooks/useExitMultiSelectOnEmptyClick";
 // === V2: 批量打标签工作流 ===
 import BatchTagModal from "./components/BatchTagModal";
 import UndoToast from "./components/UndoToast";
@@ -90,7 +93,31 @@ import { usePathSuggestions } from "./hooks/usePathSuggestions";
 import { useNucleusTree } from "./hooks/useNucleusTree";
 // === LM CUSTOMIZATION: Search/Tag decoupling — 搜索请求反腐层 ===
 import buildSearchPayload from "./utils/buildSearchPayload";
+import { isNoisePath } from "./utils/pathFilters";
 
+
+// === LM CUSTOMIZATION: Copy Deploy Fix START ===
+// 复制 URL 全链路诊断开关。
+// 默认关（生产 Console 干净）；远程排查时可在 DevTools 里：
+//   sessionStorage.setItem('copyDebug', '1')   // 然后刷新页面即可开启
+//   sessionStorage.removeItem('copyDebug')      // 关闭
+// 仅当前标签页生效，关掉标签页自动失效，不会污染长期存储。
+// 注意：失败/手动 Modal 兜底路径用 console.warn，无视开关，永远会打——
+// 失败时永远有线索可看，成功时不刷屏。
+const COPY_DEBUG = (() => {
+  try {
+    return typeof window !== 'undefined'
+      && window.sessionStorage?.getItem('copyDebug') === '1';
+  } catch (_) {
+    return false; // 隐私模式 / 跨域 iframe 等访问 sessionStorage 抛错时静默关闭
+  }
+})();
+const copyLog = (msg, data) => {
+  if (!COPY_DEBUG) return;
+  if (data !== undefined) console.log(`[CopyURL] ${msg}`, data);
+  else console.log(`[CopyURL] ${msg}`);
+};
+// === LM CUSTOMIZATION: Copy Deploy Fix END ===
 
 // Helper: shallow compare two Sets
 const areSetsEqual = (a, b) => {
@@ -123,6 +150,11 @@ const MemoizedResults = React.memo(({
   onBatchSelection,
   onCopySelectedUrls,
   isMultiSelectMode,
+  // V2 U1: 批量失败持久化（透传给结果区）
+  failedBatchItems,
+  onRetryFailed,
+  // 空白处单击退出多选（由父级传入 clearSelection）
+  onEmptyAreaClick,
   // === LM CUSTOMIZATION: Search/Tag decoupling v4 — 结果区大标题所需数据 ===
   titleBarProps
 }) => {
@@ -156,6 +188,9 @@ const MemoizedResults = React.memo(({
       onBatchSelection={onBatchSelection}
       onCopySelectedUrls={onCopySelectedUrls}
       isMultiSelectMode={isMultiSelectMode}
+      failedBatchItems={failedBatchItems}
+      onRetryFailed={onRetryFailed}
+      onEmptyAreaClick={onEmptyAreaClick}
       titleBarProps={titleBarProps}
     />
   );
@@ -228,9 +263,8 @@ const HybridDeepSearchUI = () => {
       return serverParam;
     }
     
-    // Otherwise, if we have servers in the mapping, select the first one
-    const servers = Object.keys(SERVER_MAPPING);
-    return servers.length > 0 ? servers[0] : "";
+    // [v2 补强 3] 用 getDefaultServerKey() 替代 Object.keys()[0]，与 HeaderIcons / AuthForm 保持一致 (优先 nucleus → omniverse → keys[0])
+    return getDefaultServerKey();
   });
 
   // [Tag Deploy Fix - 防线 1]
@@ -260,43 +294,49 @@ const HybridDeepSearchUI = () => {
   }, [selectedBackend]);
 
   // Listen for server selection changes from the header
+  // [v2 补强 5] server-changed 监听器优化：
+  //   1) 用 prevServerRef 做防抖，server 没变就 return（避免 mount 阶段 / 重复派发触发冗余请求）
+  //   2) fetchData 与 handleSearch 串成 IIFE 链：await fetch metadata → setPropertiesData → handleSearchRef.current?.()
+  //      去掉玄学 setTimeout(100ms)，消除"用旧 propertiesData 跑搜索"的 race condition
+  //   3) 切换 server 后**自动触发搜索**——以前只刷 propertiesData 不重搜，导致用户切完看到 0 资产必须手动 F5
+  const prevServerRef = useRef(null);
   useEffect(() => {
     const handleServerChange = (event) => {
-      if (event.detail.server) {
-        // Set the selected backend
-        setSelectedBackend(event.detail.server);
-        setEmbeddingConfig(event.detail.embeddingConfig || defaultEmbeddingConfig);
-        setResults([]);
-        
-        // Update auth state with server-specific credentials using shared helper
-        if (isAuthCleared(event.detail.server)) {
-          setAuth({ api_key: "", nucleus_api_token: "", username: "", password: "", isAuthenticated: false });
-        } else {
-          const creds = readAuthCredentials(event.detail.server);
-          const username = creds.username !== null ? creds.username : AUTH_CONFIG.DEFAULT_USERNAME;
-          const password = creds.password !== null ? creds.password : AUTH_CONFIG.DEFAULT_PASSWORD;
-          setAuth({
-            ...creds,
-            username,
-            password,
-            isAuthenticated: !!(
-              (AUTH_CONFIG.ENABLE_NUCLEUS_AUTH && creds.nucleus_api_token) ||
-              (AUTH_CONFIG.ENABLE_API_KEY_AUTH && creds.api_key) ||
-              (AUTH_CONFIG.ENABLE_BASIC_AUTH && (username !== "") && (password !== ""))
-            ),
-          });
-        }
-        
-        // Reset and refetch properties data for the new server
-        setPropertiesData(null);
-        const fetchData = async () => {
-          try {
-            // Only fetch if authenticated
-            const creds = readAuthCredentials(event.detail.server);
-            const hasAuth = !!(creds.api_key || (creds.username && creds.password) || creds.nucleus_api_token);
-            if (!hasAuth) {
-              return;
-            }
+      const nextServer = event.detail?.server;
+      if (!nextServer || nextServer === prevServerRef.current) return;  // 防抖
+      prevServerRef.current = nextServer;
+
+      // Set the selected backend
+      setSelectedBackend(nextServer);
+      setEmbeddingConfig(event.detail.embeddingConfig || defaultEmbeddingConfig);
+      setResults([]);
+
+      // Update auth state with server-specific credentials using shared helper
+      if (isAuthCleared(nextServer)) {
+        setAuth({ api_key: "", nucleus_api_token: "", username: "", password: "", isAuthenticated: false });
+      } else {
+        const creds = readAuthCredentials(nextServer);
+        const username = creds.username !== null ? creds.username : AUTH_CONFIG.DEFAULT_USERNAME;
+        const password = creds.password !== null ? creds.password : AUTH_CONFIG.DEFAULT_PASSWORD;
+        setAuth({
+          ...creds,
+          username,
+          password,
+          isAuthenticated: !!(
+            (AUTH_CONFIG.ENABLE_NUCLEUS_AUTH && creds.nucleus_api_token) ||
+            (AUTH_CONFIG.ENABLE_API_KEY_AUTH && creds.api_key) ||
+            (AUTH_CONFIG.ENABLE_BASIC_AUTH && (username !== "") && (password !== ""))
+          ),
+        });
+      }
+
+      // Reset and refetch properties data for the new server, then trigger search
+      setPropertiesData(null);
+      (async () => {
+        try {
+          const creds = readAuthCredentials(nextServer);
+          const hasAuth = !!(creds.api_key || (creds.username && creds.password) || creds.nucleus_api_token);
+          if (hasAuth) {
             const headers = getHeaders();
             const response = await fetch(`${apiUrl}/search/stats/usd_properties`, {
               method: 'GET',
@@ -304,12 +344,20 @@ const HybridDeepSearchUI = () => {
             });
             const data = await response.json();
             setPropertiesData(data);
-          } catch (error) {
-            console.error("Error fetching property data after server change:", error);
           }
-        };
-        fetchData();
-      }
+        } catch (error) {
+          console.error("Error fetching property data after server change:", error);
+        }
+        // ✅ 等 metadata 落地后再触发搜索 —— 确定性强，无 race。
+        // 用 setTimeout(0) 把搜索调度到下一 tick，绕开同一执行栈下 handleSearchRef 还未赋值的 TDZ 风险
+        // （handleSearchRef const 在文件下方 ~L2289 才声明；但此 useEffect 注册在 mount 阶段，
+        //   实际事件触发时 .current 一定已赋值，setTimeout 只是双保险）
+        setTimeout(() => {
+          if (typeof handleSearchRef !== 'undefined' && handleSearchRef?.current) {
+            handleSearchRef.current();
+          }
+        }, 0);
+      })();
     };
     window.addEventListener('server-changed', handleServerChange);
     return () => {
@@ -396,10 +444,22 @@ const HybridDeepSearchUI = () => {
   // === LM CUSTOMIZATION: 统一可见结果数组 ===
   // visibleResults = 用户实际看到的卡片对应的 hits。所有计数 / 路径树徽章 / 卡片列表
   // 必须使用同一个 visibleResults，避免「共 0 个资产」但路径树徽章却显示 3 这种不一致。
-  // 过滤链：results → tag AND 过滤 → showOnlyWithPreviews ? thumbnail 过滤 : 全收。
+  // 过滤链：results → tag AND 过滤 → showOnlyWithPreviews ? thumbnail 过滤 : 全收 → noise 过滤。
+  //
+  // [calvingu 2026-05] noise 过滤：剥掉 .thumbs / .system / __pycache__ 这类系统/缓存
+  // 路径下的 hit。必须放在过滤链末尾，且与 usePathSuggestions / nucleusListingService
+  // 共用同一份 isNoisePath 规则，保证：
+  //   visibleResults.length === Σ pathTree[*].deepCount   （根级求和）
+  //   visibleResults.length === 顶部 "X 个资产" 文案数字
   const visibleResults = useMemo(() => {
-    if (!showOnlyWithPreviews) return tagFilteredResults;
-    return tagFilteredResults.filter(item => item?.thumbnail_exists === true);
+    const base = showOnlyWithPreviews
+      ? tagFilteredResults.filter(item => item?.thumbnail_exists === true)
+      : tagFilteredResults;
+    return base.filter(item => {
+      const raw = item?.source?.path || item?.source?.base_key || item?.source?.url || '';
+      if (!raw) return true; // 没路径信息的不过滤（保守）
+      return !isNoisePath(String(raw));
+    });
   }, [tagFilteredResults, showOnlyWithPreviews]);
 
   // pathTree 用 visibleResults 聚合，确保节点徽章数字 == 该路径下实际可见卡片数
@@ -429,6 +489,20 @@ const HybridDeepSearchUI = () => {
     setStickyMultiSelect(false);
     lastClickedIndexRef.current = null;
   }, []);
+
+  // 用 ref 持有最新 clearSelection，方便在 useEffect 注册的全局事件 listener 内调用
+  // 而无需把 clearSelection 加进依赖（避免 listener 反复挂载/卸载）
+  const clearSelectionRef = useRef(clearSelection);
+  clearSelectionRef.current = clearSelection;
+
+  // === 全局空白点击退出多选 ===
+  // 在多选模式 ON 时，document 级监听 mousedown/mouseup，识别"短按 + 无位移 + 非交互元素"
+  // 即可退出多选；覆盖顶部搜索栏空白、左侧产品类型树空白、结果区 titleBar 空白等所有结果容器外区域。
+  // 反馈方式：依靠 SelectionModeBar 自身的淡出动画 + Badge 脉冲，无额外涟漪噪音。
+  useExitMultiSelectOnEmptyClick({
+    enabled: isMultiSelectMode,
+    onExit: clearSelection,
+  });
 
   // Deselect all but KEEP multi-select mode（"取消全选"按钮走这里）
   // 用户清空选中后仍可继续单击/框选卡片，bar 不会消失
@@ -490,53 +564,208 @@ const HybridDeepSearchUI = () => {
     setSelectedItems(newSet);
   }, []);
 
+  // === LM CUSTOMIZATION: Copy Deploy Fix START ===
+  // toast 提前定义（原本在第 ~648 行），避免下方 copyToClipboard 的 useCallback 依赖数组
+  // 在 hook 创建时读取 toast 触发 TDZ（Cannot access 'toast' before initialization）。
+  // useToast() 是无依赖的纯 hook，此处可以安全提前；原位置的 toast 声明已移除。
+  const toast = useToast();
+
+  // 双路都失败时承接最终用户兜底的手动复制 Modal 文本
+  const [manualCopyText, setManualCopyText] = useState(null);
+
   // Helper: copy text to clipboard with toast feedback
+  // 双路并发兜底策略：
+  //   防线 1（同步 execCommand）：必须在 onClick 同步栈内执行，保住用户激活态。这条是 calvin
+  //                              在 HTTP 内网 IP（30.23.76.17:3000）下能复制成功的关键。
+  //   防线 2（异步 writeText + readText 校验）：HTTPS 下首选；带 500ms 超时，超时/拒绝
+  //                              不判失败，仅在"读到内容明确不一致"时降级。
+  //   防线 3（手动 Modal）：双路都失败时弹出，确保用户至少能 Ctrl+C，绝不静默假成功。
   const copyToClipboard = useCallback((text) => {
-    const doCopy = () => {
-      // Prefer modern Clipboard API (works on HTTPS + localhost)
-      if (navigator.clipboard?.writeText) {
-        return navigator.clipboard.writeText(text).then(
-          () => 'success',
-          () => { throw new Error('clipboard-api-failed'); }
-        );
-      }
-      // Fallback: execCommand for HTTP non-localhost environments
-      return new Promise((resolve, reject) => {
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.left = '-9999px';
-        textarea.style.top = '-9999px';
-        textarea.setAttribute('readonly', '');
-        document.body.appendChild(textarea);
-        textarea.select();
-        try {
-          const ok = document.execCommand('copy');
-          document.body.removeChild(textarea);
-          if (ok) resolve('success'); else reject(new Error('execCommand-failed'));
-        } catch (e) {
-          document.body.removeChild(textarea);
-          reject(e);
+    if (!text) {
+      copyLog('called with empty text, skip');
+      return;
+    }
+
+    copyLog('invoked', {
+      textLen: text.length,
+      isSecureContext: typeof window !== 'undefined' && window.isSecureContext,
+      hasClipboard: !!navigator.clipboard,
+      hasWriteText: !!navigator.clipboard?.writeText,
+      hasReadText: !!navigator.clipboard?.readText,
+      hasFocus: typeof document !== 'undefined' && document.hasFocus?.(),
+      activeTag: typeof document !== 'undefined' ? document.activeElement?.tagName : null,
+    });
+
+    // [Copy Deploy Fix - 防线 1] 同步 execCommand —— 必须在 onClick 栈内
+    // 采用 copy-to-clipboard npm 包同款"硬核"写法，修复 execCommand 返回 true 但
+    // 实际粘贴板为空的问题（根因：临时 textarea 没真正拿到 selection 就被 copy 了）
+    let execOk = false;
+    const prevActive = document.activeElement;
+    // 保存用户原 selection，拷贝完恢复，避免干扰页面已选中文字
+    const savedRanges = [];
+    const sel = document.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      for (let i = 0; i < sel.rangeCount; i++) savedRanges.push(sel.getRangeAt(i));
+    }
+
+    // [Copy Deploy Fix v3 - 修复 Modal 内复制]
+    // Chakra <Modal> 默认开启 react-focus-lock：监听 focus/selection 事件，
+    // 任何"试图把焦点或 selection 转移到 Modal 外"的尝试都会被立即拽回。
+    // 之前 textarea 挂在 document.body 上，刚 select() 完 focus-lock 就把
+    // selection 抢回 Modal，导致 execCommand 拷贝的是空 selection（cmdOk=true，
+    // 但实际剪贴板为空）。修复：textarea 挂载到当前 dialog 容器内部，
+    // focus-lock 视其为"局内元素"，不再干预 selection。
+    // [v4 收紧] 只走 activeElement 祖先链，**不再做"全局找最顶层 dialog"的兜底**。
+    // 原因：页面上常驻多种隐形 dialog（Chakra toast 容器、tooltip portal、已关闭但
+    // 残留的 modal 节点等）都会匹配 [role="dialog"]，导致主列表场景下卡片复制
+    // 也被误挂到隐形 dialog 里，selection 直接被抢空（v3 现场表现：mountedIn=dialog
+    // 但 selectionLen=0）。
+    // 现在的判定：按钮自己的祖先链上有 dialog 才挂 dialog；否则一律 body。
+    // 失败也无所谓——反正后面还有手动 Modal 网兜，绝不静默假成功。
+    const findCopyMountPoint = () => {
+      try {
+        const active = document.activeElement;
+        if (active && active !== document.body && typeof active.closest === 'function') {
+          // 只接受"真正包含按钮的 dialog"——必须是 aria-modal=true 或 chakra modal content，
+          // 排除 toast/tooltip/popover 这些常驻浮层节点
+          const dialog = active.closest('.chakra-modal__content, [role="dialog"][aria-modal="true"]');
+          if (dialog && dialog.offsetParent !== null) return dialog;
         }
+      } catch (_) { /* noop, fall through to body */ }
+      return document.body;
+    };
+    const mountPoint = findCopyMountPoint();
+    const mountedIn = mountPoint === document.body ? 'body' : 'dialog';
+
+    let ta = null;
+    try {
+      ta = document.createElement('textarea');
+      ta.value = text;
+      // iOS 需要 contentEditable=true 才能 select，同时 readOnly 防键盘弹出
+      ta.setAttribute('readonly', '');
+      ta.contentEditable = 'true';
+      // 关键：不用 opacity:0 / pointer-events:none —— 那些会让浏览器跳过 selection。
+      // 改用视觉几乎不可见但仍"可交互"：1px × 1px + 接近透明色 + 用 transform 移出视口
+      ta.style.cssText =
+        'all:unset;position:fixed !important;top:0 !important;left:0 !important;' +
+        'width:1px !important;height:1px !important;padding:0 !important;' +
+        'border:0 !important;margin:0 !important;font-size:12pt !important;' +
+        'background:transparent !important;color:transparent !important;' +
+        'z-index:2147483647 !important;';
+      mountPoint.appendChild(ta);
+
+      // iOS Safari 专用：用 Range 选择（setSelectionRange 在 iOS 上不触发真选中）
+      const range = document.createRange();
+      range.selectNodeContents(ta);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      // 双保险：原生 select + setSelectionRange
+      ta.setSelectionRange(0, text.length);
+      ta.select();
+
+      // 执行前先验证 selection 里真的是我们的文本
+      // [BugFix] 旧版 selectionLooksRight = selectedText === text || ta.value === text；
+      // 因 ta.value 永远 === text（自己设的），OR 短路让验证形同虚设：
+      // 即使 selection 被 focus-lock 抢空也会判 true，弹出虚假"已复制"toast。
+      // 修正：只信 selectedText === text（真实 selection 内容）。
+      const selectedText = (window.getSelection() || '').toString();
+      const selectionMatches = selectedText === text;
+
+      const cmdOk = document.execCommand('copy');
+      // 关键：execCommand 返回 true 不代表真写入了，必须 selection 真包含目标文本才算成功
+      execOk = cmdOk && selectionMatches;
+      copyLog('execCommand path result', {
+        cmdOk,
+        selectionLen: selectedText.length,
+        selectionMatches,
+        mountedIn, // 新增：挂载点诊断字段；Modal 内复制必须为 'dialog' 才会成功
+        execOk,
       });
+    } catch (e) {
+      console.warn('[CopyURL] execCommand threw', e);
+      execOk = false;
+    } finally {
+      // 清理临时 textarea
+      if (ta && ta.parentNode) ta.parentNode.removeChild(ta);
+      // 恢复用户原 selection
+      if (savedRanges.length > 0) {
+        const s = document.getSelection();
+        if (s) {
+          s.removeAllRanges();
+          savedRanges.forEach((r) => s.addRange(r));
+        }
+      }
+      // 恢复原焦点元素
+      if (prevActive && typeof prevActive.focus === 'function') {
+        try { prevActive.focus(); } catch (_) { /* noop */ }
+      }
+    }
+
+    // [Copy Deploy Fix - 防线 2] 异步 writeText + 带超时的 readText 回读校验
+    const tryWriteText = async () => {
+      if (!navigator.clipboard?.writeText) {
+        copyLog('writeText unavailable');
+        return false;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (e) {
+        copyLog('writeText rejected', { reason: e?.message });
+        return false;
+      }
+      // 读不到不判失败：很多部署/扩展会禁用 clipboard-read 但 write 是真写了
+      if (!navigator.clipboard?.readText) {
+        copyLog('writeText resolved (no readText to verify)');
+        return true;
+      }
+      try {
+        const read = await Promise.race([
+          navigator.clipboard.readText(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('readText-timeout')), 500)),
+        ]);
+        if (typeof read === 'string' && read.length > 0 && read !== text) {
+          // 读到内容但内容明确不一致 → 显式假成功，判失败
+          copyLog('writeText FAKE SUCCESS detected', { readLen: read.length, expectedLen: text.length });
+          return false;
+        }
+        copyLog('writeText verified', { matched: read === text });
+        return true;
+      } catch (e) {
+        copyLog('readText skipped (treat as success)', { reason: e?.message });
+        return true;
+      }
     };
 
-    doCopy().then(() => {
-      toast({
-        title: t('copiedToClipboard'),
-        status: "success",
-        duration: 2000,
-      });
-    }).catch(() => {
-      toast({
-        title: t('copyFailed'),
-        description: t('copyFailedDescription'),
-        status: "error",
-        duration: 3000,
-        isClosable: true,
-      });
+    let settled = false;
+    tryWriteText().then((writeOk) => {
+      if (settled) return;
+      settled = true;
+      if (execOk || writeOk) {
+        copyLog('SUCCESS', { execOk, writeOk });
+        toast({
+          title: t('copiedToClipboard'),
+          status: 'success',
+          duration: 2000,
+        });
+      } else {
+        // [Copy Deploy Fix - 防线 3] 双路都失败 → 弹手动 Modal（不再用易被忽略的红色 toast 兜底）
+        console.warn('[CopyURL] all paths failed, opening manual copy modal');
+        setManualCopyText(text);
+      }
+    }).catch((e) => {
+      // 理论上 tryWriteText 内部已 catch；这里再兜一层防御
+      if (settled) return;
+      settled = true;
+      console.warn('[CopyURL] unexpected error in writeText path', e);
+      if (execOk) {
+        toast({ title: t('copiedToClipboard'), status: 'success', duration: 2000 });
+      } else {
+        setManualCopyText(text);
+      }
     });
-  }, [t]);
+  }, [t, toast]);
+  // === LM CUSTOMIZATION: Copy Deploy Fix END ===
 
   // Copy selected URLs - use refs to keep callback reference stable
   const resultsRef = useRef(results);
@@ -613,7 +842,8 @@ const HybridDeepSearchUI = () => {
     const serverParam = urlParams.get('server');
     const initialBackend = (serverParam && Object.keys(SERVER_MAPPING).includes(serverParam))
       ? serverParam
-      : (Object.keys(SERVER_MAPPING).length > 0 ? Object.keys(SERVER_MAPPING)[0] : "");
+      // [v2 补强 3] 与 selectedBackend / HeaderIcons / AuthForm 保持一致，不要直接 Object.keys()[0]
+      : getDefaultServerKey();
 
     // Check if user explicitly cleared credentials for this server
     if (isAuthCleared(initialBackend)) {
@@ -677,7 +907,7 @@ const HybridDeepSearchUI = () => {
   const { isOpen: isDetailsOpen, onClose: onDetailsClose, onOpen: onDetailsOpen } = useDisclosure();
   const { isOpen: __, onClose: ___onWelcomeClose, onOpen: onWelcomeOpen } = useDisclosure();
 
-  const toast = useToast();
+  // 注：toast 已在本组件靠前位置定义（Copy Deploy Fix 块），此处不再重复声明。
 
   // Shared helper: show unauthorized toast (defined after useToast to avoid "before initialization" error)
   // === LM CUSTOMIZATION: Auth Guard toast 去重 ===
@@ -757,10 +987,18 @@ const HybridDeepSearchUI = () => {
     if (showOnlyWithPreviews !== SEARCH_DEFAULTS.showOnlyWithPreviews) params.set('with_previews', 'false');
 
     // Add selected backend to URL parameters
-    if (backendOverride) {
-        params.set('server', backendOverride);
-    } else if (selectedBackend) {
-      params.set('server', selectedBackend);
+    // [v2 补强 2] 写 server 前做"主 key 归一化"——任何能被 resolveNucleusHost 解析到 'ov.qq.com' 的 key 统一写 'nucleus'。
+    // 收益：①复制 URL 永远是干净的 ?server=nucleus（不再有 %3A%2F%2F 编码污染）；
+    //      ②老用户带 ?server=omniverse 进入后，搜索一次 URL 自动无声升级到 ?server=nucleus；
+    //      ③与 useTagManager.storageKeyAliases 固定 'omniverse' / 'nucleus' 候选配合，URL 升级前后 Tag 都能命中 storage。
+    const normalizeServerParam = (key) => {
+        if (!key) return key;
+        if (resolveNucleusHost(key) === 'ov.qq.com') return 'nucleus';
+        return key;
+    };
+    const serverToWrite = backendOverride || selectedBackend;
+    if (serverToWrite) {
+        params.set('server', normalizeServerParam(serverToWrite));
     }
     
     // Search filters - skip values that match defaults or are effectively empty
@@ -1026,13 +1264,12 @@ const HybridDeepSearchUI = () => {
   }, [auth.isAuthenticated, propertiesData, selectedBackend]);
 
   // Update username based on backend type (only when initially loading, not when user clears)
+  // [v2 安全修复] 移除 Nucleus 分支的 username auto-fill ('$omni-api-token')，
+  //   原因：与 index.js 的 setDefaultUsername 保持一致，让 DeviceFlow 作为 Nucleus backend 的唯一登录入口。
+  //   保留 S3 分支：S3 测试 backend 仍允许 dummy 占位，不影响业务。
   useEffect(() => {
     if (backend && localStorage.getItem("username") === null) {
-      if (isNucleusBackend(backend)) {
-        setAuth(prev => ({ ...prev, username: "$omni-api-token" }));
-        // Set localStorage so we know it's been initialized
-        localStorage.setItem("username", "$omni-api-token");
-      } else if (isS3Backend(backend)) {
+      if (isS3Backend(backend)) {
         setAuth(prev => ({ ...prev, username: "", password: "test" }));
         // Set localStorage so we know it's been initialized
         localStorage.setItem("username", "");
@@ -2168,10 +2405,18 @@ const HybridDeepSearchUI = () => {
   //   - 顶部搜索框输入 → 只更新 searchQuery（输入框受控）；回车/搜索时 handleSearch 会同步 committedQuery 快照并保留搜索框文字。
   //   - 大标题由 committedQuery + categoryTag 驱动；chip 栏只含用户手动 selectedTags。
   useEffect(() => {
+    // 切换分类前若处于多选状态，先清空选中并退出多选——避免视图过滤后选中项不再可见造成的"幽灵选中"
+    // 反馈方式：依靠 SelectionModeBar 自身的退场动画 + Badge 脉冲，无 toast 噪音（视觉焦点已在 Bar 上）
+    const exitMultiSelectIfActive = () => {
+      // 无论是否有选中（size 为 0 也可能停留在 sticky 多选模式），统一调 clearSelection 把状态归零
+      clearSelectionRef.current?.();
+    };
+
     const handleCategorySelected = (e) => {
       const tag = (e.detail?.searchTag || '').trim();
       const label = (e.detail?.categoryLabel || '').trim() || tag;
       if (!tag) return;
+      exitMultiSelectIfActive();
       categoryTagRef.current = tag;
       setCategoryTag(tag);
       setCategoryLabel(label);
@@ -2180,6 +2425,7 @@ const HybridDeepSearchUI = () => {
 
     const handleCategoryCleared = () => {
       // 清空分类（selectedTags / searchQuery 不受影响）
+      exitMultiSelectIfActive();
       categoryTagRef.current = '';
       setCategoryTag('');
       setCategoryLabel('');
@@ -2208,6 +2454,7 @@ const HybridDeepSearchUI = () => {
       window.removeEventListener('top-search-query-changed', handleTopSearch);
       window.removeEventListener('trigger-search', handleTriggerSearch);
     };
+    // clearSelectionRef 通过 ref 访问，无需加依赖；本 effect 仅挂一次
   }, []);
 
   // 搜索词变化时同步回顶栏搜索框（仅用于"外部显式清空搜索框"这一类重置场景）
@@ -2506,8 +2753,8 @@ const HybridDeepSearchUI = () => {
                       <Text fontSize="xs" color="gray.400" noOfLines={1}>
                         {isLoading
                           ? (t('imageSearchingHint') || '正在搜索相似资产...')
-                          : results.length > 0
-                            ? (t('foundSimilarAssets') || `找到 ${results.length} 个相似资产`).replace('{count}', results.length)
+                          : visibleResults.length > 0
+                            ? (t('foundSimilarAssets') || `找到 ${visibleResults.length} 个相似资产`).replace('{count}', visibleResults.length)
                             : (t('imageSearchHint') || '正在使用图片搜索相似资产')
                         }
                       </Text>
@@ -2841,7 +3088,8 @@ const HybridDeepSearchUI = () => {
               </Box>
               {/* Layer 2: SelectionModeBar —— 绝对定位覆盖在 FabToolbar 上方，
                    高度由内部撑开，top:0/bottom:0 让其垂直居中于容器
-                   进入层：120ms + 更陡曲线，让用户尽快看到"已选中 X 个"结果 */}
+                   进入层：120ms + 更陡曲线，让用户尽快看到"已选中 X 个"结果
+                   退出时：opacity + 轻微 Y(-2px) 位移，给眼睛一个"消散感"，更高级 */}
               <Box
                 position="absolute"
                 top={0}
@@ -2849,10 +3097,10 @@ const HybridDeepSearchUI = () => {
                 right={0}
                 bottom={0}
                 opacity={isMultiSelectMode ? 1 : 0}
+                transform={isMultiSelectMode ? 'translate3d(0,0,0)' : 'translate3d(0,-2px,0)'}
                 pointerEvents={isMultiSelectMode ? 'auto' : 'none'}
-                transition="opacity 0.12s cubic-bezier(0.2, 0, 0.2, 1)"
-                willChange="opacity"
-                transform="translateZ(0)"
+                transition="opacity 0.18s cubic-bezier(0.2, 0, 0.2, 1), transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)"
+                willChange="opacity, transform"
                 display="flex"
                 alignItems="center"
                 aria-hidden={!isMultiSelectMode}
@@ -2899,6 +3147,7 @@ const HybridDeepSearchUI = () => {
               isMultiSelectMode={isMultiSelectMode}
               failedBatchItems={failedBatchItems}
               onRetryFailed={handleRetryFailedFromCard}
+              onEmptyAreaClick={clearSelection}
               titleBarProps={titleBarProps}
             />
           </GridItem>
@@ -2990,8 +3239,109 @@ const HybridDeepSearchUI = () => {
           </ModalContent>
         </Modal>
       )}
+
+      {/* === LM CUSTOMIZATION: Copy Deploy Fix - Manual Copy Modal === */}
+      <ManualCopyDialog
+        text={manualCopyText}
+        onClose={() => setManualCopyText(null)}
+        onRetry={() => {
+          const t0 = manualCopyText;
+          if (!t0) return;
+          // 关闭后重新走主流程，给用户主动重试机会（用户激活态从重试按钮的 click 重新计算）
+          setManualCopyText(null);
+          // 微延迟避免 Modal 关闭过渡抢焦点
+          setTimeout(() => copyToClipboard(t0), 0);
+        }}
+        t={t}
+      />
     </Box>
   );
 };
+
+// === LM CUSTOMIZATION: Copy Deploy Fix - Manual Copy Modal Component START ===
+// 当 navigator.clipboard.writeText 与 document.execCommand('copy') 双路均无法真正写入剪贴板时
+// （典型场景：部署层 Permissions-Policy 禁用 / 浏览器扩展拦截 / HTTP 非 localhost 焦点抢占），
+// 弹出此 Modal 让用户至少可以肉眼看到 URL，并通过：
+//   1. autoFocus + 全选 → Ctrl+C / ⌘+C 手动复制
+//   2. "在新标签页打开"链接（地址栏复制基本不会被任何策略禁）
+//   3. "重试复制"按钮（用全新的用户激活态再走一遍主流程）
+// 来兜底，确保不再出现"绿 toast + 空粘贴板"的静默失败。
+const ManualCopyDialog = ({ text, onClose, onRetry, t }) => {
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    if (text && textareaRef.current) {
+      // 微延迟，等 Chakra Modal 打开过渡完成再 focus，避免被 trapFocus 抢回
+      const id = setTimeout(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        try {
+          ta.focus();
+          ta.select();
+        } catch (_) {
+          /* noop */
+        }
+      }, 50);
+      return () => clearTimeout(id);
+    }
+  }, [text]);
+
+  if (!text) return null;
+
+  const isHttpUrl = /^https?:\/\//i.test(text);
+
+  return (
+    <Modal isOpen={!!text} onClose={onClose} size="lg" initialFocusRef={textareaRef} isCentered>
+      <ModalOverlay />
+      <ModalContent bg="gray.800" color="white">
+        <ModalHeader>{t('manualCopyTitle')}</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          <Text fontSize="sm" color="gray.400" mb={3}>
+            {t('manualCopyHint')}
+          </Text>
+          <Textarea
+            ref={textareaRef}
+            value={text}
+            isReadOnly
+            rows={3}
+            fontFamily="mono"
+            fontSize="sm"
+            bg="gray.900"
+            borderColor="yellow.400"
+            _focus={{ borderColor: 'yellow.300', boxShadow: '0 0 0 1px #FFD230' }}
+            onFocus={(e) => {
+              try { e.target.select(); } catch (_) { /* noop */ }
+            }}
+            onClick={(e) => {
+              try { e.target.select(); } catch (_) { /* noop */ }
+            }}
+          />
+        </ModalBody>
+        <ModalFooter gap={2}>
+          <Button size="sm" variant="ghost" onClick={onRetry}>
+            {t('manualCopyRetry')}
+          </Button>
+          {isHttpUrl && (
+            <Button
+              size="sm"
+              variant="outline"
+              as="a"
+              href={text}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t('manualCopyOpenInTab')}
+            </Button>
+          )}
+          <Button size="sm" colorScheme="yellow" onClick={onClose}>
+            {t('manualCopyClose')}
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  );
+};
+// === LM CUSTOMIZATION: Copy Deploy Fix - Manual Copy Modal Component END ===
 
 export default HybridDeepSearchUI;

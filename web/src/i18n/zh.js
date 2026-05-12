@@ -81,6 +81,12 @@ const zh = {
   copiedToClipboard: "已复制到剪贴板",
   copyFailed: "复制失败",
   copyFailedDescription: "无法访问剪贴板，请确保使用 HTTPS 或 localhost 访问。",
+  // === LM CUSTOMIZATION: Copy Deploy Fix - Manual Copy Modal ===
+  manualCopyTitle: "请手动复制 URL",
+  manualCopyHint: "自动复制被浏览器或部署环境拦截，请按 Ctrl+C / ⌘+C 复制下方文本。",
+  manualCopyRetry: "重试复制",
+  manualCopyOpenInTab: "在新标签页打开",
+  manualCopyClose: "关闭",
   searchUrlCopied: "搜索 URL 已复制！",
   shareSearchUrl: "分享此 URL 以重现完全相同的搜索",
   shareCurrentSearch: "分享当前搜索配置",

@@ -4,7 +4,12 @@ import {
   Popover, PopoverTrigger, PopoverContent, PopoverBody, PopoverArrow, PopoverHeader,
 } from '@chakra-ui/react';
 import { CloseIcon, CopyIcon, CheckIcon } from '@chakra-ui/icons';
+import { motion } from 'framer-motion';
 import { FEATURE_FLAGS } from '../config.jsx';
+
+// 轻量 motion 封装：用 key={selectedCount} 触发每次数字变化的脉冲反馈
+// 0.28s 的 scale 1→1.12→1，配合微弱亮度提升，不抢视线但有"被识别"的反馈
+const MotionBox = motion(Box);
 
 /**
  * useMinWidth —— 同步求值的 matchMedia hook
@@ -76,7 +81,7 @@ const SelectionModeBar = React.memo(({
   const showHints = isWide && !inProgress;
 
   return (
-    <Box position="relative" w="100%">
+    <Box position="relative" w="100%" data-multiselect-keep="true">
       <HStack
         w="100%"
         bg="rgba(255, 210, 48, 0.06)"
@@ -89,19 +94,31 @@ const SelectionModeBar = React.memo(({
         align="center"
       >
         <HStack spacing={4}>
-          <Badge
-            bg="#FFD230"
-            color="black"
-            fontSize="sm"
-            fontWeight="bold"
-            px={2.5}
-            py={0.5}
-            borderRadius="md"
-            minW="24px"
-            textAlign="center"
+          <MotionBox
+            key={selectedCount}
+            initial={{ scale: 0.92, filter: 'brightness(1.4)' }}
+            animate={{ scale: 1, filter: 'brightness(1)' }}
+            transition={{
+              duration: 0.28,
+              ease: [0.22, 1, 0.36, 1],
+              scale: { type: 'spring', stiffness: 520, damping: 22 },
+            }}
+            style={{ display: 'inline-flex', transformOrigin: 'center' }}
           >
-            {selectedCount}
-          </Badge>
+            <Badge
+              bg="#FFD230"
+              color="black"
+              fontSize="sm"
+              fontWeight="bold"
+              px={2.5}
+              py={0.5}
+              borderRadius="md"
+              minW="24px"
+              textAlign="center"
+            >
+              {selectedCount}
+            </Badge>
+          </MotionBox>
           <Text fontSize="sm" color="gray.200" fontWeight="medium">
             {(t?.('itemsSelected', { count: selectedCount })) || `已选中 ${selectedCount} 个资产`}
           </Text>

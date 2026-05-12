@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, {useState, useEffect, useRef} from 'react';
+import React, {useState, useEffect, useRef, useMemo} from 'react';
 import * as ReactDOMClient from 'react-dom/client';
 import {
     ChakraProvider,
@@ -62,7 +62,7 @@ import CategorySidebar from './components/CategorySidebar';
 // === LM CUSTOMIZATION: TopSearchBar START ===
 import TopSearchBar from './components/TopSearchBar';
 // === LM CUSTOMIZATION: TopSearchBar END ===
-import { apiUrl as defaultApiUrl, SERVER_MAPPING, defaultEmbeddingConfig } from "./config";
+import { apiUrl as defaultApiUrl, SERVER_MAPPING, defaultEmbeddingConfig, resolveNucleusHost, getDefaultServerKey } from "./config";
 import GraphVisualization from "./Graph";
 import persistentCache from "./utils/persistentImageCache";
 import { useDeviceFlowAuth, getServerHttpsUrl, AuthStatus, createApiToken } from "./nucleus";
@@ -115,8 +115,8 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
             return currentServer;
         }
         else {
-            const servers = Object.keys(SERVER_MAPPING);
-            return servers.length > 0 ? servers[0] : "";
+            // [v2] 用 getDefaultServerKey() 替代 Object.keys()[0]，保证 nucleus 优先
+            return getDefaultServerKey();
         }
     });
 
@@ -185,11 +185,16 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                 const currentAuth = auth;
                 let newUsername = null;
                 let newPassword = null;
-                
-                if (isNucleusBackend(backend)) {
-                    newUsername = '$omni-api-token';
-                    newPassword = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYWx2aW5ndSIsInByb2ZpbGUiOnsiZmlyc3RfbmFtZSI6bnVsbCwibGFzdF9uYW1lIjpudWxsLCJlbWFpbCI6ImNhbHZpbmd1IiwiYWRtaW4iOnRydWUsIm51Y2xldXNfcm8iOmZhbHNlLCJyZWFkb25seSI6ZmFsc2UsInByb3ZpZGVyIjoiU0FNTCIsImVuYWJsZWQiOnRydWUsImFjdGl2YXRlZCI6dHJ1ZX0sImp0aSI6IjVmOWE1OTBmNDExMjQ3N2ViZWJlYzAwNzcwOGYwNDg5IiwiaWF0IjoxNzY1MTg4Nzg1fQ.oX_9THuHT7B3tukN6MznyDO1FGFRZzDlDt8x5rBDyWbQLYug45KFMWBdFT1U6bfnjjaGtQaryDpS_621u76i77P0EsuPmwzrv0motvNySejXPrOZTgbJqJ21FatLhpTHSMNdazzFojGypXi8rpbUfxwZtf-Shc71LD3mTlYEY794z6l3rjAbL4ckzhhOWn3n4x8IQWigkD1zPgwm7_ErThEH6bCbNRMq3pcIDMa4P9ohREqsZTHCYnP0hQHNkv6gBd5uKae1i62TLvxQjnqymh-byXSxo3TV3OwC3PkmiWMRAqbj6xsCdD-eG4ZFTuwNiJbqC_ncmja7xxHtx4QogYRGboA3rY0pUIslbGeASGahd_aIOf_YQ0z2_-QmCLULiPw17XoqNVuJ7jW4ZX4K8iOYT6DcmPnZjNytX1YevQ9HHyRBcYbbQlHO2mFCZFz63l6vsZxcbGGrxUJ4L9ZJQtSv563Yjf1trPCt8QPlAPg24wa6QzpvawyURC7nQgTKvLICYG2KjUev-qKd9rfRNYiZGKBnguH4aPPy9FJbSpJogThwO8aKg9C2cNOs4NeBf9RF-_xF5coXoXCVrJ25w8udge-kd8LxQCxjZFPIie0W7o2EUL7x9chpeHhHvgv6eQU8TApPi5LfWlcISuLeJnAl4Wx1uP2C-YbX62ruh5g'
-                } else if (isS3Backend(backend)) {
+
+                // [v2 安全修复] 移除原 Nucleus 分支自动注入的硬编码 admin JWT token (sub='calvingu')
+                //   原行为：探测到 Nucleus backend 后，自动写入 username='$omni-api-token' +
+                //          硬编码 admin password 进 localStorage，导致：
+                //          ① 安全风险：任意访问者被静默赋予 admin 身份
+                //          ② UX 回归：useAuthGuard 误判已登录 → DeviceFlow Modal 自动关闭
+                //          ③ "已通过 Nucleus 认证"假状态显示
+                //   新行为：Nucleus backend 不做任何 auto-fill，让 DeviceFlow（设备码登录）作为唯一入口
+                //   保留 S3 分支：S3 backend 仍走 dummy 占位（仅测试场景，无安全风险）
+                if (isS3Backend(backend)) {
                     newUsername = '';
                     newPassword = 'dummy';
                 }
@@ -365,14 +370,43 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                     // Save to localStorage
                     localStorage.setItem(getServerStorageKey("username"), '$omni-api-token');
                     localStorage.setItem(getServerStorageKey("password"), apiTokenResult.api_token);
-                    // Save tokens for tagging operations (API Token may lack write permissions)
-                    if (deviceFlowAuth.authResult.refresh_token) {
-                      localStorage.setItem(getServerStorageKey("nucleus_refresh_token"), deviceFlowAuth.authResult.refresh_token);
-                    }
-                    if (deviceFlowAuth.authResult.access_token) {
-                      localStorage.setItem(getServerStorageKey("nucleus_access_token"), deviceFlowAuth.authResult.access_token);
-                      // access_token 通常 30 分钟有效，存到期时间
-                      localStorage.setItem(getServerStorageKey("nucleus_access_token_expiry"), String(Date.now() + 25 * 60 * 1000));
+                    // [TagStorageKeyFix] Save tokens for tagging operations (API Token may lack write permissions)
+                    //
+                    // 双写两份 key —— 同时按 "selectedServer 原值"（兼容 AuthForm 其他读取路径）
+                    // 和 "resolveNucleusHost(selectedServer) 解析后的真实 host"（匹配 taggingService 优先级）
+                    // 写入。这样无论是 ?server=omniverse（原值 'omniverse' / 真实 host 'ov.qq.com'）还是
+                    // ?server=https://ov.qq.com（两者相等，跳过重复写），新用户/无痕模式下都能直接命中。
+                    //
+                    // 三个 setItem 包在同一 try 块连续执行，任一抛错则 console.error 但不中断登录流程
+                    // （token 已经写过的部分仍然有效，避免出现"有 token 没 expiry"的脏状态导致 preflight 误判）。
+                    try {
+                      const accessToken = deviceFlowAuth.authResult.access_token;
+                      const refreshTok  = deviceFlowAuth.authResult.refresh_token;
+                      const expiryStr   = String(Date.now() + 25 * 60 * 1000);
+
+                      // 原行为：按 selectedServer 原值前缀写入
+                      if (refreshTok) {
+                        localStorage.setItem(getServerStorageKey("nucleus_refresh_token"), refreshTok);
+                      }
+                      if (accessToken) {
+                        localStorage.setItem(getServerStorageKey("nucleus_access_token"), accessToken);
+                        localStorage.setItem(getServerStorageKey("nucleus_access_token_expiry"), expiryStr);
+                      }
+
+                      // 新增：按真实 host 解析结果再写一份（如 'ov.qq.com_nucleus_*'），让 service 优先级查找命中
+                      const aliasPrefix = (selectedServer || '').toString();
+                      const hostPrefix = resolveNucleusHost(selectedServer) || '';
+                      if (accessToken && hostPrefix && hostPrefix !== aliasPrefix) {
+                        if (refreshTok) {
+                          localStorage.setItem(`${hostPrefix}_nucleus_refresh_token`, refreshTok);
+                        }
+                        localStorage.setItem(`${hostPrefix}_nucleus_access_token`, accessToken);
+                        localStorage.setItem(`${hostPrefix}_nucleus_access_token_expiry`, expiryStr);
+                      }
+                    } catch (persistErr) {
+                      // 不中断登录流程：已写入的 key 仍可用，下次登录会再试一次
+                      // eslint-disable-next-line no-console
+                      console.error('[DeviceFlow] persist nucleus token failed', persistErr);
                     }
                     // Clear the auth_cleared flag since user just authenticated
                     localStorage.removeItem(getServerStorageKey("auth_cleared"));
@@ -667,10 +701,8 @@ const HeaderIcons = () => {
             return serverParam;
         }
         
-        // Otherwise, if we have servers in the mapping, select the first one
-        const servers = Object.keys(SERVER_MAPPING);
-        const defaultServer = servers.length > 0 ? servers[0] : "";
-        return defaultServer;
+        // [v2] 用 getDefaultServerKey() 替代 Object.keys()[0]，让 HeaderIcons / AuthForm / HybridDeepSearchUI 三处选同一 key（避免撕裂）
+        return getDefaultServerKey();
     });
 
     // Helper function to get server-specific storage key
@@ -721,8 +753,10 @@ const HeaderIcons = () => {
             existingParams[key] = value;
         });
         
-        // Update server parameter
-        existingParams.server = serverName;
+        // [v2 补强 2] 写 URL 时归一化为 'nucleus' 主 key —— 让分享链接永远干净。
+        // 任何能被 resolveNucleusHost 解析到 'ov.qq.com' 的 key 都统一写 'nucleus'。
+        const normalizedServer = (resolveNucleusHost(serverName) === 'ov.qq.com') ? 'nucleus' : serverName;
+        existingParams.server = normalizedServer;
         
         // Reconstruct URL with all parameters
         const newParams = new URLSearchParams(existingParams);
@@ -731,6 +765,7 @@ const HeaderIcons = () => {
         window.history.replaceState({}, '', url);
                 
         // Dispatch a custom event to notify other components about the server change
+        // 注意：派发 detail.server 仍用原始 serverName（保持 storage key / state 内部行为不变）
         window.dispatchEvent(new CustomEvent('server-changed', { 
             detail: { server: serverName, embeddingConfig: newEmbeddingConfig }
         }));        
@@ -738,6 +773,29 @@ const HeaderIcons = () => {
     
     // Use disclosure for auth popover - always starts closed
     const { isOpen: isAuthOpen, onOpen: onAuthOpen, onClose: onAuthClose, onToggle: onAuthToggle } = useDisclosure();
+    // [v2 补强 4] 独立管理 server 选择 popover，让点击外部 / ESC 也能关闭
+    const { isOpen: isServerOpen, onClose: onServerClose, onToggle: onServerToggle } = useDisclosure();
+
+    // [v2 补强] Server 下拉去重：三个 fallback key 共享同一 NUCLEUS_CONFIG 引用，
+    // 直接 Object.entries 渲染会出现"OV.QQ.COM/空白/空白"三行重复（若 env 写 string fallback 还会出空白）。
+    // 按 config 引用 Set 去重，并优先暴露 'nucleus' 作为 option value，确保用户切换后 URL 是新形态。
+    const uniqueServers = useMemo(() => {
+        const seen = new Set();
+        const list = [];
+        // 先把 'nucleus' 顶上去（如果存在），让 option[0] 永远是新主 key
+        const orderedKeys = Object.keys(SERVER_MAPPING).sort((a, b) => {
+            if (a === 'nucleus') return -1;
+            if (b === 'nucleus') return 1;
+            return 0;
+        });
+        for (const key of orderedKeys) {
+            const cfg = SERVER_MAPPING[key];
+            if (!cfg || typeof cfg !== 'object' || seen.has(cfg)) continue;
+            seen.add(cfg);
+            list.push({ key, name: cfg.name || key });
+        }
+        return list;
+    }, []);
 
     // 监听 AuthGuard 事件：自动打开登录弹窗
     useEffect(() => {
@@ -961,10 +1019,20 @@ const HeaderIcons = () => {
                 </Button>
             </Tooltip>
             {Object.keys(SERVER_MAPPING).length > 0 && (
-                <Popover>
+                <Popover
+                    isOpen={isServerOpen}
+                    onClose={onServerClose}
+                    closeOnBlur={true}
+                    closeOnEsc={true}
+                >
                     <PopoverTrigger>
-                        <HStack 
-                            spacing={2} 
+                        {/* [v2 补强 4] Box as="button" 既是 forwardRef 节点（PopoverTrigger 转发不出问题），
+                            又顺带获得 a11y（键盘 Enter/Space、focus ring、aria role）。
+                            原 <HStack> 仅作为内层视觉布局。 */}
+                        <Box
+                            as="button"
+                            onClick={onServerToggle}
+                            display="inline-flex"
                             bg="#FFD230"
                             px={3}
                             py={1.5}
@@ -973,25 +1041,22 @@ const HeaderIcons = () => {
                             _hover={{ bg: "#F6C80F", boxShadow: "0 2px 8px rgba(255,210,48,0.3)" }}
                             minW="100px"
                             transition="all 0.2s"
+                            border="none"
+                            outline="none"
+                            _focus={{ boxShadow: "0 0 0 2px rgba(255,210,48,0.5)" }}
                         >
-                            <Text 
-                                color="black" 
-                                fontSize="sm" 
-                                fontWeight="600"
-                                noOfLines={1}
-                            >
-                                {SERVER_MAPPING[selectedServer]?.name || t('selectServer')}
-                            </Text>
-                            <IconButton
-                                size="xs"
-                                variant="unstyled"
-                                icon={<ChevronDownIcon color="black" />}
-                                aria-label={t('selectServer')}
-                                height="auto"
-                                minW="auto"
-                                display="inline-flex"
-                            />
-                        </HStack>
+                            <HStack spacing={2} alignItems="center" justifyContent="center" w="100%">
+                                <Text 
+                                    color="black" 
+                                    fontSize="sm" 
+                                    fontWeight="600"
+                                    noOfLines={1}
+                                >
+                                    {SERVER_MAPPING[selectedServer]?.name || t('selectServer')}
+                                </Text>
+                                <ChevronDownIcon color="black" />
+                            </HStack>
+                        </Box>
                     </PopoverTrigger>
                     <PopoverContent width="400px">
                         <PopoverArrow />
@@ -1011,8 +1076,9 @@ const HeaderIcons = () => {
                                         _hover={{ borderColor: "#FFD230" }}
                                         _focus={{ borderColor: "#FFD230", boxShadow: "0 0 0 1px #FFD230" }}
                                     >
-                                        {Object.entries(SERVER_MAPPING).map(([key, config]) => (
-                                            <option key={key} value={key}>{config.name}</option>
+                                        {/* [v2 补强] 用 uniqueServers 去重渲染，避免出现两行空白选项 */}
+                                        {uniqueServers.map(({ key, name }) => (
+                                            <option key={key} value={key}>{name}</option>
                                         ))}
                                     </Select>
                                 </Box>
