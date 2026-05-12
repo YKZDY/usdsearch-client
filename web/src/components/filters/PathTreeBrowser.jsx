@@ -91,16 +91,18 @@ const PathTreeBrowser = memo(function PathTreeBrowser({
   const toast = useToast();
   const prevTreeRef = useRef(tree);
 
-  // 自动展开 live 节点祖先链（搜索结果回流后自动展开有数据的路径）
+  // 自动展开 hasMatch 节点祖先链（搜索结果回流后自动展开有数据的路径）
+  // ⚠️ 必须用 hasMatch（搜索命中），不能用 node.live（后者由 useNucleusTree
+  // 表示「该节点来自真实 listing」，与搜索无关）
   useEffect(() => {
     if (tree === prevTreeRef.current) return;
     prevTreeRef.current = tree;
     const liveAncestors = new Set();
     const collectLiveAncestors = (nodes, ancestors = []) => {
       for (const node of nodes) {
-        if (node.live) {
+        if (node.hasMatch) {
           ancestors.forEach(a => liveAncestors.add(a));
-          liveAncestors.add(node.path); // 也展开 live 节点自身（如果有子节点）
+          liveAncestors.add(node.path); // 也展开 hasMatch 节点自身（如果有子节点）
         }
         if (node.children?.length) {
           collectLiveAncestors(node.children, [...ancestors, node.path]);
@@ -300,12 +302,12 @@ const PathTreeBrowser = memo(function PathTreeBrowser({
               <Text
                 fontSize="12px"
                 color={isInc ? '#7BC8FF' : isExc ? '#FF8B8B' : 'whiteAlpha.900'}
-                fontWeight={node.live || isInc || isExc ? 600 : 400}
+                fontWeight={node.hasMatch || isInc || isExc ? 600 : 400}
                 flex={1}
                 isTruncated
               >
                 {node.name}
-                {node.live && (
+                {node.hasMatch && (
                   <Box
                     as="span"
                     ml={1.5}

@@ -35,15 +35,69 @@ export const defaultEmbeddingConfig = {
 
 // Server name to URL mapping configuration
 // Expects a JSON string in format: {"server1": "http://url1", "server2": "http://url2"}
+//
+// [Tag Deploy Fix - 防线 3]
+// 内置兜底映射：即使部署环境忘配 REACT_APP_SERVER_MAPPING，常用别名也能解析为真实 host。
+// env 配置优先级最高，会覆盖兜底；这层只在 env 缺/坏时生效。
+// 历史踩坑：部署环境 SERVER_MAPPING 为 {} → selectedBackend="omniverse" 直接被当作 host
+//           拼成 wss://omniverse/... → 浏览器无法解析 → tag 增删全部静默失败。
+const SERVER_MAPPING_FALLBACK = {
+  // 业务约定：URL ?server=omniverse://ov.qq.com 的 "omniverse" 应解析到这里
+  omniverse: "omniverse://ov.qq.com",
+};
+
 let serverMapping = {};
 try {
   const mappingStr = process.env.REACT_APP_SERVER_MAPPING || "{}";
-  serverMapping = JSON.parse(mappingStr);
+  const parsed = JSON.parse(mappingStr);
+  // env 优先，兜底补缺：fallback 先，env 后展开，env 同 key 自动覆盖
+  serverMapping = { ...SERVER_MAPPING_FALLBACK, ...parsed };
 } catch (error) {
   console.error("Failed to parse SERVER_MAPPING configuration:", error);
-  serverMapping = {};
+  serverMapping = { ...SERVER_MAPPING_FALLBACK };
 }
 export const SERVER_MAPPING = serverMapping;
+
+/**
+ * [Tag Deploy Fix - 防线 3] 把任意 server 标识规范化为合法 nucleus host
+ *
+ * 输入示例 → 输出：
+ *   "omniverse://ov.qq.com"  → "ov.qq.com"
+ *   "omniverse://ov.qq.com/" → "ov.qq.com"
+ *   "https://ov.qq.com"      → "ov.qq.com"
+ *   "ov.qq.com"              → "ov.qq.com"
+ *   "omniverse"              → 查 SERVER_MAPPING['omniverse'] 递归解析 → "ov.qq.com"
+ *   ""/null/undefined        → ""
+ *
+ * 注意：本函数只做字符串规范化，不做合法性判断（合法性校验交给
+ *      services/taggingService.js 的 isValidNucleusHost，避免循环依赖）。
+ */
+export function resolveNucleusHost(input) {
+  if (!input || typeof input !== 'string') return '';
+  let s = input.trim();
+  if (!s) return '';
+
+  // 1) 别名查表（防止 "omniverse" 这种裸 key 直接当 host）
+  //    递归一次：mapping 的 value 可能仍是 omniverse:// URL
+  if (Object.prototype.hasOwnProperty.call(serverMapping, s)) {
+    const mapped = serverMapping[s];
+    if (mapped && typeof mapped === 'string' && mapped !== s) {
+      s = mapped;
+    }
+  }
+
+  // 2) 剥协议头：omniverse:// / omni:// / https:// / http:// / wss:// / ws://
+  s = s.replace(/^(omniverse|omni|wss|ws|https|http):\/\//i, '');
+
+  // 3) 去掉路径 / query / 末尾斜杠
+  const slashIdx = s.indexOf('/');
+  if (slashIdx > 0) s = s.substring(0, slashIdx);
+  const qIdx = s.indexOf('?');
+  if (qIdx > 0) s = s.substring(0, qIdx);
+  s = s.replace(/\/$/, '').trim();
+
+  return s;
+}
 
 // Image processing configuration
 export const IMAGE_SIZE = 224;

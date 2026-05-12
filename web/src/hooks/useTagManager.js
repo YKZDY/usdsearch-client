@@ -24,11 +24,13 @@ import {
   normalizeAssetPath,
   normalizeParentPath,
   getTaggingToken,
+  isValidNucleusHost,
 } from '../services/taggingService';
 import {
   scheduleReindex,
   cancelReindex,
 } from '../services/reindexService';
+import { resolveNucleusHost } from '../config';
 
 // tag_query 缓存（5 分钟 TTL）
 const queryCache = new Map();
@@ -59,17 +61,29 @@ export default function useTagManager({ serverUrl, assetPath, initialTags = [], 
   }, [assetUrl, assetPath]);
 
   // ─── serverUrl fallback：当 serverUrl 为空时从 assetPath 提取 host ──────
+  //
+  // [Tag Deploy Fix - 防线 2] 不再"非空即用"，而是先校验合法性：
+  // - 部署环境 selectedBackend="omniverse" 这种裸 key 会被 SERVER_MAPPING 兜底解析；
+  // - 解析后再用 isValidNucleusHost 兜底校验；
+  // - 全部失败时返回空串 → 上游 useEffect 跳过 wss，hasWritePermission 自动转 false，
+  //   UI 显示"无写权限"而非凭空消失。
   const effectiveServerUrl = useMemo(() => {
-    if (serverUrl) return serverUrl;
-    // 从 omniverse://ov.qq.com/Library/... 中提取 host
+    // 1) props.serverUrl 走 resolveNucleusHost 规范化（处理 omniverse://、别名等）
+    const fromProps = resolveNucleusHost(serverUrl);
+    if (fromProps && isValidNucleusHost(fromProps)) return fromProps;
+
+    // 2) 从 assetPath 中提取 host 兜底（omniverse://ov.qq.com/Library/...）
     if (typeof assetPath === 'string') {
-      let s = assetPath;
-      if (s.startsWith('omniverse://')) s = s.slice('omniverse://'.length);
-      else if (s.startsWith('omni://')) s = s.slice('omni://'.length);
-      else return '';
-      const slashIdx = s.indexOf('/');
-      if (slashIdx > 0) return s.substring(0, slashIdx);
-      return s || '';
+      const fromAsset = resolveNucleusHost(assetPath);
+      if (fromAsset && isValidNucleusHost(fromAsset)) return fromAsset;
+    }
+
+    // 3) 全部失败：日志一次，返回空串让上游跳过写操作
+    if (serverUrl || assetPath) {
+      console.warn('[useTagManager] cannot resolve a valid nucleus host', {
+        serverUrl,
+        assetPath,
+      });
     }
     return '';
   }, [serverUrl, assetPath]);

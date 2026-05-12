@@ -71,3 +71,4 @@ target/
 
 # Node.js
 node_modules/
+web/.env.production

@@ -111,6 +111,30 @@ function parseResponseFrame(buffer) {
 }
 
 /**
+ * [Tag Deploy Fix - 防线 4] 启发式判断是否为合法 nucleus host
+ *
+ * 合法：包含 '.'（域名形态）/ IPv4 字面量 / 'localhost'(:port)
+ * 非法：裸标识符如 "omniverse"、"backend"、"nucleus"、空串、undefined
+ *
+ * 用浏览器纯字符串规则（无 DNS 同步接口可用），O(1)，零网络成本。
+ *
+ * 历史踩坑：部署环境 SERVER_MAPPING['omniverse'] 配错导致 host="omniverse"
+ *           被拼成 wss://omniverse/...，浏览器无法解析，握手失败，
+ *           乐观更新的 pending tag 在 ~500ms 内被回滚 → "tag 输入后消失"。
+ */
+export function isValidNucleusHost(host) {
+  if (typeof host !== 'string') return false;
+  const h = host.trim().toLowerCase();
+  if (!h) return false;
+  if (h === 'localhost' || h.startsWith('localhost:')) return true;
+  // IPv4 (可带端口)
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(h)) return true;
+  // 域名（至少一个点，且不能以点开头/结尾）
+  if (h.includes('.') && !h.startsWith('.') && !h.endsWith('.')) return true;
+  return false;
+}
+
+/**
  * 执行单次 RPC 调用（短连接模式）
  * @param {string} serverUrl - Nucleus 服务器地址（如 "ov.qq.com"）
  * @param {string} authToken - access_token
@@ -120,7 +144,15 @@ function parseResponseFrame(buffer) {
  */
 async function call(serverUrl, authToken, method, params) {
   // 构建 wss URL（认证通过 query param）
-  const host = serverUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const host = (serverUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+  // [Tag Deploy Fix - 防线 4] host 合法性 guard：杜绝 wss://omniverse/... 这种非法请求
+  // 早 reject 比让浏览器静默握手失败更友好，errMsg 也利于运维定位部署配置问题
+  if (!isValidNucleusHost(host)) {
+    console.error('[TaggingService] Invalid nucleus host, refuse wss call:', { host, method });
+    return Promise.reject(new Error(`Invalid nucleus host: "${host}". Please check URL ?server= parameter or SERVER_MAPPING config.`));
+  }
+
   const wsUrl = `wss://${host}${ENDPOINT}?access_token=${encodeURIComponent(authToken)}`;
 
   return new Promise((resolve, reject) => {

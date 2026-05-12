@@ -61,7 +61,7 @@ import {
   MinusIcon,
 } from "@chakra-ui/icons";
 
-import { apiUrl as defaultApiUrl, defaultEmbeddingConfig, AUTH_CONFIG, FEATURE_FLAGS, SERVER_MAPPING, SEARCH_DEFAULTS, DEFAULT_SEARCH_PARAMS } from "./config";
+import { apiUrl as defaultApiUrl, defaultEmbeddingConfig, AUTH_CONFIG, FEATURE_FLAGS, SERVER_MAPPING, SEARCH_DEFAULTS, DEFAULT_SEARCH_PARAMS, resolveNucleusHost } from "./config";
 // === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
 // === LM CUSTOMIZATION: i18n END ===
@@ -86,6 +86,8 @@ import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts";
 import { useAuthGuard } from "./hooks/useAuthGuard";
 // === LM CUSTOMIZATION: Path tree suggestions（混合静态目录 + 搜索结果聚合）===
 import { usePathSuggestions } from "./hooks/usePathSuggestions";
+// === LM CUSTOMIZATION: Nucleus 真实目录树（运行时 listing 反推 + 静态快照兜底）===
+import { useNucleusTree } from "./hooks/useNucleusTree";
 // === LM CUSTOMIZATION: Search/Tag decoupling — 搜索请求反腐层 ===
 import buildSearchPayload from "./utils/buildSearchPayload";
 
@@ -231,6 +233,32 @@ const HybridDeepSearchUI = () => {
     return servers.length > 0 ? servers[0] : "";
   });
 
+  // [Tag Deploy Fix - 防线 1]
+  // 派生「真实 Nucleus host」——把 ?server= 与 SERVER_MAPPING 解耦：
+  // - selectedBackend 实质是 SERVER_MAPPING 的 key（譬如 "omniverse"），不能直接当 host
+  // - 部署环境踩过坑：直接把它喂给 wss → wss://omniverse/... → 浏览器无法解析握手失败 → tag 增删全部静默失败
+  // 优先级：URL ?server 原值（可能是 "omniverse://ov.qq.com"） > SERVER_MAPPING[selectedBackend] > selectedBackend 本身经 resolveNucleusHost 兜底
+  const nucleusServerUrl = useMemo(() => {
+    // 1) URL ?server= 原值最权威（用户主动声明）
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const serverParam = urlParams.get('server');
+      if (serverParam) {
+        const host = resolveNucleusHost(serverParam);
+        if (host) return host;
+      }
+    } catch (_) { /* SSR/边缘环境忽略 */ }
+
+    // 2) 用 selectedBackend 去 SERVER_MAPPING 查 URL（key → URL），再规范化
+    if (selectedBackend && SERVER_MAPPING[selectedBackend]) {
+      const host = resolveNucleusHost(SERVER_MAPPING[selectedBackend]);
+      if (host) return host;
+    }
+
+    // 3) 兜底：直接对 selectedBackend 做 resolve（兜底 mapping 内 "omniverse" → 真实 host）
+    return resolveNucleusHost(selectedBackend);
+  }, [selectedBackend]);
+
   // Listen for server selection changes from the header
   useEffect(() => {
     const handleServerChange = (event) => {
@@ -316,9 +344,15 @@ const HybridDeepSearchUI = () => {
   }, [embeddingConfig]);
   const [configCollapsed, setConfigCollapsed] = useState(SEARCH_DEFAULTS.configCollapsed);
   const [results, setResults] = useState([]);
-  // === LM CUSTOMIZATION: 路径目录树（混合静态 + 搜索结果聚合）===
-  // 每次 results 变化时自动重新聚合，给路径筛选注入「真实数据反馈」
-  const { tree: pathTree } = usePathSuggestions(results);
+  // === LM CUSTOMIZATION: 路径目录树（真实 Nucleus 树 + 搜索结果聚合）===
+  // 1) useNucleusTree 提供真实目录树骨架（来自 ov.qq.com 实拍快照 + 运行时 listing 刷新）
+  // 2) usePathSuggestions 把搜索 hits 的命中数叠加到该树上，得到带 deepCount 的混合树
+  //
+  // ⚠️ 重要：这里使用的 hits 必须是「用户最终看到的卡片」对应的数组（visibleResults），
+  // 而不是后端原始 results。否则路径树徽章数字会与顶部"共 N 个资产"对不上
+  // （例如缩略图过滤 / tag AND 过滤砍掉一部分后端 hits 时）。
+  // pathTree 的实际计算延后到 visibleResults 算出来之后（见下方 useMemo）。
+  const { tree: liveTree } = useNucleusTree(selectedBackend);
 
   // [UX Polish R2] selectedTags 客户端二次过滤
   // 背景：后端不支持 filter_by_tags，若把 tag 拼进 q，"点最近标签 #grass"
@@ -346,7 +380,6 @@ const HybridDeepSearchUI = () => {
   }, [results, selectedTags]);
 
   const [isLoading, setIsLoading] = useState(false);
-  // error state removed - was never rendered in JSX
   const [showScores, setShowScores] = useState(SEARCH_DEFAULTS.showScores);
   const [filtersCollapsed, setFiltersCollapsed] = useState(SEARCH_DEFAULTS.filtersCollapsed);
   const [configSidebarCollapsed, setConfigSidebarCollapsed] = useState(true);
@@ -359,6 +392,18 @@ const HybridDeepSearchUI = () => {
   const [showOnlyWithPreviews, setShowOnlyWithPreviews] = useState(SEARCH_DEFAULTS.showOnlyWithPreviews);
   // === LM CUSTOMIZATION: Sort state ===
   const [sortBy, setSortBy] = useState('relevance');
+
+  // === LM CUSTOMIZATION: 统一可见结果数组 ===
+  // visibleResults = 用户实际看到的卡片对应的 hits。所有计数 / 路径树徽章 / 卡片列表
+  // 必须使用同一个 visibleResults，避免「共 0 个资产」但路径树徽章却显示 3 这种不一致。
+  // 过滤链：results → tag AND 过滤 → showOnlyWithPreviews ? thumbnail 过滤 : 全收。
+  const visibleResults = useMemo(() => {
+    if (!showOnlyWithPreviews) return tagFilteredResults;
+    return tagFilteredResults.filter(item => item?.thumbnail_exists === true);
+  }, [tagFilteredResults, showOnlyWithPreviews]);
+
+  // pathTree 用 visibleResults 聚合，确保节点徽章数字 == 该路径下实际可见卡片数
+  const { tree: pathTree } = usePathSuggestions(visibleResults, { liveTree });
   
   const [plugins, setPlugins] = useState({ active: [], inactive: [], isLoading: false });
   const [backend, setBackend] = useState(null);
@@ -1060,7 +1105,7 @@ const HybridDeepSearchUI = () => {
     // 把搜索对象转成 BatchTagger items
     const batchItems = items.map(r => ({
       assetUrl: r?.source?.url || r?.source?.base_key || r?.id,
-      serverUrl: '',
+      serverUrl: nucleusServerUrl, // [Tag Deploy Fix - 防线 1] 用真实 nucleus host，不再传空串
       displayName: (r?.source?.base_key || r?.source?.url || r?.id || '').split('/').pop(),
       existingTags: Array.isArray(r?.source?.tags) ? r.source.tags : undefined,
     }));
@@ -2788,10 +2833,10 @@ const HybridDeepSearchUI = () => {
                   }
                   setTimeout(() => handleSearchRef.current?.(), 50);
                 }}
-                results={tagFilteredResults}
+                results={visibleResults}
                 // === v5 合并行：TitleBar + 结果计数内嵌 toolbar ===
                 titleBarProps={titleBarProps}
-                resultCount={showOnlyWithPreviews ? (tagFilteredResults?.filter(r => r.thumbnail_exists === true)?.length || 0) : (tagFilteredResults?.length || 0)}
+                resultCount={visibleResults.length}
                 />
               </Box>
               {/* Layer 2: SelectionModeBar —— 绝对定位覆盖在 FabToolbar 上方，
@@ -2835,8 +2880,8 @@ const HybridDeepSearchUI = () => {
             </Box>
             {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar crossfade END === */}
             <MemoizedResults
-              results={tagFilteredResults}
-              showOnlyWithPreviews={showOnlyWithPreviews}
+              results={visibleResults}
+              showOnlyWithPreviews={false}
               onItemClick={handleItemClick}
               copyToClipboard={copyToClipboard}
               onFindSimilar={handleFindSimilar}
@@ -2872,7 +2917,7 @@ const HybridDeepSearchUI = () => {
           plugins={plugins}
           getHeaders={getHeaders}
           apiUrl={apiUrl}
-          serverUrl={selectedBackend}
+          serverUrl={nucleusServerUrl}
           triggerReindexAllPlugins={triggerReindexAllPlugins}
           triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
         />
