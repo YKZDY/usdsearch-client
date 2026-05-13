@@ -27,7 +27,17 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "e2e:auth": "npx tsx e2e/auth-setup.ts",
+    "e2e": "npx playwright test --config=playwright.config.ts --project=live-chromium",
+    "e2e:smoke": "npx playwright test --config=playwright.config.ts --project=live-chromium smoke.spec.ts",
+    "e2e:mock": "npx playwright test --config=playwright.config.ts --project=mock-chromium",
+    "e2e:visual": "npx playwright test --config=playwright.config.ts --project=visual",
+    "e2e:visual:update": "npx playwright test --config=playwright.config.ts --project=visual --update-snapshots",
+    "e2e:report": "npx playwright show-report",
+    "e2e:ui": "npx playwright test --config=playwright.config.ts --ui",
+    "e2e:debug": "npx playwright test --config=playwright.config.ts --project=live-chromium --headed --debug",
+    "e2e:install": "npx playwright install chromium"
   },
   "eslintConfig": {
     "extends": [
@@ -46,5 +56,10 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "cross-env": "^10.1.0",
+    "tsx": "^4.21.0"
   }
 }

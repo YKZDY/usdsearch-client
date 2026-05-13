@@ -2,3 +2,11 @@
 .env.development.local
 .env.local
 .env.*.local
+
+# Playwright 测试产物
+test-results/
+playwright-report/
+e2e/screenshots/**/*.diff.png
+e2e/screenshots/**/*.actual.png
+e2e/.auth/
+.auth/
