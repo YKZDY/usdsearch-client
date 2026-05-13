@@ -118,6 +118,9 @@ const PathFilter = memo(function PathFilter({
   onTriggerSearch,
   t,
   pathTree = [],
+  treeStatus,
+  treeError,
+  onRefreshTree,
 }) {
   // 记忆功能（4 条）
   const {
@@ -235,6 +238,34 @@ const PathFilter = memo(function PathFilter({
         )}
 
         {/* === 主体：树形浏览器 === */}
+        {treeStatus === 'error' && (
+          <Box
+            bg="rgba(229, 62, 62, 0.1)"
+            border="1px solid rgba(229, 62, 62, 0.3)"
+            borderRadius="md"
+            px={3}
+            py={2}
+            mb={2}
+            display="flex"
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <Text fontSize="12px" color="red.200">
+              {t?.('treeLoadFailed') || '目录加载失败'}
+            </Text>
+            <Text
+              as="span"
+              fontSize="12px"
+              color="yellow.300"
+              cursor="pointer"
+              textDecoration="underline"
+              _hover={{ color: 'yellow.200' }}
+              onClick={onRefreshTree}
+            >
+              {t?.('retry') || '重试'}
+            </Text>
+          </Box>
+        )}
         <PathTreeBrowser
           tree={pathTree}
           includes={includes}

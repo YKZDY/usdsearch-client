@@ -407,18 +407,19 @@ const USDPropertiesTable = ({ usdProperties, expandedGroups, setExpandedGroups }
   );
 };
 
-const AssetDetailsModal = ({ 
-  isOpen, 
-  onClose, 
-  selectedItem, 
-  copyToClipboard, 
+const AssetDetailsModal = ({
+  isOpen,
+  onClose,
+  selectedItem,
+  copyToClipboard,
   showScores = SEARCH_DEFAULTS.showScores,
   plugins,
   getHeaders,
   apiUrl,
   serverUrl,
   triggerReindexAllPlugins,
-  triggerReindexIndividualPlugin
+  triggerReindexIndividualPlugin,
+  onTagsChanged,
 }) => {
   const [pluginStatuses, setPluginStatuses] = useState({});
   const { t } = useTranslation();
@@ -429,6 +430,17 @@ const AssetDetailsModal = ({
   const [loadingDeps, setLoadingDeps] = useState(false);
   const [loadingInverseDeps, setLoadingInverseDeps] = useState(false);
   const [loadingUsdProps, setLoadingUsdProps] = useState(false);
+
+  // [DemoFix] 安全阀：如果加载状态超过 10 秒未结束，自动清除并标记超时
+  useEffect(() => {
+    if (!loadingDeps && !loadingInverseDeps && !loadingUsdProps) return;
+    const timer = setTimeout(() => {
+      if (loadingDeps) setLoadingDeps(false);
+      if (loadingInverseDeps) setLoadingInverseDeps(false);
+      if (loadingUsdProps) setLoadingUsdProps(false);
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loadingDeps, loadingInverseDeps, loadingUsdProps]);
   
   const { isOpen: isExplanationsOpen, onToggle: toggleExplanations } = useDisclosure();
   const { isOpen: isMetadataOpen, onToggle: toggleMetadata } = useDisclosure();
@@ -439,6 +451,24 @@ const AssetDetailsModal = ({
   const { isOpen: isTechnicalOpen, onToggle: toggleTechnical } = useDisclosure();
   const { isOpen: isTagsOpen, onToggle: toggleTags } = useDisclosure({ defaultIsOpen: true });
   const { isOpen: isIndexMgmtOpen, onToggle: toggleIndexMgmt } = useDisclosure({ defaultIsOpen: false });
+
+  // [TagFilterSearch] 读取 EditableTagsPanel 最新 tags 的 ref
+  const tagsSnapshotRef = useRef(null);
+  const handleTagsSnapshot = useCallback(({ getLatestTags }) => {
+    tagsSnapshotRef.current = getLatestTags;
+  }, []);
+
+  // [TagFilterSearch] 关闭 Modal 时把最新 tags 上报给父组件
+  const handleClose = useCallback(() => {
+    if (onTagsChanged && tagsSnapshotRef.current && selectedItem) {
+      const assetId = selectedItem.source?.url || selectedItem.source?.base_key || '';
+      const latestTags = tagsSnapshotRef.current();
+      if (assetId && Array.isArray(latestTags)) {
+        onTagsChanged(assetId, latestTags);
+      }
+    }
+    onClose();
+  }, [onClose, onTagsChanged, selectedItem]);
 
   // === LM CUSTOMIZATION: detail-modal-revamp START ===
   // URL 行复制按钮的反馈状态
@@ -663,7 +693,7 @@ const AssetDetailsModal = ({
   // === LM CUSTOMIZATION: detail-modal-revamp END ===
   
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="6xl">
+    <Modal isOpen={isOpen} onClose={handleClose} size="6xl">
       <ModalOverlay />
       <ModalContent bg="gray.800" color="white" maxH="90vh" boxShadow="0 0 20px 5px rgba(72, 187, 120, 0.3)" borderRadius="md">
         <ModalHeader borderBottomWidth="1px" borderColor="gray.600">
@@ -868,6 +898,7 @@ const AssetDetailsModal = ({
                     getHeaders={getHeaders}
                     apiUrl={apiUrl}
                     assetUrl={baseKey}
+                    onTagsSnapshot={handleTagsSnapshot}
                   />
                   </Box>
               </Collapse>

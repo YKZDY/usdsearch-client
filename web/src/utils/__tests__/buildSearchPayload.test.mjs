@@ -103,6 +103,39 @@ const cases = [
       filter_by_tags: ['general building', 'industrial equipment', 'metal'],
     },
   },
+  // === [TagDedup] 去重：tag 与搜索词重复时不重复拼入 ===
+  {
+    name: '[去重] tag 名等于 committedQuery 时不重复',
+    input: { committedQuery: 'def', selectedTags: ['def'] },
+    expect: {
+      q: 'def',
+      filter_by_tags: ['def'],
+    },
+  },
+  {
+    name: '[去重] tag 名是 committedQuery 中某个词时不重复',
+    input: { committedQuery: 'grass green', selectedTags: ['grass'] },
+    expect: {
+      q: 'grass green',
+      filter_by_tags: ['grass'],
+    },
+  },
+  {
+    name: '[去重] tag 名与搜索词不同时正常拼入',
+    input: { committedQuery: 'apple', selectedTags: ['grass'] },
+    expect: {
+      q: 'apple grass',
+      filter_by_tags: ['grass'],
+    },
+  },
+  {
+    name: '[去重] 大小写不敏感去重',
+    input: { committedQuery: 'Grass', selectedTags: ['grass'] },
+    expect: {
+      q: 'Grass',
+      filter_by_tags: ['grass'],
+    },
+  },
 ];
 
 function deepEqual(a, b) {

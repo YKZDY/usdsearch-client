@@ -54,6 +54,7 @@ const TagsFilter = memo(function TagsFilter({
   onSelectedTagsChange,
   onTriggerSearch,
   results = [],
+  globalTags = [],
   t,
 }) {
   const [inputValue, setInputValue] = useState('');
@@ -73,12 +74,10 @@ const TagsFilter = memo(function TagsFilter({
     return Array.isArray(selectedTags) ? selectedTags : [];
   }, [selectedTags]);
 
-  // [TagSearchFix V3] 候选标签只从真 source.tags 聚合，不再从文件名拆词凑假 tag。
-  // 背景：历史上后端没 tag 功能时，为让 "标签筛选" UI 有候选，前端把文件名拆成伪 tag，
-  // 但这会让用户误以为 "选中 Set 就是按 tag=Set 过滤"，实际是文本搜索命中文件名。
-  // 现在 tagging 服务可用后，候选只展示真实打过的 tag，空时给明确提示引导去打标签。
+  // [TagFilterSearch] 候选标签合并：全局 tagQuery 结果 + 当前搜索结果中的 tag
   const availableTags = useMemo(() => {
-    const tagMap = new Map();
+    // 1) 从搜索结果中提取 tag + 计数
+    const resultTagMap = new Map();
     results.forEach(item => {
       const tags = item.source?.tags;
       if (!Array.isArray(tags)) return;
@@ -87,15 +86,33 @@ const TagsFilter = memo(function TagsFilter({
           ? tagItem
           : (tagItem?.name || tagItem?.tag || tagItem?.value || '');
         if (tagStr) {
-          tagMap.set(tagStr, (tagMap.get(tagStr) || 0) + 1);
+          resultTagMap.set(tagStr, (resultTagMap.get(tagStr) || 0) + 1);
         }
       });
     });
-    return Array.from(tagMap.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([tag, count]) => ({ label: tag, value: tag, count }));
-  }, [results]);
+
+    // 2) 合并 globalTags（无计数，标记来源为 'global'）
+    const merged = new Map();
+    globalTags.forEach(tagName => {
+      if (tagName && !merged.has(tagName)) {
+        merged.set(tagName, { label: tagName, value: tagName, count: 0, source: 'global' });
+      }
+    });
+    // 结果中的 tag 覆盖（附带计数 + 标记为 'results'）
+    resultTagMap.forEach((count, tagName) => {
+      merged.set(tagName, { label: tagName, value: tagName, count, source: 'results' });
+    });
+
+    // 3) 排序：有计数的排前面（按 count 降序），无计数的按字母序
+    return Array.from(merged.values())
+      .sort((a, b) => {
+        if (a.count > 0 && b.count === 0) return -1;
+        if (a.count === 0 && b.count > 0) return 1;
+        if (a.count !== b.count) return b.count - a.count;
+        return a.label.localeCompare(b.label);
+      })
+      .slice(0, 30);
+  }, [results, globalTags]);
 
   // 过滤可用标签（排除已激活 + 模糊搜索）
   const filteredAvailableTags = useMemo(() => {
@@ -280,8 +297,8 @@ const TagsFilter = memo(function TagsFilter({
                   <Tag
                     size="md"
                     variant="subtle"
-                    bg="whiteAlpha.100"
-                    color="whiteAlpha.800"
+                    bg={tag.source === 'results' ? 'whiteAlpha.100' : 'whiteAlpha.50'}
+                    color={tag.source === 'results' ? 'whiteAlpha.800' : 'whiteAlpha.500'}
                     border="1px solid transparent"
                     borderRadius="full"
                     cursor="pointer"
@@ -303,16 +320,9 @@ const TagsFilter = memo(function TagsFilter({
           </>
         )}
 
-        {availableTags.length === 0 && results.length === 0 && (
-          <Text fontSize="12px" color="whiteAlpha.500" letterSpacing="0.02em">
-            {t?.('tagsNoResults') || '搜索结果中暂无标签数据，请先执行搜索'}
-          </Text>
-        )}
-
-        {/* [TagSearchFix V3] 有结果但没真 tag：提示去卡片详情手动打标签 */}
-        {availableTags.length === 0 && results.length > 0 && (
+        {availableTags.length === 0 && (
           <Text fontSize="12px" color="whiteAlpha.500" letterSpacing="0.02em" lineHeight="1.6">
-            {t?.('tagsNoRealTagsHint') || '当前结果中暂无已打标签的资产。打开任意资产详情可手动添加标签。'}
+            {t?.('tagsNoCandidates') || '暂无可用标签。打开任意资产详情可手动添加标签，或在上方输入框直接输入标签名搜索。'}
           </Text>
         )}
 

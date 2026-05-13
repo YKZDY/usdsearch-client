@@ -46,6 +46,7 @@ const EditableTagsPanel = memo(function EditableTagsPanel({
   getHeaders,
   apiUrl,
   assetUrl,
+  onTagsSnapshot,
 }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -59,6 +60,20 @@ const EditableTagsPanel = memo(function EditableTagsPanel({
     // [TagFailureSurface] 错误诊断 API
     lastError, clearLastError, retryFailedTag, diagnosticsContext,
   } = useTagManager({ serverUrl, assetPath, initialTags, getHeaders, apiUrl, assetUrl });
+
+  // [TagFilterSearch] 暴露最新正常 tags 给父组件（Modal 关闭时读取）
+  const latestNormalTags = useMemo(
+    () => tags.filter(t => t.status === 'normal').map(t => ({ name: t.name, tag_namespace: t.tag_namespace, value: t.value })),
+    [tags]
+  );
+  const latestNormalTagsRef = useRef(latestNormalTags);
+  latestNormalTagsRef.current = latestNormalTags;
+
+  useEffect(() => {
+    if (onTagsSnapshot) {
+      onTagsSnapshot({ getLatestTags: () => latestNormalTagsRef.current });
+    }
+  }, [onTagsSnapshot]);
 
   // ─── [TagFailureSurface] lastError → 分类 toast ────────────────
   // 根据 err.kind 选择文案，每次 lastError 变化（at 戳变）触发一次。

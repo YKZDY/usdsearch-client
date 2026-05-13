@@ -114,6 +114,9 @@ function FabToolbar({
   showOnlyWithPreviews,
   // v3 路径筛选：混合目录树（由 usePathSuggestions 产出）
   pathTree = [],
+  treeStatus,
+  treeError,
+  onRefreshTree,
   onShowOnlyWithPreviewsChange,
   viewMode,
   onSetViewModeList,
@@ -130,6 +133,7 @@ function FabToolbar({
   // === LM CUSTOMIZATION: Search/Tag decoupling — v4 受控标签数组 & 已固化搜索词 & 分类 tag ===
   selectedTags = [],
   onSelectedTagsChange,
+  globalTags = [],
   committedQuery = '',
   onCommittedQueryChange,
   categoryTag = '',
@@ -210,25 +214,32 @@ function FabToolbar({
 
   return (
     <Box className="fab-toolbar">
-      {/* === v6 Header 行：结果状态（query + categoryTag + 计数 + 分数区间），一行贯通 === */}
-      <Box className="fab-toolbar-header-row">
-        <ResultsTitleBar
-          t={t}
-          committedQuery={titleBarProps?.committedQuery || ''}
-          categoryTag={titleBarProps?.categoryTag || ''}
-          categoryLabel={titleBarProps?.categoryLabel || ''}
-          onRemoveQuery={titleBarProps?.onRemoveQuery}
-          onRemoveCategory={titleBarProps?.onRemoveCategory}
-          imageSearchActive={titleBarProps?.imageSearchActive || false}
-          resultCount={resultCount}
-          scoreRange={(() => {
-            if (!showScores || !Array.isArray(results) || results.length === 0) return null;
-            const scores = results.map(r => r?.score ?? 0).filter(s => s > 0);
-            if (scores.length === 0) return null;
-            return { min: Math.min(...scores), max: Math.max(...scores) };
-          })()}
-        />
-      </Box>
+      {/* === v6 Header 行：结果状态（query + categoryTag + 计数 + 分数区间），一行贯通 ===
+          [图片搜索 banner 空白修复] imageSearchActive=true 时整体跳过该容器：
+          - 子组件 ResultsTitleBar 内部本就 return null，但外层 Box 仍占 min-height:32px
+            + 父级 flex gap:10px ≈ 42px 纯空白条带（与"查找相似"激活态视觉割裂）。
+          - 图片搜索 banner 已自带"找到 N 个相似资产"文案（HybridDeepSearchUI.jsx 第 2785 行附近），
+            此 Header 行在该态下本就冗余，整体不渲染信息无丢失。 */}
+      {!titleBarProps?.imageSearchActive && (
+        <Box className="fab-toolbar-header-row">
+          <ResultsTitleBar
+            t={t}
+            committedQuery={titleBarProps?.committedQuery || ''}
+            categoryTag={titleBarProps?.categoryTag || ''}
+            categoryLabel={titleBarProps?.categoryLabel || ''}
+            onRemoveQuery={titleBarProps?.onRemoveQuery}
+            onRemoveCategory={titleBarProps?.onRemoveCategory}
+            imageSearchActive={titleBarProps?.imageSearchActive || false}
+            resultCount={resultCount}
+            scoreRange={(() => {
+              if (!showScores || !Array.isArray(results) || results.length === 0) return null;
+              const scores = results.map(r => r?.score ?? 0).filter(s => s > 0);
+              if (scores.length === 0) return null;
+              return { min: Math.min(...scores), max: Math.max(...scores) };
+            })()}
+          />
+        </Box>
+      )}
 
       <HStack spacing={2} flexWrap="wrap" align="center">
         {/* FilterGroupProvider：让 8 个 FilterPopoverButton 互斥打开（同一时刻只开一个）；
@@ -249,6 +260,7 @@ function FabToolbar({
           onSelectedTagsChange={onSelectedTagsChange}
           onTriggerSearch={onTriggerSearch}
           results={results}
+          globalTags={globalTags}
           t={t}
         />
 
@@ -267,6 +279,9 @@ function FabToolbar({
           onTriggerSearch={onTriggerSearch}
           t={t}
           pathTree={pathTree}
+          treeStatus={treeStatus}
+          treeError={treeError}
+          onRefreshTree={onRefreshTree}
         />
 
         {/* ── 5. 大小 ── */}

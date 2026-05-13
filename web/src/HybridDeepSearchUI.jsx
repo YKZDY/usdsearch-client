@@ -89,6 +89,8 @@ import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts";
 import { useAuthGuard } from "./hooks/useAuthGuard";
 // === LM CUSTOMIZATION: Path tree suggestions（混合静态目录 + 搜索结果聚合）===
 import { usePathSuggestions } from "./hooks/usePathSuggestions";
+// [TagFilterSearch] 全局可用标签（wss tagQuery）
+import useGlobalTags from "./hooks/useGlobalTags";
 // === LM CUSTOMIZATION: Nucleus 真实目录树（运行时 listing 反推 + 静态快照兜底）===
 import { useNucleusTree } from "./hooks/useNucleusTree";
 // === LM CUSTOMIZATION: Search/Tag decoupling — 搜索请求反腐层 ===
@@ -400,7 +402,7 @@ const HybridDeepSearchUI = () => {
   // 而不是后端原始 results。否则路径树徽章数字会与顶部"共 N 个资产"对不上
   // （例如缩略图过滤 / tag AND 过滤砍掉一部分后端 hits 时）。
   // pathTree 的实际计算延后到 visibleResults 算出来之后（见下方 useMemo）。
-  const { tree: liveTree } = useNucleusTree(selectedBackend);
+  const { tree: liveTree, status: treeStatus, error: treeError, refresh: refreshTree } = useNucleusTree(selectedBackend);
 
   // [UX Polish R2] selectedTags 客户端二次过滤
   // 背景：后端不支持 filter_by_tags，若把 tag 拼进 q，"点最近标签 #grass"
@@ -1304,6 +1306,44 @@ const HybridDeepSearchUI = () => {
     return headers;
   }, [selectedBackend, readAuthCredentials]);
 
+  // [TagFilterSearch] 获取全局可用 tag 列表（供 TagsFilter 候选）
+  const { globalTags, removeTag: removeGlobalTag, addTag: addGlobalTag } = useGlobalTags({
+    serverUrl: nucleusServerUrl,
+    getHeaders,
+  });
+
+  // [TagFilterSearch] Modal 关闭时乐观更新 results 中对应 item 的 source.tags
+  // [TagDeleteSync] 同时同步 globalTags 缓存：新增的 tag 加入候选，被删的 tag 移除候选
+  const handleTagsChanged = useCallback((assetId, latestTags) => {
+    if (!assetId || !Array.isArray(latestTags)) return;
+
+    // 乐观更新 results 数组
+    setResults(prev => {
+      const oldItem = prev.find(item => (item.source?.url || item.source?.base_key || '') === assetId);
+      const oldTagNames = (oldItem?.source?.tags || []).map(t =>
+        typeof t === 'string' ? t : (t?.name || t?.tag || '')
+      ).filter(Boolean);
+      const newTagNames = latestTags.map(t => t.name || '').filter(Boolean);
+
+      // 同步 globalTags：移除被删的，添加新增的
+      const removed = oldTagNames.filter(t => !newTagNames.includes(t));
+      const added = newTagNames.filter(t => !oldTagNames.includes(t));
+      removed.forEach(t => removeGlobalTag(t));
+      added.forEach(t => addGlobalTag(t));
+
+      return prev.map(item => {
+        const key = item.source?.url || item.source?.base_key || '';
+        if (key === assetId) {
+          return {
+            ...item,
+            source: { ...item.source, tags: latestTags },
+          };
+        }
+        return item;
+      });
+    });
+  }, [removeGlobalTag, addGlobalTag]);
+
   // ─── V2 批量打标签：编排（放在 getHeaders 之后以避免 TDZ） ────────
   // 注：searchQueryRefForBatch 已在前面（L605 附近）声明，这里复用。
 
@@ -1973,6 +2013,12 @@ const HybridDeepSearchUI = () => {
 
   // Search handling
   const handleSearch = useCallback(async () => {
+    // === LM CUSTOMIZATION: 搜索时自动退出多选 ===
+    // 搜索是典型的"结果集整体重置"场景（新搜索词 → 大概率新结果集），此前的选中项在新结果里很可能不可见，
+    // 继续保留多选模式会让用户看到"已选中 N 个资产"的 Bar 但找不到它们（幽灵选中），体验割裂。
+    // 统一在 handleSearch 入口清一次：无选中时幂等无副作用；URL 恢复/首次加载等走该入口也安全。
+    clearSelectionRef.current?.();
+
     // === LM CUSTOMIZATION: Search/Tag decoupling v4 — committedQuery 仅作快照，不再清空搜索框 ===
     // 把输入框当前文本固化为 committedQuery（供大标题使用），但保留搜索框文字不变——
     // 与 Fab/Google 一致：回车后搜索词仍留在输入框里，光标由 TopSearchBar 做 select()。
@@ -3035,6 +3081,9 @@ const HybridDeepSearchUI = () => {
                 onShowScoresChange={onShowScoresChange}
                 showOnlyWithPreviews={showOnlyWithPreviews}
                 pathTree={pathTree}
+                treeStatus={treeStatus}
+                treeError={treeError}
+                onRefreshTree={refreshTree}
                 onShowOnlyWithPreviewsChange={onShowOnlyWithPreviewsChange}
                 viewMode={viewMode}
                 onSetViewModeList={onSetViewModeList}
@@ -3084,6 +3133,7 @@ const HybridDeepSearchUI = () => {
                 // === v5 合并行：TitleBar + 结果计数内嵌 toolbar ===
                 titleBarProps={titleBarProps}
                 resultCount={visibleResults.length}
+                globalTags={globalTags}
                 />
               </Box>
               {/* Layer 2: SelectionModeBar —— 绝对定位覆盖在 FabToolbar 上方，
@@ -3169,6 +3219,7 @@ const HybridDeepSearchUI = () => {
           serverUrl={nucleusServerUrl}
           triggerReindexAllPlugins={triggerReindexAllPlugins}
           triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
+          onTagsChanged={handleTagsChanged}
         />
       )}
 

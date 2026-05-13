@@ -40,10 +40,18 @@ export default function buildSearchPayload({
   const tags = Array.isArray(selectedTags) ? selectedTags : [];
   const cat = typeof categoryTag === 'string' ? categoryTag : '';
 
-  // [UX Polish R2] selectedTags 不再进 q。只保留搜索词 + 分类。
-  const parts = [committedQuery, searchQuery, cat]
+  // [TagFilterSearch] selectedTags 重新拼入 q，让后端通过 tags.tag 全文索引命中含该 tag 的资产。
+  // 前端仍保留 tagFilteredResults 做二次 AND 验证，排除文件名误命中的噪音。
+  // [TagDedup] 去重：如果 tag 名已经出现在 committedQuery/searchQuery/categoryTag 中，不再重复拼入，
+  // 避免 "def def" 这样的重复词影响后端 scoring 导致结果变少。
+  const baseParts = [committedQuery, searchQuery, cat]
     .map(s => (typeof s === 'string' ? s.trim() : ''))
     .filter(Boolean);
+  const baseWordsLower = baseParts.join(' ').toLowerCase().split(/\s+/).filter(Boolean);
+  const dedupedTags = tags
+    .map(s => (typeof s === 'string' ? s.trim() : ''))
+    .filter(t => t && !baseWordsLower.includes(t.toLowerCase()));
+  const parts = [...baseParts, ...dedupedTags].filter(Boolean);
 
   // filter_by_tags：分类 tag 置顶（若非空），其后是用户手动标签（保留原数组顺序与空值）
   const filter_by_tags = cat ? [cat, ...tags] : [...tags];
