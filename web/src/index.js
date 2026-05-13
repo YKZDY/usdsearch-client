@@ -776,12 +776,20 @@ const HeaderIcons = () => {
     // [v2 补强 4] 独立管理 server 选择 popover，让点击外部 / ESC 也能关闭
     const { isOpen: isServerOpen, onClose: onServerClose, onToggle: onServerToggle } = useDisclosure();
 
-    // [v2 补强] Server 下拉去重：三个 fallback key 共享同一 NUCLEUS_CONFIG 引用，
-    // 直接 Object.entries 渲染会出现"OV.QQ.COM/空白/空白"三行重复（若 env 写 string fallback 还会出空白）。
-    // 按 config 引用 Set 去重，并优先暴露 'nucleus' 作为 option value，确保用户切换后 URL 是新形态。
+    // [v2 补强 / 部署修复] Server 下拉去重：按"解析后的真实 host 值"去重，而不是按对象引用。
+    //
+    // 历史踩坑（部署环境）：早期版本按 `seen.has(cfg)` 即对象引用去重，依赖 SERVER_MAPPING_FALLBACK
+    // 三个 key 共享同一 NUCLEUS_CONFIG 引用。但 `.env.production` 的 REACT_APP_SERVER_MAPPING JSON
+    // 解析后多个 key 是相互独立的对象，与 fallback 合并后引用全部不同 → 去重失效 → 下拉出现
+    // 3 行 "OV.QQ.COM"。本地 dev 不加载 .env.production，纯走 fallback 共享引用，所以本地是正常的。
+    //
+    // 现按 host 值去重：'nucleus' / 'omniverse' / 'omniverse://ov.qq.com' 经 resolveNucleusHost
+    // 全部解析到 'ov.qq.com' → Set 命中 → 仅保留排序最靠前的（'nucleus' 优先）。
+    // 未来运维若在 env 配置真正不同 host 的服务器，下拉会正确显示对应数量。
     const uniqueServers = useMemo(() => {
         const seen = new Set();
         const list = [];
+        let dupWarned = false;
         // 先把 'nucleus' 顶上去（如果存在），让 option[0] 永远是新主 key
         const orderedKeys = Object.keys(SERVER_MAPPING).sort((a, b) => {
             if (a === 'nucleus') return -1;
@@ -790,8 +798,35 @@ const HeaderIcons = () => {
         });
         for (const key of orderedKeys) {
             const cfg = SERVER_MAPPING[key];
-            if (!cfg || typeof cfg !== 'object' || seen.has(cfg)) continue;
-            seen.add(cfg);
+            if (!cfg || typeof cfg !== 'object') continue;
+            // 三级 fallback 选去重 key：
+            //   1) resolveNucleusHost(key)  —— 最权威，能拉平 'nucleus'/'omniverse'/'omniverse://ov.qq.com' 等所有别名
+            //   2) cfg.host                  —— env 富对象兜底
+            //   3) cfg.name || key           —— 极端兜底，避免空字符串崩
+            const dedupKey =
+                resolveNucleusHost(key) ||
+                (typeof cfg.host === 'string' && cfg.host.trim()) ||
+                (cfg.name || key);
+            if (!dedupKey) continue;
+            if (seen.has(dedupKey)) {
+                // 异常配置提示：同 host 但 name 不同时，提醒运维一次（不阻断渲染）
+                const existing = list.find(it => (
+                    (resolveNucleusHost(it.key) ||
+                     (typeof SERVER_MAPPING[it.key]?.host === 'string' && SERVER_MAPPING[it.key].host.trim()) ||
+                     (SERVER_MAPPING[it.key]?.name || it.key)
+                    ) === dedupKey
+                ));
+                if (!dupWarned && existing && (cfg.name || key) !== existing.name) {
+                    // eslint-disable-next-line no-console
+                    console.warn(
+                        `[SERVER_MAPPING] Duplicate host "${dedupKey}" with different names: ` +
+                        `"${existing.name}" vs "${cfg.name || key}". Only the first is shown.`
+                    );
+                    dupWarned = true;
+                }
+                continue;
+            }
+            seen.add(dedupKey);
             list.push({ key, name: cfg.name || key });
         }
         return list;

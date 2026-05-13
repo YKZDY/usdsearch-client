@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Language
+
+Always respond in **Simplified Chinese (简体中文)**.
+
 ## Overview
 
 NVIDIA USD Search Client — hybrid-language monorepo: OpenAPI-generated Python SDK + React search frontend demo with LightArt branding. API v1.3.0, Generator v7.8.0 (PythonClientCodegen), Python 3.8+.
