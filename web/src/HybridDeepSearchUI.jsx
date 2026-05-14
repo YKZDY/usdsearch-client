@@ -2091,6 +2091,11 @@ const HybridDeepSearchUI = () => {
     // Update URL with the current search parameters, but don't trigger a backend change
     serializeToURL();
 
+    // [calvingu 2026-05-14 Round4] 浏览模式判定（空 query + 空 image）。
+    // 浏览模式下后端命中率仅 31%（实测），需走 getApiLimit 的浏览模式分支
+    // 拉大 limit 单次请求拿到全集，避免「打 tag 后假性消失 50→49」。
+    const isBrowseMode = !currentQuery && !currentImage;
+
     try {
       // Build the V3 API request
       const requestBody = {
@@ -2100,7 +2105,8 @@ const HybridDeepSearchUI = () => {
           {
             showOnlyWithPreviews,
             fileExtensionExclude: currentSearchParams.file_extension_exclude || '',
-          }
+          },
+          { isBrowseMode }
         ),
         return_images: true,
         return_metadata: true,
@@ -2221,7 +2227,7 @@ const HybridDeepSearchUI = () => {
         }
       });
       // 浏览模式（空 query）：移除 file_extension_exclude 避免与 include 冲突
-      if (!currentQuery && !currentImage && requestBody.file_extension_include) {
+      if (isBrowseMode && requestBody.file_extension_include) {
         delete requestBody.file_extension_exclude;
       }
 
@@ -2229,12 +2235,14 @@ const HybridDeepSearchUI = () => {
       // 防御 spread 顺序 / clientOnlyFields 漏项 / webpack 缓存等历史踩坑：
       // 在 fetch 前最后一次显式赋值，确保 requestBody.limit === 过采样后的 apiLimit。
       // 任何上面的 spread / Object.fromEntries 都不会再覆盖这一行。
+      // [Round4] 同步透传 isBrowseMode，让浏览模式走大 limit 分支。
       requestBody.limit = getApiLimit(
         parseInt(currentSearchParams.limit),
         {
           showOnlyWithPreviews,
           fileExtensionExclude: currentSearchParams.file_extension_exclude || '',
-        }
+        },
+        { isBrowseMode }
       );
 
       const response = await fetch(`${apiUrl}/search_hybrid`, {

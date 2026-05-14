@@ -72,8 +72,12 @@ target/
 # Node.js
 node_modules/
 web/.env.production
-web/deepsearch-ui-build-20260513-110151.zip
-web/deepsearch-ui-build-20260513-110241.zip
-web/deepsearch-ui-build-20260513-112741.zip
-web/deepsearch-ui-build-20260513-115855.zip
-web/deepsearch-ui-build-latest.zip
+
+# Build artifacts (zip packages, snapshot builds)
+# 一次性忽略所有版本/时间戳的 build 压缩包，避免每次构建都要手工添加新行
+*.zip
+web/deepsearch-ui-build*.zip
+web/build-*.zip
+deepsearch-ui-build*.zip
+build-*.zip
+
