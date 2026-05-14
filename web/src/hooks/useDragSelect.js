@@ -28,6 +28,67 @@ const CARD_INDEX_ATTR = 'data-card-index';
 const CARD_SELECTOR = `[${CARD_INDEX_ATTR}]`;
 const CARD_CLASS = 'chakra-card';
 const DRAG_THRESHOLD = 8; // px：>5 给抖动/双击留缓冲，避免误判为拖拽分支
+const OUTER_DRAG_THRESHOLD = 20; // px：容器外起点需要更大位移才启动框选，避免与"单击退出多选"冲突
+
+/**
+ * 硬交互元素：单击会触发 form submit / focus / 跳转 / 编辑等关键行为
+ * → 任何起点（容器内外）都必须 return，不能干预
+ *
+ * 与"软交互"区分：treeitem、role=tab/option 等只是装饰性 ARIA，被点中也不会
+ * 影响真实行为；data-drag-select-skip 是纯视觉隔离区（顶部 bar），里面的实际
+ * 控件已通过 button/a/input 明确，整块 skip 反而会让顶部空白进不去 outerPending。
+ */
+function isHardInteractive(el) {
+  if (!el || el === document || el === document.body || el.nodeType !== 1) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') return true;
+  // 仅有 href 的 <a> 才是硬交互；纯装饰 <a> （如 brand 容器）应允许框选起手
+  if (tag === 'A' && el.hasAttribute?.('href')) return true;
+  if (el.isContentEditable) return true;
+  const role = el.getAttribute?.('role');
+  if (role === 'button' || role === 'switch' || role === 'slider' ||
+      role === 'menuitem' || role === 'option' || role === 'tab' ||
+      role === 'checkbox' || role === 'radio') return true;
+  if (el.closest?.('label')) return true;
+  // 祖先链上是否有真硬交互（处理 button 内部 span/svg 的情况）
+  return el.closest?.(
+    'button, input, textarea, select, a[href], [contenteditable="true"], ' +
+    '[role="button"], [role="switch"], [role="slider"], [role="menuitem"], ' +
+    '[role="option"], [role="tab"], [role="checkbox"], [role="radio"], label'
+  ) != null;
+}
+
+/**
+ * 容器内起点的"软屏蔽"：希望保护的容器内交互元素（结果区里的下拉、按钮、链接等）
+ * 容器外起点不参考此函数，让 sidebar/topbar 的空白区域能进入 outerPending。
+ */
+function isContainerInnerSkip(el) {
+  if (!el || el.nodeType !== 1) return false;
+  return el.closest?.('[data-drag-select-skip="true"]') != null;
+}
+
+/**
+ * 浏览器原生 drag 源：mousedown 时会触发原生 dragstart，必须 preventDefault
+ * 否则 sidebar 里的 logo/tree 图标、顶部 bar 的 logo 会被浏览器叼走拖拽
+ */
+function isNativeDragSource(el) {
+  if (!el || el.nodeType !== 1) return false;
+  if (el.tagName === 'IMG' || el.tagName === 'A') return true;
+  if (el.getAttribute?.('draggable') === 'true') return true;
+  // 祖先有 draggable=true 也算
+  return el.closest?.('img, a, [draggable="true"]') != null;
+}
+
+/**
+ * 判断当前是否有 Modal/Popover 打开
+ */
+function isModalOpen() {
+  return !!(
+    document.querySelector('.chakra-modal__overlay') ||
+    document.querySelector('[data-chakra-modal]') ||
+    document.querySelector('[role="dialog"][aria-modal="true"]')
+  );
+}
 
 export function useDragSelect({
   containerRef,
@@ -177,28 +238,54 @@ export function useDragSelect({
   const handleMouseDown = useCallback((e) => {
     if (!enabled || e.button !== 0) return;
     if (!containerRef.current) return;
-    if (!containerRef.current.contains(e.target)) return;
 
-    // 忽略 input / textarea / contenteditable / 按钮等交互控件
-    const tag = e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') return;
-    if (e.target.closest?.('[data-drag-select-skip="true"]')) return;
+    // Modal 打开时完全不启动框选
+    if (isModalOpen()) return;
 
-    // 排除"点在滚动条上"的情况（容器是 overflow:auto 时，滚动条也是容器一部分，
-    // mousedown 落在滚动条不应启动框选/视为空白点击）
+    // 硬交互控件（input/button/a[href]/contenteditable/...）任何起点都不拦截
+    if (isHardInteractive(e.target)) return;
+
+    // 排除"点在滚动条上"的情况
     const container = containerRef.current;
     if (e.target === container) {
       const rect = container.getBoundingClientRect();
-      // 鼠标 x 落在内容区右侧（垂直滚动条）或 y 落在底部（水平滚动条）→ 不处理
       if (e.clientX > rect.left + container.clientWidth) return;
       if (e.clientY > rect.top + container.clientHeight) return;
     }
 
+    // 判断起点是否在结果容器内（用于区分 paint vs rect）
+    const isInContainer = container.contains(e.target);
+
+    if (!isInContainer) {
+      // 容器外起点（顶部 bar / 左侧 sidebar / 其它空白）：仅记录坐标，不激活 stateRef
+      // 等 mousemove 超过 OUTER_DRAG_THRESHOLD 后才正式启动 rect 模式。
+      // 不参考 data-drag-select-skip：那只针对容器内的小范围保护。
+      stateRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        isActive: false,
+        outerPending: true,
+        mode: null,
+        startedInsideCard: false,
+        baseSet: new Set(),
+        paintedIds: new Set(),
+        paintMode: 'add',
+      };
+
+      // 关键：起点是 IMG / A / [draggable=true] 时，浏览器会立刻触发原生 dragstart
+      // 必须 preventDefault 否则用户拖动 logo/icon 时被浏览器原生拖拽叼走，
+      // 从而看不到我们的选择矩形。preventDefault 不会影响后续 click。
+      if (isNativeDragSource(e.target)) {
+        e.preventDefault();
+      }
+      return; // 不干预其他事件处理
+    }
+
+    // 容器内起点：保留原有 data-drag-select-skip 视觉隔离区行为
+    if (isContainerInnerSkip(e.target)) return;
+
     const insideCard = isInsideCard(e.target);
     const baseSet = new Set(baseSelection || []);
-
-    // 决定 paint 子模式：起点卡片已选中 → 拖拽过程是"减选"；未选中 → "加选"
-    // 在 mousedown 即可决定（避免到 mousemove 时 baseSelection 已被中间状态污染）
     let paintMode = 'add';
     if (insideCard) {
       const startCard = findCardFromEl(e.target);
@@ -211,15 +298,15 @@ export function useDragSelect({
       startX: e.clientX,
       startY: e.clientY,
       isActive: true,
-      mode: null, // 等到 move 超过阈值再决定 'rect' | 'paint'
+      outerPending: false,
+      mode: null,
       startedInsideCard: insideCard,
       baseSet,
       paintedIds: new Set(),
       paintMode,
     };
 
-    // 仅在空白处主动 preventDefault，避免文本选区与原生选高亮干扰
-    // 卡片内允许默认行为（让点击事件链工作）
+    // 容器内非卡片区域 preventDefault 阻止文本选区
     if (!insideCard) {
       e.preventDefault();
     }
@@ -227,6 +314,51 @@ export function useDragSelect({
 
   const handleMouseMove = useCallback((e) => {
     const st = stateRef.current;
+
+    // [Round 4 修复 A] mousemove 入口 e.buttons === 0 卫生检查
+    // 真因：日志确认 mouseup 偶尔会丢失（React listener 重装空窗期吞了事件 / 或浏览器异常）
+    //   导致 outerPending=true 残留 → 下次纯移动鼠标累积位移误激活 rect。
+    // 防御：只要鼠标无任何按键按下，强制清理状态并退出。
+    // 仅在我们处于"有状态"时干预，避免误伤完全空闲的 mousemove。
+    if (e.buttons === 0 && (st.outerPending || st.isActive)) {
+      st.outerPending = false;
+      st.isActive = false;
+      st.mode = null;
+      st.paintedIds = new Set();
+      setIsDragging(false);
+      setSelectionRect(null);
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
+      if (autoScrollRef.current) {
+        cancelAnimationFrame(autoScrollRef.current);
+        autoScrollRef.current = null;
+      }
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      return;
+    }
+
+    // 容器外待激活状态：检查是否超过外部阈值
+    if (st.outerPending && !st.isActive) {
+      const dx = e.clientX - st.startX;
+      const dy = e.clientY - st.startY;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= OUTER_DRAG_THRESHOLD) {
+        // 正式激活为 rect 模式，全新选择
+        st.isActive = true;
+        st.outerPending = false;
+        st.mode = 'rect';
+        st.baseSet = new Set(); // 从容器外发起 = 全新选择
+        setIsDragging(true);
+        document.body.style.userSelect = 'none';
+        document.body.style.webkitUserSelect = 'none';
+      }
+      // 未超阈值则什么都不做（让其他 hook 正常工作）
+      if (!st.isActive) return;
+    }
+
     if (!st.isActive) return;
 
     const dx = e.clientX - st.startX;
@@ -236,10 +368,12 @@ export function useDragSelect({
     // 未达拖拽阈值：不做任何事，留给 click 处理
     if (st.mode === null && dist < DRAG_THRESHOLD) return;
 
-    // 第一次越过阈值：决定模式
+    // 第一次越过阈值：决定模式（仅容器内起点走这里）
     if (st.mode === null) {
       st.mode = st.startedInsideCard ? 'paint' : 'rect';
       setIsDragging(true);
+      document.body.style.userSelect = 'none';
+      document.body.style.webkitUserSelect = 'none';
 
       // paint 模式：把"起始卡片"立刻应用（确保用户拖过即选/即取消）
       if (st.mode === 'paint') {
@@ -283,6 +417,15 @@ export function useDragSelect({
 
   const handleMouseUp = useCallback((e) => {
     const st = stateRef.current;
+
+    // 容器外待激活状态（没超过阈值的单击）→ 静默清理
+    if (st.outerPending) {
+      st.outerPending = false;
+      st.isActive = false;
+      st.mode = null;
+      return;
+    }
+
     if (!st.isActive) return;
 
     const wasDragging = st.mode !== null;
@@ -291,6 +434,8 @@ export function useDragSelect({
     st.isActive = false;
     st.mode = null;
     setIsDragging(false);
+    document.body.style.userSelect = '';
+    document.body.style.webkitUserSelect = '';
     setSelectionRect(null);
 
     if (autoScrollRef.current) {
@@ -319,24 +464,82 @@ export function useDragSelect({
     }
   }, [containerRef, isInsideCard]);
 
-  // 全局监听 mousemove/mouseup
+  // 全局监听 mousedown/mousemove/mouseup/dragstart
   useEffect(() => {
     if (!enabled) return;
+    const onDown = (e) => handleMouseDown(e);
     const onMove = (e) => handleMouseMove(e);
     const onUp = (e) => handleMouseUp(e);
+    // 兜底阻断浏览器原生 dragstart：当我们处于 outerPending 或 isActive 时，
+    // 任何浏览器自发的拖拽（IMG/A/draggable=true 等）都会先经过这里被压制。
+    // 仅在 hook 状态为"待激活/已激活"时干预，避免误伤其它正常拖拽（如外部文件拖入）。
+    const onDragStart = (e) => {
+      const st = stateRef.current;
+      if (st && (st.outerPending || st.isActive)) {
+        e.preventDefault();
+      }
+    };
+
+    // [Round 4 修复 C] 异常路径兜底重置
+    // 真因：mouseup 偶尔会丢失（React 重渲染中 listener 重装空窗 / 浏览器异常）。
+    // 兜底：监听 pointercancel / window.blur / document.mouseleave / visibilitychange，
+    //   只要 hook 处于"有状态"就强制重置。
+    const safetyReset = () => {
+      const st = stateRef.current;
+      if (!st || (!st.outerPending && !st.isActive)) return;
+      st.outerPending = false;
+      st.isActive = false;
+      st.mode = null;
+      st.paintedIds = new Set();
+      setIsDragging(false);
+      setSelectionRect(null);
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
+      if (autoScrollRef.current) {
+        cancelAnimationFrame(autoScrollRef.current);
+        autoScrollRef.current = null;
+      }
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
+    const onPointerCancel = () => safetyReset();
+    const onWindowBlur = () => safetyReset();
+    const onDocMouseLeave = (e) => {
+      // 仅当鼠标真的离开 document（而非进入子元素）时才触发
+      // mouseleave 事件没有冒泡，注册到 document 上时 e.relatedTarget==null 表示离开窗口
+      if (!e.relatedTarget && !e.toElement) safetyReset();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') safetyReset();
+    };
+
+    document.addEventListener('mousedown', onDown, true); // capture phase to beat other handlers
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+    document.addEventListener('dragstart', onDragStart, true);
+    document.addEventListener('pointercancel', onPointerCancel, true);
+    window.addEventListener('blur', onWindowBlur);
+    document.addEventListener('mouseleave', onDocMouseLeave);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
+      document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('dragstart', onDragStart, true);
+      document.removeEventListener('pointercancel', onPointerCancel, true);
+      window.removeEventListener('blur', onWindowBlur);
+      document.removeEventListener('mouseleave', onDocMouseLeave);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       if (autoScrollRef.current) cancelAnimationFrame(autoScrollRef.current);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
-  }, [enabled, handleMouseMove, handleMouseUp]);
+  }, [enabled, handleMouseDown, handleMouseMove, handleMouseUp]);
 
   return {
     isDragging,
     selectionRect,
-    handleMouseDown,
+    // handleMouseDown no longer returned — registered via document listener
   };
 }

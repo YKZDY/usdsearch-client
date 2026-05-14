@@ -250,6 +250,7 @@ const zh = {
   noResultsMessage: "未找到结果。请尝试调整搜索词或配置。",
   resultsFound: "找到 {count} 个结果",
   resultsTotalCount: "共 {count} 个资产",
+  resultShortageHint: "已请求 {requested} 条，当前过滤条件下仅找到 {actual} 条。可尝试关闭「仅含预览」或调整格式过滤获取更多结果。",
   copyAllUrls: "复制所有 URL",
   copySelectedUrls: "复制选中的 URL",
   // === NEW CARD INTERACTION: Multi-select mode ===

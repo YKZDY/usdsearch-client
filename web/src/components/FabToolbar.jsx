@@ -231,6 +231,8 @@ function FabToolbar({
             onRemoveCategory={titleBarProps?.onRemoveCategory}
             imageSearchActive={titleBarProps?.imageSearchActive || false}
             resultCount={resultCount}
+            isResultShortage={titleBarProps?.isResultShortage || false}
+            userLimit={titleBarProps?.userLimit || 0}
             scoreRange={(() => {
               if (!showScores || !Array.isArray(results) || results.length === 0) return null;
               const scores = results.map(r => r?.score ?? 0).filter(s => s > 0);

@@ -1476,9 +1476,9 @@ const App = () => {
         <LanguageProvider>
         <ChakraProvider theme={theme}>
             {/* === LM CUSTOMIZATION: Fab-style top bar START === */}
-            <Box 
-                w="100%" 
-                h="72px" 
+            <Box
+                w="100%"
+                h="72px"
                 bg="transparent"
                 borderBottom="1px solid rgba(255,255,255,0.05)"
                 position="sticky"
@@ -1486,6 +1486,7 @@ const App = () => {
                 zIndex={1100}
                 backdropFilter="blur(12px)"
                 backgroundColor="rgba(16,16,20,0.85)"
+                data-drag-select-skip="true"
             >
                 <Flex h="100%" alignItems="center" px={6} gap={4}>
                     {/* 左侧：仅 Logo（移除标题文字和版本号，Fab 风格） */}

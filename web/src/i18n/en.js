@@ -250,6 +250,7 @@ const en = {
   noResultsMessage: "No results found. Try adjusting your search terms or configuration.",
   resultsFound: "{count} results found",
   resultsTotalCount: "{count} assets in total",
+  resultShortageHint: "Requested {requested} items, but only {actual} match current filters. Try disabling 'Preview only' or adjusting format filters for more results.",
   copyAllUrls: "Copy All URLs",
   copySelectedUrls: "Copy Selected URLs",
   // === NEW CARD INTERACTION: Multi-select mode ===

@@ -157,3 +157,14 @@
   outline: 2px solid rgba(255, 210, 48, 0.6);
   outline-offset: 1px;
 }
+
+/* ── 过采样不足提示 info icon ── */
+.results-title-shortage-hint {
+  cursor: help;
+  color: rgba(255, 210, 48, 0.7);
+  transition: color 0.15s ease;
+  flex-shrink: 0;
+}
+.results-title-shortage-hint:hover {
+  color: rgba(255, 210, 48, 1);
+}

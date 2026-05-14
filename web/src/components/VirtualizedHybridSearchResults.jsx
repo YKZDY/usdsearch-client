@@ -929,7 +929,7 @@ const VirtualizedHybridSearchResults = ({
     }
   }, [isMultiSelectMode, onEmptyAreaClick]);
 
-  const { isDragging, selectionRect, handleMouseDown } = useDragSelect({
+  const { isDragging, selectionRect } = useDragSelect({
     containerRef: scrollContainerRef,
     items: results,
     getItemId,
@@ -1039,7 +1039,6 @@ const VirtualizedHybridSearchResults = ({
           itemWidth={gridSize === "S" ? 140 : 280}
           gap={viewMode === "grid" ? (gridSize === "S" ? 8 : 16) : 16}
           scrollContainerRef={scrollContainerRef}
-          onMouseDown={handleMouseDown}
           style={{ userSelect: isDragging ? 'none' : 'auto' }}
         />
         {/* Drag selection rectangle overlay */}

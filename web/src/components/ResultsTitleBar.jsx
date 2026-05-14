@@ -56,6 +56,9 @@ function ResultsTitleBar({
   // === v6 新增：计数与分数区间内嵌到 Header 行 ===
   resultCount = 0,
   scoreRange = null, // { min: number, max: number } | null
+  // === 过采样不足提示 ===
+  isResultShortage = false,
+  userLimit = 0,
 }) {
   const hasQuery = !!(committedQuery && committedQuery.trim());
   const hasCategory = !!(categoryTag && categoryTag.trim());
@@ -136,6 +139,11 @@ function ResultsTitleBar({
           <AnimatedCount value={resultCount} />
         </span>
         {countParts[1] || ''}
+        {/* [calvingu 2026-05-14 Round4] shortage 提示已下线 —
+            现在 oversample factor 保底 2.0 + 自适应降级，绝大多数场景都能凑齐 userLimit；
+            切换 limit 时短暂闪现的黄色 ⚠️ 影响体验。如需重新启用，恢复下面被注释的 JSX 即可。
+            isResultShortage / userLimit 入参保留，便于 console 调试用。 */}
+        {/* {isResultShortage && (...)} — 已禁用 */}
       </span>
 
       {/* 可选分数区间 */}

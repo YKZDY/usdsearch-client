@@ -1004,7 +1004,7 @@ const HybridSearchResults = ({
     onBatchSelection?.(newSet);
   }, [onBatchSelection]);
 
-  const { isDragging, selectionRect, handleMouseDown } = useDragSelect({
+  const { isDragging, selectionRect } = useDragSelect({
     containerRef: scrollContainerRef,
     items: results,
     getItemId,
@@ -1060,7 +1060,6 @@ const HybridSearchResults = ({
         overflowY="auto"
         position="relative"
         ref={scrollContainerRef}
-        onMouseDown={handleMouseDown}
         style={{ userSelect: isDragging ? 'none' : 'auto' }}
       >
         {viewMode === "grid" ? (

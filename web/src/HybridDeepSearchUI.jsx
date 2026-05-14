@@ -96,6 +96,7 @@ import { useNucleusTree } from "./hooks/useNucleusTree";
 // === LM CUSTOMIZATION: Search/Tag decoupling — 搜索请求反腐层 ===
 import buildSearchPayload from "./utils/buildSearchPayload";
 import { isNoisePath } from "./utils/pathFilters";
+import { getApiLimit } from "./utils/oversample";
 
 
 // === LM CUSTOMIZATION: Copy Deploy Fix START ===
@@ -443,26 +444,38 @@ const HybridDeepSearchUI = () => {
   // === LM CUSTOMIZATION: Sort state ===
   const [sortBy, setSortBy] = useState('relevance');
 
-  // === LM CUSTOMIZATION: 统一可见结果数组 ===
+  // === LM CUSTOMIZATION: 统一可见结果数组 + 过采样截断 ===
   // visibleResults = 用户实际看到的卡片对应的 hits。所有计数 / 路径树徽章 / 卡片列表
   // 必须使用同一个 visibleResults，避免「共 0 个资产」但路径树徽章却显示 3 这种不一致。
-  // 过滤链：results → tag AND 过滤 → showOnlyWithPreviews ? thumbnail 过滤 : 全收 → noise 过滤。
+  // 过滤链：results → tag AND 过滤 → showOnlyWithPreviews ? thumbnail 过滤 : 全收 → noise 过滤 → 过采样截断。
   //
   // [calvingu 2026-05] noise 过滤：剥掉 .thumbs / .system / __pycache__ 这类系统/缓存
   // 路径下的 hit。必须放在过滤链末尾，且与 usePathSuggestions / nucleusListingService
   // 共用同一份 isNoisePath 规则，保证：
   //   visibleResults.length === Σ pathTree[*].deepCount   （根级求和）
   //   visibleResults.length === 顶部 "X 个资产" 文案数字
-  const visibleResults = useMemo(() => {
+  // userLimit: 使用 DEFAULT_SEARCH_PARAMS.limit 作为初始值，后续由 URL/用户切换更新
+  const [userLimit, setUserLimit] = useState(DEFAULT_SEARCH_PARAMS.limit);
+
+  const { visibleResults, isResultShortage } = useMemo(() => {
     const base = showOnlyWithPreviews
       ? tagFilteredResults.filter(item => item?.thumbnail_exists === true)
       : tagFilteredResults;
-    return base.filter(item => {
+    const filtered = base.filter(item => {
       const raw = item?.source?.path || item?.source?.base_key || item?.source?.url || '';
       if (!raw) return true; // 没路径信息的不过滤（保守）
       return !isNoisePath(String(raw));
     });
-  }, [tagFilteredResults, showOnlyWithPreviews]);
+
+    // 过采样截断：过滤后结果可能超过用户请求的 limit（因为过采样请求了更多）
+    const truncated = filtered.length > userLimit ? filtered.slice(0, userLimit) : filtered;
+    const shortage = truncated.length < userLimit && tagFilteredResults.length > 0;
+
+    return {
+      visibleResults: truncated,
+      isResultShortage: shortage,
+    };
+  }, [tagFilteredResults, showOnlyWithPreviews, userLimit]);
 
   // pathTree 用 visibleResults 聚合，确保节点徽章数字 == 该路径下实际可见卡片数
   const { tree: pathTree } = usePathSuggestions(visibleResults, { liveTree });
@@ -811,6 +824,12 @@ const HybridDeepSearchUI = () => {
 
   // Search parameters (legacy filters)
   const [searchParams, setSearchParams] = useState({ ...DEFAULT_SEARCH_PARAMS });
+
+  // 同步 userLimit 与 searchParams.limit（userLimit 提前声明以供 visibleResults useMemo 使用）
+  useEffect(() => {
+    const newLimit = parseInt(searchParams.limit) || DEFAULT_SEARCH_PARAMS.limit;
+    setUserLimit(newLimit);
+  }, [searchParams.limit]);
 
   // Helper function to check if backend is S3
   const isS3Backend = (backendString) => {
@@ -1745,7 +1764,13 @@ const HybridDeepSearchUI = () => {
     // Trigger image search using the asset URL
     // We'll use the vector_queries with the asset URL instead of base64
     const requestBody = {
-      limit: parseInt(currentSearchParams.limit),
+      limit: getApiLimit(
+        parseInt(currentSearchParams.limit),
+        {
+          showOnlyWithPreviews,
+          fileExtensionExclude: currentSearchParams.file_extension_exclude || '',
+        }
+      ),
       return_images: true,
       return_metadata: true,
       return_vision_generated_metadata: true,
@@ -1776,6 +1801,17 @@ const HybridDeepSearchUI = () => {
         if (!isNaN(num)) requestBody[key] = num; else delete requestBody[key];
       }
     });
+
+    // === [calvingu 2026-05-13] limit 鲁棒覆盖 (Similar search 路径) ===
+    // 与主搜索同根 bug：spread currentSearchParams 会用原始 limit 覆盖过采样值。
+    // 在 fetch 前最后一次显式赋值兜底。
+    requestBody.limit = getApiLimit(
+      parseInt(currentSearchParams.limit),
+      {
+        showOnlyWithPreviews,
+        fileExtensionExclude: currentSearchParams.file_extension_exclude || '',
+      }
+    );
 
     // Clear existing results and start loading
     setIsLoading(true);
@@ -1862,7 +1898,7 @@ const HybridDeepSearchUI = () => {
       .finally(() => {
         setIsLoading(false);
       });
-  }, [apiUrl, getHeaders, serializeToURL, handleSearchComplete, toast, t]);
+  }, [apiUrl, getHeaders, serializeToURL, handleSearchComplete, toast, t, showOnlyWithPreviews]);
 
   // Image handling
   const handleFileChange = useCallback((e) => {
@@ -2059,7 +2095,13 @@ const HybridDeepSearchUI = () => {
       // Build the V3 API request
       const requestBody = {
         // Basic search parameters
-        limit: parseInt(currentSearchParams.limit),
+        limit: getApiLimit(
+          parseInt(currentSearchParams.limit),
+          {
+            showOnlyWithPreviews,
+            fileExtensionExclude: currentSearchParams.file_extension_exclude || '',
+          }
+        ),
         return_images: true,
         return_metadata: true,
         return_vision_generated_metadata: true,
@@ -2075,7 +2117,15 @@ const HybridDeepSearchUI = () => {
         } : {
           // 无搜索词：浏览全部产品模式（仅靠 file_extension_include 获取所有正常资产）
           ...(currentImage ? { scoring_config: currentHybridConfig } : {}),
-          file_extension_include: 'uasset,fbx',
+          // [calvingu 2026-05-14 Round3] 默认 include 仅在用户未设时生效
+          //   原因：之前硬编码 'uasset,fbx' 会在 spread 之后被用户的 include 覆盖
+          //   （后写覆盖前写）—— 但因为 file_extension_include 之前在 clientOnlyFields
+          //   不会发后端，导致硬编码值 'uasset,fbx' 始终生效，用户筛选 .png/.jpg 完全无效。
+          //   现在 file_extension_include 会发后端，spread 顺序也保证用户的会覆盖默认值。
+          //   保留默认值是为了：用户清空 include 时，浏览模式仍只展示 uasset/fbx 主资产（避免一上来就堆满 jpg/png 缩略图）。
+          ...(currentSearchParams.file_extension_include
+            ? {} // 用户已设 include → 由 spread 自然带上，不用默认
+            : { file_extension_include: 'uasset,fbx' }),
         }),
         
         // Vector queries (for image and text-to-vector search)
@@ -2131,12 +2181,17 @@ const HybridDeepSearchUI = () => {
         ...Object.fromEntries(
           Object.entries(currentSearchParams).filter(([key, value]) => {
             if (value === "" || value === null || value === undefined) return false;
-            // 仅 file_name/exclude_file_name/精度阈值 不发后端（后端不支持或做精确匹配导致0结果）
-            // 其他字段（file_extension_exclude 等）后端能正确处理，继续发送
+            // [calvingu 2026-05-14 Round3] file_extension_include/exclude 改为发后端
+            //   原因：之前列入 clientOnlyFields → 后端按"无任何 ext 限制"返回 →
+            //   样本量不变，客户端只能在固定样本里二次过滤，导致：
+            //   - 浏览模式下后端硬编码 'uasset,fbx' 始终生效，用户改 include 无效
+            //   - 用户切换 .png/.jpg 筛选 → 客户端样本里没 png/jpg → 0 结果
+            //   Similar search 路径（~1805 行）一直全发包含 ext 字段，所以后端是支持的。
             const clientOnlyFields = [
+              'limit', // limit 已由 getApiLimit 过采样计算，不要从 searchParams 覆盖
               'file_name', 'exclude_file_name', 'similarity_threshold', 'cutoff_threshold',
               'file_size_greater_than', 'file_size_less_than',
-              'file_extension_include', 'file_extension_exclude',
+              // 'file_extension_include', 'file_extension_exclude', // ← 已移出，发给后端真正过滤
               'created_after', 'created_before', 'modified_after', 'modified_before',
               'created_by', 'exclude_created_by', 'modified_by', 'exclude_modified_by',
               'search_path', 'exclude_search_path', 'search_in_scene', 'filter_url_regexp',
@@ -2170,6 +2225,18 @@ const HybridDeepSearchUI = () => {
         delete requestBody.file_extension_exclude;
       }
 
+      // === [calvingu 2026-05-13] limit 鲁棒覆盖 (位置无关) ===
+      // 防御 spread 顺序 / clientOnlyFields 漏项 / webpack 缓存等历史踩坑：
+      // 在 fetch 前最后一次显式赋值，确保 requestBody.limit === 过采样后的 apiLimit。
+      // 任何上面的 spread / Object.fromEntries 都不会再覆盖这一行。
+      requestBody.limit = getApiLimit(
+        parseInt(currentSearchParams.limit),
+        {
+          showOnlyWithPreviews,
+          fileExtensionExclude: currentSearchParams.file_extension_exclude || '',
+        }
+      );
+
       const response = await fetch(`${apiUrl}/search_hybrid`, {
         method: "POST",
         headers: getHeaders(),
@@ -2193,9 +2260,20 @@ const HybridDeepSearchUI = () => {
       }
 
       const data = await response.json();
-      
+
       // Handle V3 response format
       const hits = data.hits || data || [];
+
+      // [Oversample Shortage 告警] 仅在过采样后 hits 仍凑不齐 userLimit 时打 warn，
+      // 用于提示开发者把 oversample.js 的 BACKEND_RECALL_COMPENSATION 调高。
+      // 平时不打日志，避免污染控制台。
+      const _userLimit = parseInt(currentSearchParams.limit);
+      if (hits.length < _userLimit && (data.total || 0) > _userLimit * 2) {
+        console.warn(
+          `⚠️ [Oversample Shortage] hits (${hits.length}) < userLimit (${_userLimit})，data.total=${data.total}。` +
+          ' 建议把 oversample.js 的 BACKEND_RECALL_COMPENSATION 再调高。'
+        );
+      }
 
       // === LM CUSTOMIZATION: 客户端过滤（后端暂不支持筛选参数执行） ===
       const filteredHits = (() => {
@@ -2385,7 +2463,7 @@ const HybridDeepSearchUI = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [apiUrl, getHeaders, serializeToURL, handleSearchComplete, toast, t]);
+  }, [apiUrl, getHeaders, serializeToURL, handleSearchComplete, toast, t, showOnlyWithPreviews]);
 
   const handleFilterChange = useCallback((e) => {
     const { name, value } = e.target;
@@ -2621,9 +2699,11 @@ const HybridDeepSearchUI = () => {
     categoryTag,
     categoryLabel,
     imageSearchActive: !!imageBase64,
+    isResultShortage,
+    userLimit,
     onRemoveQuery: onRemoveCommittedQuery,
     onRemoveCategory: onRemoveCategoryTag,
-  }), [committedQuery, categoryTag, categoryLabel, imageBase64, onRemoveCommittedQuery, onRemoveCategoryTag]);
+  }), [committedQuery, categoryTag, categoryLabel, imageBase64, isResultShortage, userLimit, onRemoveCommittedQuery, onRemoveCategoryTag]);
 
   // Memoized active filter count for sidebar badge
   const activeFilterCount = useMemo(() => {

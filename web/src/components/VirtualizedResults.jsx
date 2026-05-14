@@ -35,7 +35,6 @@ const VirtualizedResults = ({
   itemWidth = 280,
   gap = 16,
   scrollContainerRef,
-  onMouseDown,
   ...props
 }) => {
   const [scrollTop, setScrollTop] = useState(0);
@@ -193,7 +192,6 @@ const VirtualizedResults = ({
       height={containerHeight}
       overflowY="auto"
       onScroll={handleScroll}
-      onMouseDown={onMouseDown}
       position="relative"
       {...props}
     >
