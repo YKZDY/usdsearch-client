@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>SSO Bridge — Debug</title>
+    <style>
+      :root {
+        --brand: #FFD230;
+        --bg: #0d0d10;
+        --panel: rgba(28, 28, 32, 0.85);
+        --border: rgba(255, 210, 48, 0.35);
+        --text: #fff;
+        --text-secondary: rgba(255, 255, 255, 0.65);
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; height: 100%; }
+      body {
+        background: radial-gradient(ellipse at top, #1a1a20 0%, #0d0d10 60%);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        min-height: 100vh;
+      }
+      .panel {
+        max-width: 560px;
+        width: 100%;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 28px;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+      }
+      h1 {
+        margin: 0 0 4px 0;
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--brand);
+      }
+      .subtitle {
+        margin: 0 0 20px 0;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        font-size: 14px;
+      }
+      .row:first-of-type { border-top: none; }
+      .label { color: var(--text-secondary); flex: 0 0 110px; }
+      .value { color: var(--text); word-break: break-all; }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #888;
+        flex: 0 0 auto;
+      }
+      .status-dot.ok { background: #4caf50; box-shadow: 0 0 8px rgba(76, 175, 80, 0.6); }
+      .status-dot.warn { background: #ff9800; }
+      .status-dot.err { background: #f44336; }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 20px;
+        flex-wrap: wrap;
+      }
+      button {
+        font: inherit;
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      button:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.32);
+      }
+      button.primary {
+        background: var(--brand);
+        color: #1a1a1a;
+        border-color: var(--brand);
+        font-weight: 600;
+      }
+      button.primary:hover {
+        background: #ffe066;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      button:focus-visible {
+        outline: 2px solid var(--brand);
+        outline-offset: 2px;
+      }
+      .hint {
+        margin-top: 16px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.6;
+      }
+      code {
+        background: rgba(255, 255, 255, 0.08);
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-family: "SF Mono", Consolas, Menlo, monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="panel" role="main">
+      <h1 id="title">SSO Bridge — Debug</h1>
+      <p class="subtitle" id="subtitle">
+        Fallback page used when nginx <code>sub_filter</code> injection is unavailable.
+      </p>
+
+      <div class="row">
+        <span class="status-dot" id="dot-status" aria-hidden="true"></span>
+        <span class="label" id="label-status">Status</span>
+        <span class="value" id="val-status">Detecting token…</span>
+      </div>
+      <div class="row">
+        <span class="status-dot" id="dot-opener" aria-hidden="true"></span>
+        <span class="label" id="label-opener">Opener</span>
+        <span class="value" id="val-opener">—</span>
+      </div>
+      <div class="row">
+        <span class="status-dot" id="dot-token" aria-hidden="true"></span>
+        <span class="label" id="label-token">Token</span>
+        <span class="value" id="val-token">—</span>
+      </div>
+
+      <div class="actions">
+        <button id="btn-copy" class="primary" disabled>Copy token</button>
+        <button id="btn-recheck">Re-check</button>
+        <button id="btn-close">Close window</button>
+      </div>
+
+      <p class="hint" id="hint">
+        Tip: open this page from the main app's SSO popup. After SAML login, the
+        token will be sent back via <code>postMessage</code> automatically.
+      </p>
+    </main>
+
+    <script src="./post-token.js"></script>
+    <script>
+      (function () {
+        'use strict';
+        var lang = (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+        var I18N = {
+          en: {
+            title: 'SSO Bridge — Debug',
+            subtitle: 'Fallback page used when nginx sub_filter injection is unavailable.',
+            labelStatus: 'Status',
+            labelOpener: 'Opener',
+            labelToken: 'Token',
+            stateDetecting: 'Detecting token…',
+            stateSent: 'Token sent back to main app',
+            stateTimeout: 'Token detection timed out',
+            stateNoOpener: 'Direct visit detected — bridge stays idle',
+            stateInvalid: 'Token format invalid',
+            openerNone: 'No opener (direct visit)',
+            tokenNone: 'No token in localStorage yet',
+            btnCopy: 'Copy token',
+            btnReCheck: 'Re-check',
+            btnClose: 'Close window',
+            copySuccess: 'Token copied to clipboard',
+            copyEmpty: 'No token to copy yet',
+            hint: 'Tip: open this page from the main app\u2019s SSO popup. After SAML login, the token will be sent back via postMessage automatically.'
+          },
+          zh: {
+            title: 'SSO 中转 — 调试模式',
+            subtitle: 'nginx sub_filter 注入不可用时的兜底调试页。',
+            labelStatus: '状态',
+            labelOpener: '父窗口',
+            labelToken: 'Token',
+            stateDetecting: '正在检测 Token…',
+            stateSent: 'Token 已发送给主页',
+            stateTimeout: 'Token 检测已超时',
+            stateNoOpener: '检测到直接访问 — 中转脚本保持静默',
+            stateInvalid: 'Token 格式无效',
+            openerNone: '无父窗口（直接访问）',
+            tokenNone: 'localStorage 中暂无 Token',
+            btnCopy: '复制 Token',
+            btnReCheck: '重新检测',
+            btnClose: '关闭窗口',
+            copySuccess: 'Token 已复制到剪贴板',
+            copyEmpty: '暂无可复制的 Token',
+            hint: '提示：通过主应用的 SSO 弹窗打开本页。SAML 登录完成后会自动通过 postMessage 把 token 回传给主页。'
+          }
+        };
+        function t(k) { return (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k; }
+
+        // Apply i18n to static labels
+        document.getElementById('title').textContent = t('title');
+        document.getElementById('subtitle').innerHTML = t('subtitle').replace(
+          'sub_filter', '<code>sub_filter</code>'
+        ).replace(
+          'sub_filter 注入', '<code>sub_filter</code> 注入'
+        );
+        document.getElementById('label-status').textContent = t('labelStatus');
+        document.getElementById('label-opener').textContent = t('labelOpener');
+        document.getElementById('label-token').textContent = t('labelToken');
+        document.getElementById('btn-copy').textContent = t('btnCopy');
+        document.getElementById('btn-recheck').textContent = t('btnReCheck');
+        document.getElementById('btn-close').textContent = t('btnClose');
+        document.getElementById('hint').innerHTML = t('hint').replace(
+          'postMessage', '<code>postMessage</code>'
+        );
+
+        // Status helpers
+        function setStatus(text, cls) {
+          document.getElementById('val-status').textContent = text;
+          var dot = document.getElementById('dot-status');
+          dot.className = 'status-dot ' + (cls || '');
+        }
+        function setOpener() {
+          var has = !!window.opener;
+          document.getElementById('val-opener').textContent = has
+            ? (document.referrer || 'window.opener present')
+            : t('openerNone');
+          document.getElementById('dot-opener').className = 'status-dot ' + (has ? 'ok' : 'warn');
+        }
+        function readToken() {
+          try { return localStorage.getItem('omni_access_token'); } catch (e) { return null; }
+        }
+        function maskToken(tok) {
+          if (!tok) return null;
+          if (tok.length <= 16) return tok;
+          return tok.slice(0, 12) + '…' + tok.slice(-6) + ' (' + tok.length + ' chars)';
+        }
+        function refreshTokenView() {
+          var tok = readToken();
+          var btn = document.getElementById('btn-copy');
+          var dot = document.getElementById('dot-token');
+          if (tok) {
+            document.getElementById('val-token').textContent = maskToken(tok);
+            dot.className = 'status-dot ok';
+            btn.disabled = false;
+          } else {
+            document.getElementById('val-token').textContent = t('tokenNone');
+            dot.className = 'status-dot warn';
+            btn.disabled = true;
+          }
+        }
+
+        // Initial render
+        setOpener();
+        if (!window.opener) {
+          setStatus(t('stateNoOpener'), 'warn');
+        } else {
+          setStatus(t('stateDetecting'), '');
+        }
+        refreshTokenView();
+
+        // Watch token changes (poll every 500ms; bridge script also polls 200ms but we keep light)
+        var tokenWatchTimer = setInterval(function () {
+          refreshTokenView();
+          // If bridge has fired (overlay shown by post-token.js), upgrade status
+          if (document.getElementById('__sso_bridge_overlay__')) {
+            setStatus(t('stateSent'), 'ok');
+          }
+        }, 500);
+        // Stop watching after 60s to avoid endless polling on idle pages
+        setTimeout(function () { clearInterval(tokenWatchTimer); }, 60 * 1000);
+
+        // Buttons
+        document.getElementById('btn-copy').addEventListener('click', function () {
+          var tok = readToken();
+          if (!tok) {
+            setStatus(t('copyEmpty'), 'warn');
+            return;
+          }
+          var done = function () { setStatus(t('copySuccess'), 'ok'); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(tok).then(done).catch(function () {
+              fallbackCopy(tok); done();
+            });
+          } else {
+            fallbackCopy(tok); done();
+          }
+        });
+        function fallbackCopy(text) {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+          document.body.removeChild(ta);
+        }
+        document.getElementById('btn-recheck').addEventListener('click', function () {
+          refreshTokenView();
+          setOpener();
+        });
+        document.getElementById('btn-close').addEventListener('click', function () {
+          try { window.close(); } catch (e) { /* ignore */ }
+        });
+      })();
+    </script>
+  </body>
+</html>

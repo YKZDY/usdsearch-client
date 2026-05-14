@@ -21,6 +21,12 @@ export const AUTH_STORAGE_KEYS = Object.freeze({
   apiKey: 'api_key',
   nucleusToken: 'nucleus_api_token', // 兼容旧版字段
   cleared: 'auth_cleared',
+  // SSO 相关 keys
+  ssoAccessToken: 'omni_access_token',
+  ssoRefreshToken: 'omni_refresh_token',
+  nucleusAccessToken: 'nucleus_access_token',
+  nucleusAccessTokenExpiry: 'nucleus_access_token_expiry',
+  nucleusRefreshToken: 'nucleus_refresh_token',
 });
 
 const ALL_VALUE_KEYS = [
@@ -44,7 +50,7 @@ export function getServerStorageKey(key, server) {
 /**
  * 读取当前 server 下已存的全部凭证字段（不做有效性校验）。
  * @param {string} [server]
- * @returns {{ username: string, password: string, apiKey: string, nucleusToken: string }}
+ * @returns {{ username: string, password: string, apiKey: string, nucleusToken: string, ssoToken: string }}
  */
 export function getStoredAuth(server) {
   return {
@@ -52,6 +58,7 @@ export function getStoredAuth(server) {
     password: localStorage.getItem(getServerStorageKey(AUTH_STORAGE_KEYS.password, server)) || '',
     apiKey: localStorage.getItem(getServerStorageKey(AUTH_STORAGE_KEYS.apiKey, server)) || '',
     nucleusToken: localStorage.getItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusToken, server)) || '',
+    ssoToken: localStorage.getItem(AUTH_STORAGE_KEYS.ssoAccessToken) || '',
   };
 }
 
@@ -61,9 +68,9 @@ export function getStoredAuth(server) {
  * @returns {boolean}
  */
 export function hasStoredCredentials(server) {
-  const { username, password, apiKey, nucleusToken } = getStoredAuth(server);
-  // username 单独有值（即便 password 为空）也视为有；与现有 useAuthGuard.js:50 行为一致
-  return !!(apiKey || nucleusToken || (username && username.trim()));
+  const { username, password, apiKey, nucleusToken, ssoToken } = getStoredAuth(server);
+  // SSO token 或传统凭证任意存在即视为有凭证
+  return !!(ssoToken || apiKey || nucleusToken || (username && username.trim()));
 }
 
 /**
@@ -99,6 +106,8 @@ function notifyAuthChanged() {
  */
 export function clearExpiredCredentials(server) {
   removeAllAuthValues(server);
+  // 同时清除 SSO JWT（可能已过期）
+  localStorage.removeItem(AUTH_STORAGE_KEYS.ssoAccessToken);
   // 关键：不写 cleared，否则下次启动会被 isUserCleared 跳过而无法自动登录
   notifyAuthChanged();
 }
@@ -127,6 +136,89 @@ export function persistNucleusToken(server, apiToken) {
   notifyAuthChanged();
 }
 
+// ─── SSO 相关方法 ─────────────────────────────────────────────────────────────
+
+/**
+ * 读取 SSO Token（omni_access_token）。
+ * SSO 登录成功后 Nucleus Auth 页面会将 JWT 写入 localStorage。
+ * @returns {string|null}
+ */
+export function getSSOToken() {
+  return localStorage.getItem(AUTH_STORAGE_KEYS.ssoAccessToken) || null;
+}
+
+/**
+ * SSO 登录成功后持久化所有必要的 token。
+ * 同时将永久 API Token 写入传统 key（兼容现有 Tag 功能的 3 层查找链）。
+ *
+ * @param {string} server 服务器标识（如 'nucleus' 或解析后的 host）
+ * @param {string} jwt SSO 获取的 JWT access_token
+ * @param {string} apiToken 通过 createApiToken 创建的永久 API Token
+ * @param {string} [resolvedHost] 解析后的真实主机名（如 'ov.qq.com'），供 Tag 服务 host-prefixed 查找
+ */
+export function persistSSOLogin(server, jwt, apiToken, resolvedHost) {
+  // 1. 保存原始 SSO JWT
+  localStorage.setItem(AUTH_STORAGE_KEYS.ssoAccessToken, jwt);
+
+  // 2. 永久 API Token（与 Device Flow 存储格式完全一致）
+  localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.username, server), '$omni-api-token');
+  localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.password, server), apiToken);
+
+  // 3. access_token 供 Tag WebSocket 使用
+  const expiryStr = String(Date.now() + 25 * 60 * 1000);
+  localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusAccessToken, server), jwt);
+  localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusAccessTokenExpiry, server), expiryStr);
+
+  // 4. 如果有独立的 host 前缀（如 server='nucleus' 但 host='ov.qq.com'），双写一份
+  if (resolvedHost && resolvedHost !== server) {
+    localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.username, resolvedHost), '$omni-api-token');
+    localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.password, resolvedHost), apiToken);
+    localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusAccessToken, resolvedHost), jwt);
+    localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusAccessTokenExpiry, resolvedHost), expiryStr);
+  }
+
+  // 5. 清除 auth_cleared 标记
+  localStorage.removeItem(getServerStorageKey(AUTH_STORAGE_KEYS.cleared, server));
+  if (resolvedHost && resolvedHost !== server) {
+    localStorage.removeItem(getServerStorageKey(AUTH_STORAGE_KEYS.cleared, resolvedHost));
+  }
+
+  notifyAuthChanged();
+}
+
+/**
+ * 清除所有 SSO 相关 token（登出时使用）。
+ * @param {string} [server]
+ * @param {string} [resolvedHost]
+ */
+export function clearSSOLogin(server, resolvedHost) {
+  // SSO JWT
+  localStorage.removeItem(AUTH_STORAGE_KEYS.ssoAccessToken);
+  localStorage.removeItem(AUTH_STORAGE_KEYS.ssoRefreshToken);
+
+  // server-prefixed keys
+  removeAllAuthValues(server);
+  localStorage.removeItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusAccessToken, server));
+  localStorage.removeItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusAccessTokenExpiry, server));
+  localStorage.removeItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusRefreshToken, server));
+
+  // host-prefixed keys
+  if (resolvedHost && resolvedHost !== server) {
+    removeAllAuthValues(resolvedHost);
+    localStorage.removeItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusAccessToken, resolvedHost));
+    localStorage.removeItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusAccessTokenExpiry, resolvedHost));
+    localStorage.removeItem(getServerStorageKey(AUTH_STORAGE_KEYS.nucleusRefreshToken, resolvedHost));
+  }
+
+  // 标记用户主动退出
+  localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.cleared, server), 'true');
+  if (resolvedHost && resolvedHost !== server) {
+    localStorage.setItem(getServerStorageKey(AUTH_STORAGE_KEYS.cleared, resolvedHost), 'true');
+  }
+
+  notifyAuthChanged();
+}
+
 export default {
   AUTH_STORAGE_KEYS,
   getServerStorageKey,
@@ -136,4 +228,7 @@ export default {
   clearExpiredCredentials,
   clearAuthByUserAction,
   persistNucleusToken,
+  getSSOToken,
+  persistSSOLogin,
+  clearSSOLogin,
 };

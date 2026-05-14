@@ -154,12 +154,40 @@ export const AUTH_CONFIG = {
   ENABLE_NUCLEUS_AUTH: process.env.REACT_APP_ENABLE_NUCLEUS_AUTH === "true",
   ENABLE_API_KEY_AUTH: process.env.REACT_APP_ENABLE_API_KEY_AUTH === "true",
   ENABLE_BASIC_AUTH: process.env.REACT_APP_ENABLE_BASIC_AUTH !== "false",
-  
+
   // Default values if provided
   DEFAULT_NUCLEUS_TOKEN: process.env.REACT_APP_DEFAULT_NUCLEUS_TOKEN || "",
   DEFAULT_API_KEY: process.env.REACT_APP_DEFAULT_API_KEY || "",
   DEFAULT_USERNAME: process.env.REACT_APP_DEFAULT_USERNAME || "",
   DEFAULT_PASSWORD: process.env.REACT_APP_DEFAULT_PASSWORD || "",
+
+  // SSO 登录页面 URL（弹窗打开的目标地址）
+  // 本地开发时走代理无效（浏览器导航不经过 proxy），需要指向真实服务器
+  // 生产部署时使用相对路径 /omni/auth/login（nginx 反代）
+  SSO_LOGIN_URL: process.env.REACT_APP_SSO_LOGIN_URL || "/omni/auth/login",
+
+  // === LM CUSTOMIZATION: SSO Bridge — postMessage origin 白名单与调试开关 START ===
+  // 原因：本地开发环境（localhost:3000）打开远程域 SSO 弹窗后，必须通过 postMessage
+  //       跨域回传 token；为防止恶意页面伪造消息，主页对收到的 message.origin 严格校验。
+  // 合入英伟达新版时：本块独立可移除（NVIDIA 原版无 SSO 弹窗 postMessage 通道）。
+  //
+  // 默认白名单：包含本地开发与已知部署域；可通过 env 追加（逗号分隔），自动与默认列表合并去重。
+  SSO_BRIDGE_TRUSTED_ORIGINS: (() => {
+    const defaults = [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "https://lightart-dev.woa.com",
+      "https://market.lightart-dev.woa.com",
+    ];
+    const extra = (process.env.REACT_APP_SSO_BRIDGE_TRUSTED_ORIGINS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return Array.from(new Set([...defaults, ...extra]));
+  })(),
+  // 调试开关：开启后输出每次轮询、每条 message、每次 origin 校验日志，便于本地联调定位
+  SSO_DEBUG: process.env.REACT_APP_SSO_DEBUG === "true",
+  // === LM CUSTOMIZATION: SSO Bridge END ===
 };
 
 // ============================================================

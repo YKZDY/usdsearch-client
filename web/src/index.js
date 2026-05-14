@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, {useState, useEffect, useRef, useMemo} from 'react';
+import React, {useState, useEffect, useRef, useMemo, useCallback} from 'react';
 import * as ReactDOMClient from 'react-dom/client';
 import {
     ChakraProvider,
@@ -62,12 +62,19 @@ import CategorySidebar from './components/CategorySidebar';
 // === LM CUSTOMIZATION: TopSearchBar START ===
 import TopSearchBar from './components/TopSearchBar';
 // === LM CUSTOMIZATION: TopSearchBar END ===
-import { apiUrl as defaultApiUrl, SERVER_MAPPING, defaultEmbeddingConfig, resolveNucleusHost, getDefaultServerKey } from "./config";
+import { apiUrl as defaultApiUrl, SERVER_MAPPING, defaultEmbeddingConfig, resolveNucleusHost, getDefaultServerKey, AUTH_CONFIG } from "./config";
 import GraphVisualization from "./Graph";
 import persistentCache from "./utils/persistentImageCache";
 import { useDeviceFlowAuth, getServerHttpsUrl, AuthStatus, createApiToken } from "./nucleus";
 // === LM CUSTOMIZATION: Auth Guard utils ===
-import { clearAuthByUserAction } from "./utils/authStorage";
+import { clearAuthByUserAction, getSSOToken, persistSSOLogin, clearSSOLogin } from "./utils/authStorage";
+// === LM CUSTOMIZATION: SSOPostMessage START ===
+// 原因：本地开发环境（localhost:3000）与 SSO 弹窗完成后落在的 lightart-dev.woa.com
+//       跨域，localStorage 互相隔离读不到 token；根据需求文档选型「postMessage
+//       跨域中转」方案，本项引入 createSSOBridge / buildSSOUrl 以接收跨域 token。
+// 合入英伟达新版时：本 import 块可直接移除（NVIDIA 原版无 SSO 弹窗 postMessage 通道）。
+import { createSSOBridge, buildSSOUrl } from "./utils/ssoBridge";
+// === LM CUSTOMIZATION: SSOPostMessage END ===
 
 // === LM CUSTOMIZATION: Theme START ===
 import theme, { LA } from './theme/laTheme';
@@ -273,175 +280,7 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
         }
     };
 
-    // === LM CUSTOMIZATION: 监听 auth-auto-device-flow 事件，自动启动 Device Flow ===
-    // 流程：
-    //  1) 收到事件 → 若用户已认证则忽略；否则标记 pendingAutoStart
-    //  2) 若 backend 已就绪且是 Nucleus 后端 → 立即启动
-    //  3) 否则等待 backend useEffect 链路探测完毕，再由下面的 effect 触发
-    useEffect(() => {
-        const handleAutoDeviceFlow = () => {
-            if (autoStartTriggeredRef.current) return;
-            // 已认证则无需重复启动
-            if (auth?.password || auth?.api_key) return;
-            pendingAutoStartRef.current = true;
-            // 如果 backend 已就绪且是 Nucleus 后端，立即启动
-            if (backend && isNucleusBackend(backend) && !isDeviceFlowOpen) {
-                autoStartTriggeredRef.current = true;
-                pendingAutoStartRef.current = false;
-                handleStartDeviceFlow();
-            }
-        };
-        window.addEventListener('auth-auto-device-flow', handleAutoDeviceFlow);
-        return () => window.removeEventListener('auth-auto-device-flow', handleAutoDeviceFlow);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [backend, auth, isDeviceFlowOpen]);
-
-    // 当 backend 延迟就绪后触发 pending 的自动启动
-    useEffect(() => {
-        if (!pendingAutoStartRef.current) return;
-        if (autoStartTriggeredRef.current) return;
-        if (!backend) return;
-        if (!isNucleusBackend(backend)) {
-            // 非 Nucleus 后端：清除 pending，不自动启动（用户手动填用户名密码）
-            pendingAutoStartRef.current = false;
-            return;
-        }
-        if (auth?.password || auth?.api_key) {
-            pendingAutoStartRef.current = false;
-            return;
-        }
-        autoStartTriggeredRef.current = true;
-        pendingAutoStartRef.current = false;
-        handleStartDeviceFlow();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [backend]);
-
-    // Device Flow 成功完成 / 用户关闭 → 复位允许下次 auth-auto-device-flow 再次触发
-    useEffect(() => {
-        if (!isDeviceFlowOpen) {
-            // Modal 关闭后等 1s 重置，避免同一流程内重复触发
-            const t = setTimeout(() => {
-                autoStartTriggeredRef.current = false;
-            }, 1000);
-            // 清除底部 toast 去重窗口
-            if (typeof window !== 'undefined') window.__authGuardActiveUntil = 0;
-            return () => clearTimeout(t);
-        }
-        // Device Flow Modal 打开时屏蔽底部 loginRequired toast（30s 窗口）
-        if (typeof window !== 'undefined') {
-            window.__authGuardActiveUntil = Date.now() + 30 * 1000;
-        }
-        return undefined;
-    }, [isDeviceFlowOpen]);
-
-    // Handle successful device flow authentication - create API token
-    useEffect(() => {
-        const createAndSaveApiToken = async () => {
-            if (deviceFlowAuth.authResult && deviceFlowAuth.authResult.status === AuthStatus.OK) {
-                try {
-                    // Create a long-lived API token using the access token
-                    const now = new Date();
-                    const timestamp = `${now.toISOString().split('T')[0]}_${now.getHours().toString().padStart(2, '0')}-${now.getMinutes().toString().padStart(2, '0')}-${now.getSeconds().toString().padStart(2, '0')}`;
-                    const tokenName = `USD-Search-${timestamp}`;
-                    
-                    toast({
-                        title: t('creatingApiToken'),
-                        description: t('pleaseWaitApiToken'),
-                        status: "info",
-                        duration: 3000,
-                    });
-                    
-                    // Pass null for expireAt to create a permanent token (no expiration)
-                    const apiTokenResult = await createApiToken(
-                        backend, 
-                        deviceFlowAuth.authResult.access_token, 
-                        tokenName, 
-                        null
-                    );
-                    
-                    // Set the API token as the password with $omni-api-token username
-                    const newAuth = { 
-                        ...auth, 
-                        username: '$omni-api-token',
-                        password: apiTokenResult.api_token 
-                    };
-                    setAuth(newAuth);
-                    
-                    // Save to localStorage
-                    localStorage.setItem(getServerStorageKey("username"), '$omni-api-token');
-                    localStorage.setItem(getServerStorageKey("password"), apiTokenResult.api_token);
-                    // [TagStorageKeyFix] Save tokens for tagging operations (API Token may lack write permissions)
-                    //
-                    // 双写两份 key —— 同时按 "selectedServer 原值"（兼容 AuthForm 其他读取路径）
-                    // 和 "resolveNucleusHost(selectedServer) 解析后的真实 host"（匹配 taggingService 优先级）
-                    // 写入。这样无论是 ?server=omniverse（原值 'omniverse' / 真实 host 'ov.qq.com'）还是
-                    // ?server=https://ov.qq.com（两者相等，跳过重复写），新用户/无痕模式下都能直接命中。
-                    //
-                    // 三个 setItem 包在同一 try 块连续执行，任一抛错则 console.error 但不中断登录流程
-                    // （token 已经写过的部分仍然有效，避免出现"有 token 没 expiry"的脏状态导致 preflight 误判）。
-                    try {
-                      const accessToken = deviceFlowAuth.authResult.access_token;
-                      const refreshTok  = deviceFlowAuth.authResult.refresh_token;
-                      const expiryStr   = String(Date.now() + 25 * 60 * 1000);
-
-                      // 原行为：按 selectedServer 原值前缀写入
-                      if (refreshTok) {
-                        localStorage.setItem(getServerStorageKey("nucleus_refresh_token"), refreshTok);
-                      }
-                      if (accessToken) {
-                        localStorage.setItem(getServerStorageKey("nucleus_access_token"), accessToken);
-                        localStorage.setItem(getServerStorageKey("nucleus_access_token_expiry"), expiryStr);
-                      }
-
-                      // 新增：按真实 host 解析结果再写一份（如 'ov.qq.com_nucleus_*'），让 service 优先级查找命中
-                      const aliasPrefix = (selectedServer || '').toString();
-                      const hostPrefix = resolveNucleusHost(selectedServer) || '';
-                      if (accessToken && hostPrefix && hostPrefix !== aliasPrefix) {
-                        if (refreshTok) {
-                          localStorage.setItem(`${hostPrefix}_nucleus_refresh_token`, refreshTok);
-                        }
-                        localStorage.setItem(`${hostPrefix}_nucleus_access_token`, accessToken);
-                        localStorage.setItem(`${hostPrefix}_nucleus_access_token_expiry`, expiryStr);
-                      }
-                    } catch (persistErr) {
-                      // 不中断登录流程：已写入的 key 仍可用，下次登录会再试一次
-                      // eslint-disable-next-line no-console
-                      console.error('[DeviceFlow] persist nucleus token failed', persistErr);
-                    }
-                    // Clear the auth_cleared flag since user just authenticated
-                    localStorage.removeItem(getServerStorageKey("auth_cleared"));
-                    window.dispatchEvent(new Event('storage'));
-                    window.dispatchEvent(new Event('auth-updated'));
-                    
-                    toast({
-                        title: t('authSuccessful'),
-                        description: t('createdApiToken', { username: deviceFlowAuth.authResult.username || 'user' }),
-                        status: "success",
-                        duration: 5000,
-                    });
-                    
-                    onDeviceFlowClose();
-                    deviceFlowAuth.reset();
-                } catch (error) {
-                    console.error("Failed to create API token:", error);
-                    
-                    toast({
-                        title: t('failedCreateApiToken'),
-                        description: error.message || t('unknownApiTokenError'),
-                        status: "error",
-                        duration: 8000,
-                    });
-                    
-                    // Reset the device flow but keep the modal open so user can retry
-                    deviceFlowAuth.reset();
-                }
-            }
-        };
-        
-        createAndSaveApiToken();
-    }, [deviceFlowAuth.authResult]);
-
-    // Handle device flow errors
+    // Handle device flow errors (保留，供 fallback 场景使用)
     useEffect(() => {
         if (deviceFlowAuth.error) {
             toast({
@@ -453,235 +292,608 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
         }
     }, [deviceFlowAuth.error]);
 
+    // === LM CUSTOMIZATION: DeviceFlowFallback START ===
+    // 原因：本地开发兜底登录路径——Device Flow 拿到 access_token 后，需要走和 SSO 完全
+    //       一致的后续流程：createApiToken（永久 API token）→ persistSSOLogin → 关闭 Modal
+    //       → 触发 auth-completed 事件，让 useAuthGuard 重放被拦截的请求。
+    // 与 SSO processToken 行为对齐，仅入口不同（Device Flow vs SSO 弹窗）。
+    // 合入英伟达新版时：移除整个 effect（NVIDIA 原版仅在 Modal 内显示成功，不做 createApiToken）。
+    const deviceFlowProcessedRef = useRef(false);
+    useEffect(() => {
+        const accessToken = deviceFlowAuth.authResult && deviceFlowAuth.authResult.access_token;
+        if (!accessToken || deviceFlowProcessedRef.current) return;
+        deviceFlowProcessedRef.current = true;
+
+        (async () => {
+            try {
+                const tokenName = `web-client-${Date.now()}`;
+                const serverArg = backend || selectedServer;
+                const apiTokenHost = resolveNucleusHost(serverArg) || serverArg;
+
+                let effectiveApiToken;
+                let isFallbackToken = false;
+                try {
+                    const apiTokenResult = await createApiToken(
+                        apiTokenHost,
+                        accessToken,
+                        tokenName,
+                        null // 永不过期
+                    );
+                    effectiveApiToken = apiTokenResult.api_token;
+                } catch (apiTokenError) {
+                    const isLocalDev = typeof window !== 'undefined' && (
+                        window.location.hostname === 'localhost' ||
+                        window.location.hostname === '127.0.0.1'
+                    );
+                    if (!isLocalDev) throw apiTokenError;
+                    // 本地开发降级：JWT 顶替永久 token
+                    console.warn('[DeviceFlow] createApiToken failed in local dev, fallback to JWT:', apiTokenError.message);
+                    effectiveApiToken = accessToken;
+                    isFallbackToken = true;
+                    toast({
+                        title: t('ssoLocalDevFallbackTitle') || '本地开发模式',
+                        description: t('ssoLocalDevFallbackDesc') || 'Discovery 服务不可达，已使用 JWT 作为临时凭证（约 8-24 小时有效）',
+                        status: 'warning',
+                        duration: 8000,
+                    });
+                }
+
+                const server = selectedServer || '';
+                const resolvedHost = resolveNucleusHost(server) || '';
+                persistSSOLogin(server, accessToken, effectiveApiToken, resolvedHost);
+
+                const newAuth = {
+                    ...auth,
+                    username: '$omni-api-token',
+                    password: effectiveApiToken,
+                };
+                setAuth(newAuth);
+
+                onDeviceFlowClose();
+                window.dispatchEvent(new CustomEvent('auth-completed'));
+
+                toast({
+                    title: t('authSuccess') || '登录成功',
+                    description: isFallbackToken
+                        ? (t('ssoLocalDevFallbackDesc') || '已使用 JWT 作为临时凭证')
+                        : (t('ssoLoginSuccessDesc') || '已创建永久 API Token'),
+                    status: 'success',
+                    duration: 4000,
+                });
+            } catch (err) {
+                deviceFlowProcessedRef.current = false; // 允许重试
+                console.error('[DeviceFlow] post-token processing failed:', err);
+                toast({
+                    title: t('authFailed') || '登录失败',
+                    description: err.message || String(err),
+                    status: 'error',
+                    duration: 6000,
+                });
+            }
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [deviceFlowAuth.authResult]);
+    // === LM CUSTOMIZATION: DeviceFlowFallback END ===
+
+    // === SSO 弹窗登录逻辑 ===
+    const [ssoLoading, setSsoLoading] = useState(false);
+    const [ssoError, setSsoError] = useState(null);
+    const ssoPollingRef = useRef(null);
+    const ssoWindowRef = useRef(null);
+    // === LM CUSTOMIZATION: SSOPostMessage START ===
+    // postMessage 通道句柄 / 双通道一次性锁 / 60s 兜底超时 / token 处理闭包引用
+    const ssoBridgeRef = useRef(null);
+    const ssoFiredRef = useRef(false);
+    const ssoTimeoutRef = useRef(null);
+    const ssoTokenProcessorRef = useRef(null);
+    // === LM CUSTOMIZATION: SSOPostMessage END ===
+
+    // 清理 SSO 轮询
+    const cleanupSSOPolling = useCallback(() => {
+        if (ssoPollingRef.current) {
+            clearInterval(ssoPollingRef.current);
+            ssoPollingRef.current = null;
+        }
+        // === LM CUSTOMIZATION: SSOPostMessage START ===
+        // 同步清理 postMessage 通道 + 兜底超时，避免内存泄漏与残留监听干扰下次登录
+        if (ssoBridgeRef.current) {
+            try { ssoBridgeRef.current.stop(); } catch (e) { /* ignore */ }
+            ssoBridgeRef.current = null;
+        }
+        if (ssoTimeoutRef.current) {
+            clearTimeout(ssoTimeoutRef.current);
+            ssoTimeoutRef.current = null;
+        }
+        ssoTokenProcessorRef.current = null;
+        // === LM CUSTOMIZATION: SSOPostMessage END ===
+    }, []);
+
+    // SSO 登录流程
+    const handleSSOLogin = useCallback(async () => {
+        setSsoError(null);
+        setSsoLoading(true);
+
+        // === LM CUSTOMIZATION: SSOPostMessage START ===
+        // 重置一次性锁，保证本轮登录两通道仅触发一次 token 处理
+        ssoFiredRef.current = false;
+        // === LM CUSTOMIZATION: SSOPostMessage END ===
+
+        // 打开 SSO 弹窗
+        // === LM CUSTOMIZATION: SSOPostMessage START ===
+        // 原原始 URL 仅使用 AUTH_CONFIG.SSO_LOGIN_URL；现需追加 opener_origin 参数，
+        // 供远程中转脚本识别主页 origin 并安全地 postMessage 回传 token。
+        const baseSsoUrl = AUTH_CONFIG.SSO_LOGIN_URL || '/omni/auth/login';
+        const ssoLoginUrl = buildSSOUrl(baseSsoUrl, window.location.origin);
+        // === LM CUSTOMIZATION: SSOPostMessage END ===
+        const ssoWindow = window.open(ssoLoginUrl, 'sso_login', 'width=500,height=600');
+        ssoWindowRef.current = ssoWindow;
+
+        if (!ssoWindow) {
+            setSsoError(t('ssoPopupBlocked') || t('popupBlocked') || '弹窗被浏览器拦截，请允许弹窗后重试');
+            setSsoLoading(false);
+            return;
+        }
+
+        // === LM CUSTOMIZATION: SSOPostMessage START ===
+        // 抽取 token 处理逻辑为闭包，localStorage 轮询 与 postMessage 通道共享。
+        // channel 参数仅用于调试日志，不影响业务逻辑。
+        const processToken = async (token, channel) => {
+            if (ssoFiredRef.current) {
+                if (AUTH_CONFIG.SSO_DEBUG) {
+                    // eslint-disable-next-line no-console
+                    console.log('[SSO]', 'token from', channel, 'arrived but already fired — ignored');
+                }
+                return;
+            }
+            ssoFiredRef.current = true;
+            if (ssoBridgeRef.current && typeof ssoBridgeRef.current.markFired === 'function') {
+                ssoBridgeRef.current.markFired();
+            }
+            cleanupSSOPolling();
+
+            // 关闭弹窗
+            if (ssoWindow && !ssoWindow.closed) {
+                try { ssoWindow.close(); } catch (e) { /* ignore */ }
+            }
+
+            try {
+                if (AUTH_CONFIG.SSO_DEBUG) {
+                    // eslint-disable-next-line no-console
+                    console.log('[SSO]', 'processing token via channel:', channel);
+                }
+                // 用 JWT 创建永久 API Token
+                toast({
+                    title: t('creatingApiToken') || '正在创建 API 令牌...',
+                    description: t('pleaseWaitApiToken') || '请稍候，正在创建永久 API 令牌',
+                    status: "info",
+                    duration: 3000,
+                });
+
+                const now = new Date();
+                const timestamp = `${now.toISOString().split('T')[0]}_${now.getHours().toString().padStart(2, '0')}-${now.getMinutes().toString().padStart(2, '0')}-${now.getSeconds().toString().padStart(2, '0')}`;
+                const tokenName = `USD-Search-SSO-${timestamp}`;
+
+                // === LM CUSTOMIZATION: SSO API Token host 解析 + 本地降级 START ===
+                // 原因 1：createApiToken 内部走 normalizeServerUrl（仅剥 omniverse:// 前缀，
+                //         不查 SERVER_MAPPING），若直接传 server key（如 "nucleus"）会被
+                //         原样丢给 DiscoverySearch → wss://nucleus/... → 报
+                //         "Failed to connect to the discovery service: nucleus"。
+                //         先用 resolveNucleusHost 把 key → 真实 host。
+                // 原因 2：本地开发 (localhost) 直连远程 Nucleus discovery（端口 3333 等）
+                //         会被公司 OA SSO 拦截重定向 → CORS 拒绝 → 永久 token 创建失败。
+                //         此时降级使用 JWT 顶替（短期可用 ~8-24h），供 fetch / Tag WebSocket
+                //         调用使用，本地联调不再被卡住。
+                // 合入英伟达新版时：本块独立可移除（NVIDIA 原版无 SSO 弹窗 + key 别名机制）。
+                const serverArg = backend || selectedServer;
+                const apiTokenHost = resolveNucleusHost(serverArg) || serverArg;
+                if (AUTH_CONFIG.SSO_DEBUG) {
+                    // eslint-disable-next-line no-console
+                    console.log('[SSO]', 'createApiToken host resolved:', { serverArg, apiTokenHost });
+                }
+
+                let effectiveApiToken;
+                let isFallbackToken = false;
+                try {
+                    const apiTokenResult = await createApiToken(
+                        apiTokenHost,
+                        token,
+                        tokenName,
+                        null // null = 永不过期
+                    );
+                    effectiveApiToken = apiTokenResult.api_token;
+                } catch (apiTokenError) {
+                    // 仅在本地开发场景下降级；生产环境（部署域名）失败仍报错以暴露真实问题
+                    const isLocalDev = typeof window !== 'undefined' && (
+                        window.location.hostname === 'localhost' ||
+                        window.location.hostname === '127.0.0.1'
+                    );
+                    if (!isLocalDev) {
+                        throw apiTokenError;
+                    }
+                    // 本地开发：用 JWT 顶替永久 token，给用户明确提示
+                    console.warn('[SSO] createApiToken failed in local dev, falling back to JWT:', apiTokenError.message);
+                    effectiveApiToken = token;
+                    isFallbackToken = true;
+                    toast({
+                        title: t('ssoLocalDevFallbackTitle') || '本地开发模式',
+                        description: t('ssoLocalDevFallbackDesc') || 'Discovery 服务不可达，已使用 JWT 作为临时凭证（约 8-24 小时有效）',
+                        status: 'warning',
+                        duration: 8000,
+                    });
+                }
+
+                // 持久化所有 token
+                const server = selectedServer || '';
+                const resolvedHost = resolveNucleusHost(server) || '';
+                persistSSOLogin(server, token, effectiveApiToken, resolvedHost);
+                // === LM CUSTOMIZATION: SSO API Token host 解析 + 本地降级 END ===
+
+                // 更新组件 auth state
+                const newAuth = {
+                    ...auth,
+                    username: '$omni-api-token',
+                    password: effectiveApiToken,
+                };
+                setAuth(newAuth);
+
+                // 解码 JWT 获取用户名
+                let username = 'user';
+                try {
+                    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+                    username = payload.sub || 'user';
+                } catch (e) { /* ignore */ }
+
+                toast({
+                    title: t('authSuccessful') || '认证成功！',
+                    description: isFallbackToken
+                        ? (t('createdJwtToken', { username }) || `已为 ${username} 登录（本地开发使用临时 JWT 凭证）。`)
+                        : (t('createdApiToken', { username }) || `已为 ${username} 创建永久 API 令牌。`),
+                    status: "success",
+                    duration: 5000,
+                });
+            } catch (error) {
+                console.error('[SSO] Failed to create API token:', error);
+                setSsoError(error.message || t('failedCreateApiToken') || '创建 API Token 失败，请重试');
+                toast({
+                    title: t('failedCreateApiToken') || '创建 API Token 失败',
+                    description: error.message || t('unknownApiTokenError') || '未知错误',
+                    status: "error",
+                    duration: 8000,
+                });
+            } finally {
+                setSsoLoading(false);
+            }
+        };
+        ssoTokenProcessorRef.current = processToken;
+
+        // 启动 postMessage 通道 bridge
+        const bridge = createSSOBridge({
+            trustedOrigins: AUTH_CONFIG.SSO_BRIDGE_TRUSTED_ORIGINS || [],
+            ssoWindowRef,
+            debug: AUTH_CONFIG.SSO_DEBUG,
+            onToken: ({ token }) => {
+                processToken(token, 'postMessage');
+            },
+            onTimeout: () => {
+                if (ssoFiredRef.current) return;
+                if (AUTH_CONFIG.SSO_DEBUG) {
+                    // eslint-disable-next-line no-console
+                    console.log('[SSO]', 'bridge reported timeout');
+                }
+                // 中转脚本超时仅提示；不主动结束 loading，交由 60s 兜底或用户手关弹窗。
+                toast({
+                    title: t('ssoTimeout') || '登录超时，请重试',
+                    status: 'warning',
+                    duration: 4000,
+                });
+            },
+            onError: (messageKey) => {
+                if (ssoFiredRef.current) return;
+                const description = (messageKey && t(messageKey)) || messageKey || '';
+                toast({
+                    title: t('error') || 'Error',
+                    description,
+                    status: 'error',
+                    duration: 5000,
+                });
+            },
+        });
+        bridge.start();
+        ssoBridgeRef.current = bridge;
+
+        // 60s 兜底超时：避免任何异常路径下按钮永久转圈
+        ssoTimeoutRef.current = setTimeout(() => {
+            if (ssoFiredRef.current) return;
+            if (AUTH_CONFIG.SSO_DEBUG) {
+                // eslint-disable-next-line no-console
+                console.log('[SSO]', 'safety timeout (60s) reached, aborting');
+            }
+            cleanupSSOPolling();
+            setSsoLoading(false);
+            toast({
+                title: t('ssoTimeoutLong') || t('ssoTimeout') || '登录超时',
+                status: 'error',
+                duration: 5000,
+            });
+        }, 60000);
+        // === LM CUSTOMIZATION: SSOPostMessage END ===
+
+        // 轮询 localStorage 检测 token（同域生产环境主通道 / postMessage 未生效时的兜底）
+        ssoPollingRef.current = setInterval(async () => {
+            const token = getSSOToken();
+
+            // 检查弹窗是否被用户手动关闭
+            if (ssoWindow.closed && !token) {
+                if (ssoFiredRef.current) return;
+                cleanupSSOPolling();
+                setSsoLoading(false);
+                if (AUTH_CONFIG.SSO_DEBUG) {
+                    // eslint-disable-next-line no-console
+                    console.log('[SSO]', 'popup closed by user before token arrival');
+                }
+                return;
+            }
+
+            if (token) {
+                // === LM CUSTOMIZATION: SSOPostMessage START ===
+                // 复用跨通道的 processToken（有一次性锁保护，不会与 postMessage 重复执行）
+                processToken(token, 'localStorage');
+                // === LM CUSTOMIZATION: SSOPostMessage END ===
+            }
+        }, 500);
+    }, [backend, selectedServer, auth, setAuth, toast, t, cleanupSSOPolling]);
+
+    // === LM CUSTOMIZATION: 监听 auth-auto-device-flow 事件，自动启动 SSO 登录 ===
+    // useAuthGuard 检测到无 token 时会派发此事件，改造后触发 SSO 弹窗
+    const ssoAutoTriggeredRef = useRef(false);
+    useEffect(() => {
+        const handleAutoAuth = () => {
+            if (ssoAutoTriggeredRef.current) return;
+            // 已认证则忽略
+            if (auth?.password || auth?.api_key) return;
+            ssoAutoTriggeredRef.current = true;
+            // 延迟触发避免页面还没完全渲染
+            setTimeout(() => {
+                handleSSOLogin();
+            }, 300);
+        };
+        window.addEventListener('auth-auto-device-flow', handleAutoAuth);
+        return () => window.removeEventListener('auth-auto-device-flow', handleAutoAuth);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [auth, handleSSOLogin]);
+
+    // SSO 登录认证后重置自动触发标记
+    useEffect(() => {
+        if (auth?.password) {
+            ssoAutoTriggeredRef.current = false;
+        }
+    }, [auth]);
+
+    // 组件卸载时清理
+    useEffect(() => {
+        return () => {
+            cleanupSSOPolling();
+        };
+    }, [cleanupSSOPolling]);
+
     return (
+        <>
         <VStack spacing={4} align="stretch">
-            <Box>
-                <FormLabel fontSize="sm" mb={2}>{t('authMethod')}</FormLabel>
-                <Select size="sm" value={authMethod} onChange={(e) => setAuthMethod(e.target.value)}>
-                    <option value="basic">{t('basicAuth')}</option>
-                    <option value="api_key">{t('apiKeyAuth')}</option>
-                </Select>
-            </Box>
-
-            {authMethod === 'api_key' && (
-                <Box>
-                    <FormLabel fontSize="sm">{t('apiKeyLabel')}</FormLabel>
-                    <Input
+            {auth.password ? (
+                /* === 已登录状态 === */
+                <VStack align="stretch" spacing={3}>
+                    <HStack spacing={2} align="center">
+                        <Box w={2} h={2} bg="#76b900" borderRadius="full" />
+                        <Text fontSize="sm" color="#76b900" fontWeight="medium">
+                            {t('authenticatedWithNucleus') || '已通过 Nucleus 认证'}
+                        </Text>
+                    </HStack>
+                    <Button
                         size="sm"
-                        type="password"
-                        value={auth.api_key}
-                        onChange={(e) => {
-                            const newAuth = { ...auth, api_key: e.target.value };
-                            setAuth(newAuth);
-                            // Save immediately
-                            localStorage.setItem(getServerStorageKey("api_key"), newAuth.api_key || "");
-                            window.dispatchEvent(new Event('storage'));
-                            window.dispatchEvent(new Event('auth-updated'));
+                        variant="outline"
+                        colorScheme="red"
+                        onClick={() => {
+                            const server = selectedServer || '';
+                            const resolvedHost = resolveNucleusHost(server) || '';
+                            clearSSOLogin(server, resolvedHost);
+                            setAuth({
+                                api_key: "",
+                                username: "",
+                                password: "",
+                            });
                         }}
-                        placeholder={t('enterApiKey')}
-                        borderColor={!auth.isAuthenticated && (!auth.api_key || auth.api_key === "") ? "red.300" : "inherit"}
-                        _hover={{ borderColor: !auth.isAuthenticated && (!auth.api_key || auth.api_key === "") ? "red.400" : "inherit" }}
-                        _focus={{ borderColor: !auth.isAuthenticated && (!auth.api_key || auth.api_key === "") ? "red.500" : "#FFD230" }}
-                    />
-                </Box>
+                    >
+                        {t('clearToken') || '退出登录'}
+                    </Button>
+                </VStack>
+            ) : (
+                /* === 未登录状态：SSO 登录按钮 === */
+                <VStack spacing={3} align="stretch">
+                    <Button
+                        size="md"
+                        bg="#FFD230"
+                        color="black"
+                        _hover={{ bg: "#F6C80F" }}
+                        _active={{ bg: "#D4A800" }}
+                        width="100%"
+                        onClick={handleSSOLogin}
+                        isLoading={ssoLoading}
+                        loadingText={t('ssoLoggingIn') || '登录中…'}
+                        leftIcon={<UnlockIcon />}
+                        fontWeight="semibold"
+                        borderRadius="md"
+                        py={5}
+                    >
+                        {t('ssoLoginButton') || 'Log in with SSO'}
+                    </Button>
+
+                    {/* === LM CUSTOMIZATION: DeviceFlowFallback START === */}
+                    {/* 原因：SSO 弹窗依赖与登录页同主域；本地开发 (localhost) 跨域 localStorage
+                              隔离导致 SSO 不可用。给本地开发提供 Device Flow 兜底入口，
+                              连接当前 backend (例如 ov.qq.com)，与原 NVIDIA 设备码登录路径一致。
+                       生产域 (market.lightart-dev.woa.com) 与 SSO 同主域，无需此入口，自动隐藏。
+                       合入英伟达新版时：本块可整体移除（NVIDIA 原版默认即 Device Flow） */}
+                    {(typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) && (
+                        <Button
+                            size="xs"
+                            variant="ghost"
+                            color="gray.400"
+                            _hover={{ color: 'gray.200', bg: 'whiteAlpha.100' }}
+                            onClick={handleStartDeviceFlow}
+                            isLoading={deviceFlowAuth.isLoading}
+                            loadingText={t('connectingToNucleus') || '正在连接 Nucleus 服务器...'}
+                            isDisabled={ssoLoading}
+                            aria-label={t('useDeviceFlowFallback') || '使用设备码登录（本地开发）'}
+                        >
+                            {t('useDeviceFlowFallback') || '使用设备码登录（本地开发）'}
+                        </Button>
+                    )}
+                    {/* === LM CUSTOMIZATION: DeviceFlowFallback END === */}
+
+                    {ssoError && (
+                        <Text fontSize="xs" color="red.400" textAlign="center">
+                            {ssoError}
+                        </Text>
+                    )}
+
+                    {ssoLoading && (
+                        <HStack justify="center" spacing={2}>
+                            <Box
+                                as="span"
+                                w={2}
+                                h={2}
+                                bg="#FFD230"
+                                borderRadius="full"
+                                animation="pulse 1.5s ease-in-out infinite"
+                            />
+                            <Text fontSize="xs" color="gray.400">
+                                等待 SSO 认证完成...
+                            </Text>
+                        </HStack>
+                    )}
+                </VStack>
             )}
+        </VStack>
 
-
-            {authMethod === 'basic' && (
-                <>
-                    {isNucleusBackend(backend) ? (
-                        <Box>
-                            {auth.password ? (
-                                <VStack align="stretch" spacing={2}>
-                                    <Text fontSize="sm" color="#FFD230">
-                                        {t('authenticatedWithNucleus')}
-                                    </Text>
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        colorScheme="red"
-                                        onClick={() => {
-                                            // === LM CUSTOMIZATION: 使用统一的用户主动清除工具函数 ===
-                                            const newAuth = { ...auth, username: '', password: '' };
-                                            setAuth(newAuth);
-                                            clearAuthByUserAction(selectedServer);
-                                        }}
+        {/* === LM CUSTOMIZATION: DeviceFlowFallback Modal START === */}
+        {/* 原因：仅在本地开发使用的兜底登录 Modal——显示 verification_uri / user_code，
+                 让用户复制 → 跳转 → 粘贴 → 完成，沿用 NVIDIA 原 Device Flow 流程。
+           合入英伟达新版时：可保留（NVIDIA 原版本身有此 Modal）；冲突时以本块为准。 */}
+        <Modal isOpen={isDeviceFlowOpen} onClose={onDeviceFlowClose} isCentered size="md">
+            <ModalOverlay backdropFilter="blur(2px)" />
+            <ModalContent>
+                <ModalHeader>{t('deviceFlowTitle') || 'Nucleus 设备码登录'}</ModalHeader>
+                <ModalCloseButton aria-label={t('close') || '关闭'} />
+                <ModalBody>
+                    {deviceFlowAuth.isLoading && (
+                        <Text fontSize="sm" color="gray.500">
+                            {t('connectingToNucleus') || '正在连接 Nucleus 服务器...'}
+                        </Text>
+                    )}
+                    {deviceFlowAuth.deviceFlowData && (
+                        <VStack align="stretch" spacing={4}>
+                            <Text fontSize="sm">
+                                {t('deviceFlowStep1') || '1. 在浏览器中打开下方链接：'}
+                            </Text>
+                            {/* === LM CUSTOMIZATION: DeviceFlowURLRewrite START === */}
+                            {/* 原因：Nucleus discovery 服务在某些部署下会返回带通配符的
+                                       verification_uri（如 http://*:3180/device）
+                                       —— 因为它不知道自己对外暴露的 host。
+                                       NVIDIA 原版做了 URL 重写：当 URI 含端口号时，
+                                       回退使用 https://{backend}/omni/auth/login/device。
+                               合入英伟达新版时：保留此重写逻辑（NVIDIA 原版同款行为）。 */}
+                            {(() => {
+                                const uri = deviceFlowAuth.deviceFlowData.verification_uri;
+                                let displayUrl = uri || (backend ? getServerHttpsUrl(backend) : '');
+                                if (uri && /:\d+/.test(uri) && backend) {
+                                    const serverHost = getServerHttpsUrl(backend).replace(/^https?:\/\//, '').split('/')[0];
+                                    displayUrl = `https://${serverHost}/omni/auth/login/device`;
+                                }
+                                return (
+                                    <Link
+                                        href={displayUrl}
+                                        isExternal
+                                        color="#FFD230"
+                                        fontWeight="semibold"
+                                        wordBreak="break-all"
                                     >
-                                        {t('clearToken')}
-                                    </Button>
-                                </VStack>
-                            ) : (
+                                        {displayUrl} <ExternalLinkIcon mx={1} />
+                                    </Link>
+                                );
+                            })()}
+                            {/* === LM CUSTOMIZATION: DeviceFlowURLRewrite END === */}
+                            <Text fontSize="sm">
+                                {t('deviceFlowStep2') || '2. 输入以下设备码：'}
+                            </Text>
+                            <HStack spacing={2}>
+                                <Box
+                                    flex="1"
+                                    bg="gray.700"
+                                    color="#FFD230"
+                                    px={4}
+                                    py={3}
+                                    borderRadius="md"
+                                    fontFamily="mono"
+                                    fontSize="2xl"
+                                    fontWeight="bold"
+                                    textAlign="center"
+                                    letterSpacing="widest"
+                                    userSelect="all"
+                                >
+                                    {deviceFlowAuth.deviceFlowData.user_code}
+                                </Box>
                                 <Button
                                     size="sm"
-                                    bg="#FFD230"
-                                    color="black"
-                                    _hover={{ bg: "#F6C80F" }}
-                                    width="100%"
-                                    onClick={handleStartDeviceFlow}
-                                    leftIcon={<UnlockIcon />}
+                                    variant="outline"
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(deviceFlowAuth.deviceFlowData.user_code);
+                                        toast({
+                                            title: t('copied') || '已复制',
+                                            status: 'success',
+                                            duration: 1500,
+                                        });
+                                    }}
+                                    aria-label={t('copyCode') || '复制设备码'}
                                 >
-                                    {t('getTokenFromNucleus')}
+                                    {t('copy') || '复制'}
                                 </Button>
-                            )}
-                        </Box>
-                    ) : (
-                        <>
-                            <Box>
-                                <FormLabel fontSize="sm">{t('username')}</FormLabel>
-                                <Input
-                                    size="sm"
-                                    value={auth.username}
-                                    onChange={(e) => {
-                                        const newAuth = { ...auth, username: e.target.value };
-                                        setAuth(newAuth);
-                                        // Save immediately
-                                        localStorage.setItem(getServerStorageKey("username"), newAuth.username || "");
-                                        window.dispatchEvent(new Event('storage'));
-                                        window.dispatchEvent(new Event('auth-updated'));
-                                    }}
-                                    placeholder={t('enterUsername')}
-                                    borderColor={!auth.isAuthenticated && (!auth.username || auth.username === "") ? "red.300" : "inherit"}
-                                    _hover={{ borderColor: !auth.isAuthenticated && (!auth.username || auth.username === "") ? "red.400" : "inherit" }}
-                                    _focus={{ borderColor: !auth.isAuthenticated && (!auth.username || auth.username === "") ? "red.500" : "#FFD230" }}
-                                />
-                                {isS3Backend(backend) && (
-                                    <Text fontSize="xs" color="gray.400" mt={1}>
-                                        {t('usernameHelp')}
+                            </HStack>
+                            <Text fontSize="xs" color="gray.500">
+                                {t('deviceFlowStep3') || '3. 在浏览器中完成登录后，本窗口会自动关闭。'}
+                            </Text>
+                            {deviceFlowAuth.isPolling && (
+                                <HStack spacing={2} justify="center">
+                                    <Box
+                                        as="span"
+                                        w={2}
+                                        h={2}
+                                        bg="#FFD230"
+                                        borderRadius="full"
+                                        animation="pulse 1.5s ease-in-out infinite"
+                                    />
+                                    <Text fontSize="xs" color="gray.400">
+                                        {t('waitingForLogin') || '等待用户授权...'}
                                     </Text>
-                                )}
-                            </Box>
-                            {isS3Backend(backend) ? null : (
-                            <Box>
-                                <FormLabel fontSize="sm">{t('password')}</FormLabel>
-                                <Input
-                                    size="sm"
-                                    type="password"
-                                    value={auth.password}
-                                    onChange={(e) => {
-                                        const newAuth = { ...auth, password: e.target.value };
-                                        setAuth(newAuth);
-                                        // Save immediately
-                                        localStorage.setItem(getServerStorageKey("password"), newAuth.password || "");
-                                        window.dispatchEvent(new Event('storage'));
-                                        window.dispatchEvent(new Event('auth-updated'));
-                                    }}
-                                    placeholder={t('enterPassword')}
-                                    borderColor={!auth.isAuthenticated && (!auth.password || auth.password === "") ? "red.300" : "inherit"}
-                                    _hover={{ borderColor: !auth.isAuthenticated && (!auth.password || auth.password === "") ? "red.400" : "inherit" }}
-                                    _focus={{ borderColor: !auth.isAuthenticated && (!auth.password || auth.password === "") ? "red.500" : "#FFD230" }}
-                                />
-                            </Box>
+                                </HStack>
                             )}
-                        </>
+                            <Text fontSize="xs" color="gray.500" textAlign="center">
+                                {(t('codeExpiresIn') || '代码将在 {minutes} 分钟后过期').replace(
+                                    '{minutes}',
+                                    String(Math.floor((deviceFlowAuth.deviceFlowData.expires_in || 900) / 60))
+                                )}
+                            </Text>
+                        </VStack>
                     )}
-                </>
-            )}
-
-            {/* <Box>
-                <HStack spacing={2} justify="space-between">
-                    <Text fontSize="xs" color="gray.600">
-                        Status: {auth.username ? "Basic auth set" :
-                                auth.api_key ? "API Key set" : "No authentication"}
-                    </Text>
-                    <Button size="xs" variant="ghost" colorScheme="red" onClick={() => {
-                        // Clear all auth for current server
-                        localStorage.removeItem(getServerStorageKey("api_key"));
-                        localStorage.removeItem(getServerStorageKey("username"));
-                        localStorage.removeItem(getServerStorageKey("password"));
-                        setAuth({
-                            api_key: "",
-                            username: "",
-                            password: "",
-                        });
-                        window.dispatchEvent(new Event('storage'));
-                    }}>
-                        Clear
+                </ModalBody>
+                <ModalFooter>
+                    <Button variant="ghost" size="sm" onClick={onDeviceFlowClose}>
+                        {t('cancel') || '取消'}
                     </Button>
-                </HStack>
-            </Box> */}
-
-            {/* Device Flow Modal */}
-            <Modal isOpen={isDeviceFlowOpen} onClose={() => { onDeviceFlowClose(); deviceFlowAuth.reset(); }} size="md">
-                <ModalOverlay />
-                <ModalContent>
-                    <ModalHeader>{t('authenticateWithNucleus')}</ModalHeader>
-                    <ModalCloseButton />
-                    <ModalBody>
-                        {deviceFlowAuth.isLoading && (
-                            <VStack spacing={4} py={4}>
-                                <Text>{t('connectingToNucleus')}</Text>
-                            </VStack>
-                        )}
-                        
-                        {deviceFlowAuth.deviceFlowData && !deviceFlowAuth.authResult && (
-                            <VStack spacing={4} py={4} align="stretch">
-                                <Text fontSize="sm" color="gray.300">
-                                    {t('deviceFlowInstructions')}
-                                </Text>
-                                
-                                <Box bg="#1C1D20" p={4} borderRadius="md" textAlign="center" border="1px solid #383838">
-                                    <Text fontSize="2xl" fontWeight="bold" letterSpacing="0.2em" color="#FFD230">
-                                        {deviceFlowAuth.deviceFlowData.user_code}
-                                    </Text>
-                                </Box>
-                                
-                                <VStack spacing={2}>
-                                    <Link 
-                                        href={(() => {
-                                            const uri = deviceFlowAuth.deviceFlowData.verification_uri;
-                                            // If verification_uri has a port (e.g., https://server:3180/...), use standard login URL instead
-                                            if (uri && /:\d+/.test(uri)) {
-                                                const serverHost = getServerHttpsUrl(backend).replace(/^https?:\/\//, '').split('/')[0];
-                                                return `https://${serverHost}/omni/auth/login/device`;
-                                            }
-                                            return uri || getServerHttpsUrl(backend);
-                                        })()} 
-                                        isExternal 
-                                        color="blue.400"
-                                    >
-                                        {t('openNucleusLoginPage')} <ExternalLinkIcon mx="2px" />
-                                    </Link>
-                                </VStack>
-                                
-                                {deviceFlowAuth.isPolling && (
-                                    <HStack justify="center" spacing={2}>
-                                        <Box 
-                                            as="span" 
-                                            w={2} 
-                                            h={2} 
-                                            bg="#FFD230" 
-                                            borderRadius="full"
-                                            animation="pulse 1.5s ease-in-out infinite"
-                                        />
-                                        <Text fontSize="sm" color="gray.400">
-                                            {t('waitingForCode')}
-                                        </Text>
-                                    </HStack>
-                                )}
-                                
-                                <Text fontSize="xs" color="gray.400" textAlign="center">
-                                    {t('codeExpiresIn', { minutes: Math.floor((deviceFlowAuth.deviceFlowData.expires_in || 900) / 60) })}
-                                </Text>
-                            </VStack>
-                        )}
-                        
-                        {deviceFlowAuth.error && (
-                            <VStack spacing={4} py={4}>
-                                <Text color="red.400">{deviceFlowAuth.error}</Text>
-                                <Button size="sm" onClick={handleStartDeviceFlow}>
-                                    {t('tryAgain')}
-                                </Button>
-                            </VStack>
-                        )}
-                    </ModalBody>
-                    <ModalFooter>
-                        <Button variant="ghost" onClick={() => { onDeviceFlowClose(); deviceFlowAuth.reset(); }}>
-                            {t('cancel')}
-                        </Button>
-                    </ModalFooter>
-                </ModalContent>
-            </Modal>
-        </VStack>
+                </ModalFooter>
+            </ModalContent>
+        </Modal>
+        {/* === LM CUSTOMIZATION: DeviceFlowFallback Modal END === */}
+        </>
     );
 };
 
