@@ -68,6 +68,19 @@ export default function useKeyboardShortcuts(params = {}) {
         return;
       }
 
+      // === LM CUSTOMIZATION: SelectionDrawer START ===
+      // 原因：方案 B（Windows 复选框模式）下 ESC 应优先关闭任何打开的 dialog
+      //       （包括 AssetDetailsDrawer / BatchTagModal / 各类 Modal），
+      //       第二次按 ESC 才清选中。这避免"按一次 ESC 同时关抽屉+清选中"。
+      // 合入英伟达新版时：保留本守卫，原版 V2 hook 没有此逻辑
+      if (isEsc) {
+        const anyDialog = typeof document !== 'undefined'
+          ? document.querySelector('[role="dialog"][aria-modal="true"]')
+          : null;
+        if (anyDialog) return;
+      }
+      // === LM CUSTOMIZATION: SelectionDrawer END ===
+
       if (isCtrlA && typeof selectVisible === 'function') {
         const now = Date.now();
         const isConsecutive = now - lastCtrlARef.current < 700;

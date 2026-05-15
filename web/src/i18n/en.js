@@ -366,6 +366,29 @@ const en = {
   hideAdvancedPanels: "Hide advanced panels",
   adminMode: "Admin mode",
   // === LM CUSTOMIZATION: detail-modal-revamp END ===
+  // === LM CUSTOMIZATION: details-drawer-i18n START ===
+  // Group A 任务 4：详情抽屉骨架专用 i18n keys
+  // 合入英伟达新版时：保留本块（NVIDIA 原版无详情抽屉）
+  detailsDrawerTitle: "Asset Details",
+  detailsDrawerClose: "Close details",
+  detailsDrawerCollapse: "Collapse details",
+  detailsDrawerExpand: "Expand details",
+  detailsDrawerPreviewPlaceholder: "[Preview — task 5]",
+  detailsDrawerMetadataPlaceholder: "[Metadata — task 5]",
+  detailsDrawerTagsSlot: "[Tags slot — Group B]",
+  detailsDrawerAdvancedSlot: "[Advanced panel slot — Group B]",
+  // Task 5: 5-section layout + action button copy
+  detailsDrawerMetaSize: "Size",
+  detailsDrawerMetaFormat: "Format",
+  detailsDrawerMetaModified: "Modified",
+  detailsDrawerMetaCreator: "Creator",
+  detailsDrawerMetaUnknown: "Unknown",
+  detailsDrawerCopyPath: "Copy path",
+  detailsDrawerOpenInOmniverse: "Open in Omniverse",
+  detailsDrawerDownload: "Download",
+  detailsDrawerEmptyHint: "Select an asset from the results",
+  detailsDrawerAdvancedTitle: "Advanced",
+  // === LM CUSTOMIZATION: details-drawer-i18n END ===
   details: "Details",
   property: "Property",
   etag: "ETag",
