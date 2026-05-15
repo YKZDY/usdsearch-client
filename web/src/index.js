@@ -1466,31 +1466,64 @@ const LanguageSwitcher = () => {
 // 顶栏"搜索设置"齿轮按钮抽出来作为独立内部组件，让 useTranslation() 能在 LanguageProvider 子树内合法调用
 // （App 组件本身没有调 useTranslation，无法直接在其 JSX 里使用 t）。
 // 点击后派发 CustomEvent('open-search-settings')，由 SearchSettingsPopover 监听并打开。
+// 4.6 增强：订阅 'hybrid-config-customized' 事件，在 hybridConfig 偏离默认时显示金色小圆点 Badge，
+//          状态可见性 / Badge 配色与 FilterPopoverButton 等其它筛选 badge 风格保持一致。
 // 合入英伟达新版时：整个组件 + JSX 调用都包在 LM 块里，删除时只需删本块和 JSX 调用处即可。
 const SearchSettingsTriggerButton = () => {
     const { t } = useTranslation();
-    const label = t('searchSettings') || 'Search settings';
+    const [hasCustom, setHasCustom] = useState(false);
+
+    useEffect(() => {
+        const handleCustom = (e) => {
+            const next = !!(e.detail && e.detail.isCustom);
+            setHasCustom((prev) => (prev === next ? prev : next));
+        };
+        window.addEventListener('hybrid-config-customized', handleCustom);
+        return () => window.removeEventListener('hybrid-config-customized', handleCustom);
+    }, []);
+
+    const labelBase = t('searchSettings') || 'Search settings';
+    const labelCustomized = t('searchSettingsCustomized') || 'Search settings (customized)';
+    const label = hasCustom ? labelCustomized : labelBase;
+
     return (
         <Tooltip label={label} placement="bottom" hasArrow>
-            <IconButton
-                size="md"
-                variant="ghost"
-                aria-label={label}
-                icon={<SettingsIcon boxSize="18px" />}
-                color="rgba(255,255,255,0.75)"
-                bg="rgba(255,255,255,0.04)"
-                border="1px solid rgba(255,255,255,0.08)"
-                borderRadius="999px"
-                h="40px"
-                w="40px"
-                ml={2}
-                flexShrink={0}
-                _hover={{ color: '#FFD230', bg: 'rgba(255,210,48,0.08)', borderColor: 'rgba(255,210,48,0.4)' }}
-                _active={{ bg: 'rgba(255,210,48,0.16)' }}
-                _focusVisible={{ boxShadow: '0 0 0 2px #FFD230' }}
-                transition="color 200ms ease, background 200ms ease, border-color 200ms ease"
-                onClick={() => window.dispatchEvent(new CustomEvent('open-search-settings'))}
-            />
+            <Box position="relative" display="inline-flex" ml={2} flexShrink={0}>
+                <IconButton
+                    size="md"
+                    variant="ghost"
+                    aria-label={label}
+                    icon={<SettingsIcon boxSize="18px" />}
+                    color={hasCustom ? '#FFD230' : 'rgba(255,255,255,0.75)'}
+                    bg={hasCustom ? 'rgba(255,210,48,0.10)' : 'rgba(255,255,255,0.04)'}
+                    border="1px solid"
+                    borderColor={hasCustom ? 'rgba(255,210,48,0.45)' : 'rgba(255,255,255,0.08)'}
+                    borderRadius="999px"
+                    h="40px"
+                    w="40px"
+                    _hover={{ color: '#FFD230', bg: 'rgba(255,210,48,0.16)', borderColor: 'rgba(255,210,48,0.6)' }}
+                    _active={{ bg: 'rgba(255,210,48,0.22)' }}
+                    _focusVisible={{ boxShadow: '0 0 0 2px #FFD230' }}
+                    transition="color 200ms ease, background 200ms ease, border-color 200ms ease"
+                    onClick={() => window.dispatchEvent(new CustomEvent('open-search-settings'))}
+                />
+                {hasCustom && (
+                    // 金色小圆点 Badge — 8×8 px，按钮右上角；
+                    // 不靠颜色单独传达信息（Tooltip 文案已说明 customized），可达性达标。
+                    <Box
+                        position="absolute"
+                        top="2px"
+                        right="2px"
+                        w="9px"
+                        h="9px"
+                        borderRadius="999px"
+                        bg="#FFD230"
+                        boxShadow="0 0 0 2px #1A1A1A, 0 0 6px rgba(255,210,48,0.6)"
+                        pointerEvents="none"
+                        aria-hidden
+                    />
+                )}
+            </Box>
         </Tooltip>
     );
 };

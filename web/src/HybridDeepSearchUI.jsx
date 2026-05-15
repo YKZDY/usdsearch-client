@@ -76,8 +76,12 @@ import AssetImage from "./components/AssetImage";
 // === LM CUSTOMIZATION: Fab Toolbar START ===
 import FabToolbar from "./components/FabToolbar";
 // === LM CUSTOMIZATION: Fab Toolbar END ===
+// === LM CUSTOMIZATION: Search Settings Popover START ===
+// 原因：C 组任务 3 — 顶栏齿轮按钮触发的搜索设置面板（搜索方法 / 每页结果数 / 去重 / Tag 权重 / 高级混合配置）
+// 合入英伟达新版时：保留这一行 import 和下方对应 JSX 区块即可
+import SearchSettingsPopover from "./components/SearchSettingsPopover";
+// === LM CUSTOMIZATION: Search Settings Popover END ===
 // === LM CUSTOMIZATION: Selection Mode Bar ===
-import SelectionModeBar from "./components/SelectionModeBar";
 // === LM CUSTOMIZATION: 全局空白点击退出多选（无涟漪反馈，依赖 Bar 自身淡出动画） ===
 import useExitMultiSelectOnEmptyClick from "./hooks/useExitMultiSelectOnEmptyClick";
 // === V2: 批量打标签工作流 ===
@@ -968,6 +972,20 @@ const HybridDeepSearchUI = () => {
 
   // URL serialization functions (memoized to stabilize handleFindSimilar reference)
   const serializedDefaultHybridConfig = useMemo(() => JSON.stringify(DEFAULT_HYBRID_CONFIG), []);
+
+  // === LM CUSTOMIZATION: SearchSettingsCustomBadge START ===
+  // 原因：C 组任务 4.6 — 顶栏齿轮按钮需要"Custom"小圆点提示用户当前有非默认配置；
+  //       但 hybridConfig state 在 HybridDeepSearchUI 内部，顶栏触发器在 index.js 里，
+  //       两者跨组件树。用 CustomEvent 单向广播是最小侵入解法。
+  // 合入英伟达新版时：保留本 useEffect。
+  useEffect(() => {
+    const isCustom = serializedHybridConfig !== serializedDefaultHybridConfig;
+    window.dispatchEvent(
+      new CustomEvent('hybrid-config-customized', { detail: { isCustom } }),
+    );
+  }, [serializedHybridConfig, serializedDefaultHybridConfig]);
+  // === LM CUSTOMIZATION: SearchSettingsCustomBadge END ===
+
   const serializeToURL = useCallback((backendOverride = null) => {
     const params = new URLSearchParams();
     
@@ -3280,6 +3298,21 @@ const HybridDeepSearchUI = () => {
               </Box>
             </Box>
             {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar crossfade END === */}
+            {/* === LM CUSTOMIZATION: Search Settings Popover START ===
+                 原因：C 组任务 3 — 从顶栏齿轮按钮触发的搜索设置面板。
+                 本身不占布局空间（fixed 定位 + isOpen 受控）；
+                 监听 CustomEvent('open-search-settings') 开启，与 FabToolbar 的视图设置 Popover 互斥。
+                 合入英伟达新版时：本区块整体保留。 */}
+            <SearchSettingsPopover
+              hybridConfig={hybridConfig}
+              onHybridConfigChange={setHybridConfig}
+              searchParams={searchParams}
+              setSearchParams={setSearchParams}
+              onTriggerSearch={triggerSearchFromToolbar}
+              defaultHybridConfig={DEFAULT_HYBRID_CONFIG}
+              defaultSearchParams={DEFAULT_SEARCH_PARAMS}
+            />
+            {/* === LM CUSTOMIZATION: Search Settings Popover END === */}
             <MemoizedResults
               results={visibleResults}
               showOnlyWithPreviews={false}

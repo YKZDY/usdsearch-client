@@ -429,17 +429,6 @@ function FabToolbar({
                     {tr('viewSettings', { en: 'View Settings', zh: '视图设置' })}
                   </Text>
 
-                  {/* 去重开关：搬到 SearchSettingsPopover；这里整段注释保留，方便 git 追溯与未来恢复
-                      <FormControl display="flex" alignItems="center" justifyContent="space-between">
-                        <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)" mb="0">
-                          {tr('removeDuplicates', { en: 'Remove duplicates', zh: '去重' })}
-                        </FormLabel>
-                        <Switch size="sm" colorScheme="yellow"
-                          isChecked={deduplicateByHash || false}
-                          onChange={onRemoveDuplicatesChange} />
-                      </FormControl>
-                  */}
-
                   {/* 仅预览 */}
                   <FormControl display="flex" alignItems="center" justifyContent="space-between">
                     <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)" mb="0">
@@ -494,68 +483,6 @@ function FabToolbar({
                       )}
                     </HStack>
                   </FormControl>
-
-                  {/* --- 以下为被迁移到 SearchSettingsPopover 的原本搜索类项 ——
-                       以 JSX 注释形式保留供未来参考；不使用 LM CUSTOMIZATION 标记以避免 grep 误计。
-                       外层的 ViewSettingsRefactor 标记块已覆盖本范围。
-                       <Divider borderColor="rgba(255,255,255,0.1)" />
-                       <Text fontSize="xs" fontWeight="600" color="rgba(255,255,255,0.6)" textTransform="uppercase" letterSpacing="0.5px">
-                         {tr('searchSettings', { en: 'Search Settings', zh: '搜索设置' })}
-                       </Text>
-                       <FormControl>
-                         <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)">
-                           {tr('resultsPerPage', { en: 'Results per page', zh: '每页结果数' })}
-                         </FormLabel>
-                         <HStack spacing={1} flexWrap="wrap">
-                           {[25, 50, 100, 250, 500, 1000].map(n => (
-                             <Button key={n} size="xs"
-                               variant={String(searchParams?.limit) === String(n) ? 'solid' : 'ghost'}
-                               colorScheme={String(searchParams?.limit) === String(n) ? 'yellow' : 'gray'}
-                               fontSize="11px" minW="40px" h="26px"
-                               onClick={() => {
-                                 setSearchParams(prev => ({ ...prev, limit: n }));
-                                 onTriggerSearch?.();
-                               }}
-                             >
-                               {n}
-                             </Button>
-                           ))}
-                         </HStack>
-                       </FormControl>
-                       <FormControl>
-                         <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)">
-                           {tr('searchMethod', { en: 'Search method', zh: '搜索方法' })}
-                         </FormLabel>
-                         <RadioGroup size="sm"
-                           value={searchParams?.embedding_knn_search_method || 'approximate'}
-                           onChange={(value) => {
-                             setSearchParams(prev => ({
-                               ...prev, embedding_knn_search_method: value,
-                             }));
-                             onTriggerSearch?.();
-                           }}>
-                           <HStack spacing={4}>
-                             <Radio value="exact" size="sm" colorScheme="yellow">
-                               <Text fontSize="xs" color="rgba(255,255,255,0.85)">{tr('exact', { en: 'Exact', zh: '精确' })}</Text>
-                             </Radio>
-                             <Radio value="approximate" size="sm" colorScheme="yellow">
-                               <Text fontSize="xs" color="rgba(255,255,255,0.85)">{tr('approximate', { en: 'Approx', zh: '近似' })}</Text>
-                             </Radio>
-                           </HStack>
-                         </RadioGroup>
-                       </FormControl>
-                       {onOpenHybridConfig && (
-                         <>
-                           <Divider borderColor="rgba(255,255,255,0.1)" />
-                           <Button size="sm" variant="ghost" color="rgba(255,255,255,0.6)"
-                             _hover={{ color: '#FFD230', bg: 'rgba(255,210,48,0.08)' }}
-                             onClick={onOpenHybridConfig}
-                             fontSize="xs" justifyContent="flex-start" px={0}>
-                             {tr('advancedHybridConfig', { en: 'Advanced Hybrid Search Config...', zh: '高级混合搜索配置...' })}
-                           </Button>
-                         </>
-                       )}
-                     --- 迁移保留区结束 --- */}
                 </VStack>
               </PopoverBody>
             </PopoverContent>

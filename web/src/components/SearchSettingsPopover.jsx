@@ -6,9 +6,15 @@
  *  - 内容分组（自上而下）：搜索方法 → 每页结果数 → 去重 → Tag 权重滑块 → 高级混合搜索配置（折叠）
  *  - 触发方式：监听 CustomEvent('open-search-settings')；并提供 onClose 通知关闭
  *
- * 当前阶段（4.2 骨架版）
- *  - 仅渲染框架与占位区；任务 5/6 会填充 TagWeightSlider + 搜索类项 + Accordion(HybridSearchConfig)
- *  - state 由父组件（HybridDeepSearchUI）通过 props 传入；Popover 自身只负责呈现
+ * 实装状态（v1 完整版，4.5c 完成）
+ *  - ✅ 5 块功能全接入：搜索方法 / 每页结果数 / 去重 / TagWeightSlider / HybridSearchConfig Accordion
+ *  - ✅ 重置按钮使用 useToast 反馈
+ *  - ✅ i18n 动态 fallback（tt() 包装）
+ *  - ⏳ 4.5d：HybridDeepSearchUI 挂载本组件 + 透传 props
+ *  - ⏳ 4.7：en.js / zh.js 补全 i18n key
+ *
+ * 状态责任
+ *  - state 由父组件（HybridDeepSearchUI）通过 props 传入；Popover 自身只负责呈现 + 调用 callbacks
  *
  * 视觉令牌
  *  - 复用 popoverContentSx（暗灰玻璃感 + 12px 圆角，与 FilterPopoverButton/FabToolbar 一致）
@@ -20,7 +26,7 @@
  *  - 不修改 HybridSearchConfig.jsx / TopSearchBar.jsx
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Box,
   Popover,
@@ -33,11 +39,26 @@ import {
   VStack,
   HStack,
   Button,
+  Divider,
+  FormControl,
+  FormLabel,
+  Switch,
+  RadioGroup,
+  Radio,
+  Accordion,
+  AccordionItem,
+  AccordionButton,
+  AccordionPanel,
+  AccordionIcon,
   useDisclosure,
   useBreakpointValue,
+  useToast,
 } from '@chakra-ui/react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { popoverContentSx } from './filters/FilterPopoverButton';
+import TagWeightSlider from './TagWeightSlider';
+import HybridSearchConfig from '../HybridSearchConfig';
+import { mapSliderToHybridConfig } from '../utils/searchWeightMap';
 
 // ---------------------------------------------------------------------------
 // 事件常量（顶栏触发器 / 视图设置互斥关闭都用同一组事件名）
@@ -57,24 +78,34 @@ export const SEARCH_SETTINGS_CLOSE_EVENT = 'close-search-settings';
  * 但保留 useDisclosure 的可用性以便未来切换到 anchor 模式。
  */
 function SearchSettingsPopover({
-  // 透传给 TagWeightSlider / 搜索类项的 state（任务 5/6 才用到，骨架阶段先收下不报错）
+  // 透传给 TagWeightSlider / 搜索类项的 state
   hybridConfig,
   onHybridConfigChange,
   searchParams,
   setSearchParams,
   onTriggerSearch,
-  // 默认值引用（任务 7 重置按钮用）
+  // 默认值引用（重置按钮用）
   defaultHybridConfig,
   defaultSearchParams,
   // 锚点（来自顶栏触发器的 ref，可选；若不给则用屏幕右上 fixed 定位）
   anchorRef,
 }) {
   const { t } = useTranslation();
+  const toast = useToast();
   const { isOpen, onOpen, onClose } = useDisclosure();
   const firstFocusRef = useRef(null);
 
-  // 响应式宽度：宽屏 420px，窄屏 90vw（不超出视口）
-  const popoverW = useBreakpointValue({ base: '90vw', md: '420px' });
+  // i18n fallback：t() 内部已 `|| key` 兜底，外层 `t(k) || fallback` 永远不生效
+  const tt = React.useCallback(
+    (key, fallback) => {
+      const v = t(key);
+      return v === key ? fallback : v;
+    },
+    [t],
+  );
+
+  // 响应式宽度：宽屏 440px，窄屏 90vw（不超出视口）
+  const popoverW = useBreakpointValue({ base: '90vw', md: '440px' });
 
   // -------------------------------------------------------------------------
   // 监听全局 open / close 事件（顶栏触发器 + 视图设置互斥）
@@ -107,7 +138,7 @@ function SearchSettingsPopover({
   }, [isOpen]);
 
   // -------------------------------------------------------------------------
-  // 重置：任务 7 完整实装；骨架阶段提供基础逻辑
+  // 重置：拉回完整默认（hybridConfig + searchParams）+ toast 提示
   // -------------------------------------------------------------------------
   const handleReset = () => {
     if (onHybridConfigChange && defaultHybridConfig) {
@@ -116,9 +147,69 @@ function SearchSettingsPopover({
     if (setSearchParams && defaultSearchParams) {
       setSearchParams({ ...defaultSearchParams });
     }
-    // 任务 7 会接 useToast 提示"已重置"
+    toast({
+      title: tt('settingsResetTitle', 'Settings reset'),
+      description: tt('settingsResetDesc', 'All search settings restored to default'),
+      status: 'info',
+      duration: 2000,
+      isClosable: true,
+      position: 'top',
+    });
     setTimeout(() => onTriggerSearch?.(), 50);
   };
+
+  // -------------------------------------------------------------------------
+  // TagWeightSlider commit 处理：把 0..100 映射成完整 hybridConfig 后写回
+  // -------------------------------------------------------------------------
+  const handleTagSliderCommit = React.useCallback(
+    (sliderValue) => {
+      if (!hybridConfig || !onHybridConfigChange) return;
+      const nextConfig = mapSliderToHybridConfig(sliderValue, hybridConfig);
+      onHybridConfigChange(nextConfig);
+      // 拖完立即触发搜索（用户期望：调 tag 权重 → 立刻看到结果变化）
+      setTimeout(() => onTriggerSearch?.(), 30);
+    },
+    [hybridConfig, onHybridConfigChange, onTriggerSearch],
+  );
+
+  // -------------------------------------------------------------------------
+  // 每页结果数 / 搜索方法 / 去重 — 改动后即刻触发搜索（与 FabToolbar 原行为一致）
+  // -------------------------------------------------------------------------
+  const handleLimitChange = React.useCallback(
+    (n) => {
+      setSearchParams?.((prev) => ({ ...(prev || {}), limit: n }));
+      setTimeout(() => onTriggerSearch?.(), 30);
+    },
+    [setSearchParams, onTriggerSearch],
+  );
+
+  const handleSearchMethodChange = React.useCallback(
+    (value) => {
+      setSearchParams?.((prev) => ({
+        ...(prev || {}),
+        embedding_knn_search_method: value,
+      }));
+      setTimeout(() => onTriggerSearch?.(), 30);
+    },
+    [setSearchParams, onTriggerSearch],
+  );
+
+  const handleDeduplicateChange = React.useCallback(
+    (e) => {
+      const checked = e.target.checked;
+      setSearchParams?.((prev) => ({
+        ...(prev || {}),
+        deduplicate_by_hash: checked,
+      }));
+      setTimeout(() => onTriggerSearch?.(), 30);
+    },
+    [setSearchParams, onTriggerSearch],
+  );
+
+  // 控件取值（带兜底）
+  const currentLimit = String(searchParams?.limit ?? '');
+  const currentMethod = searchParams?.embedding_knn_search_method || 'approximate';
+  const currentDedup = !!searchParams?.deduplicate_by_hash;
 
   if (!isOpen) return null;
 
@@ -159,27 +250,114 @@ function SearchSettingsPopover({
                   color="#ffffff"
                   letterSpacing="0.2px"
                 >
-                  {t('searchSettings') || 'Search Settings'}
+                  {tt('searchSettings', 'Search Settings')}
                 </Text>
               </HStack>
 
-              {/* 占位区（任务 5/6 填充：搜索方法 / 每页结果数 / 去重 / TagWeightSlider / Accordion HybridSearchConfig） */}
-              <Box
-                ref={firstFocusRef}
-                tabIndex={-1}
-                p={4}
-                borderRadius="8px"
-                bg="rgba(255,255,255,0.03)"
-                border="1px dashed rgba(255,255,255,0.1)"
-                _focus={{ outline: 'none', borderColor: 'rgba(255,210,48,0.4)' }}
-              >
-                <Text fontSize="12px" color="rgba(255,255,255,0.5)" lineHeight="1.6">
-                  {t('searchSettingsPlaceholder')
-                    || 'Tag weight slider, search method, results per page, advanced hybrid config — coming soon.'}
-                </Text>
-              </Box>
+              {/* ① 搜索方法（exact / approximate） */}
+              <FormControl>
+                <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)" mb={2}>
+                  {tt('searchMethod', 'Search method')}
+                </FormLabel>
+                <RadioGroup
+                  size="sm"
+                  value={currentMethod}
+                  onChange={handleSearchMethodChange}
+                >
+                  <HStack spacing={4}>
+                    <Radio ref={firstFocusRef} value="exact" size="sm" colorScheme="yellow">
+                      <Text fontSize="xs" color="rgba(255,255,255,0.85)">
+                        {tt('exact', 'Exact')}
+                      </Text>
+                    </Radio>
+                    <Radio value="approximate" size="sm" colorScheme="yellow">
+                      <Text fontSize="xs" color="rgba(255,255,255,0.85)">
+                        {tt('approximate', 'Approx')}
+                      </Text>
+                    </Radio>
+                  </HStack>
+                </RadioGroup>
+              </FormControl>
 
-              {/* 底部：重置按钮（骨架占位；任务 7 完善） */}
+              {/* ② 每页结果数（25/50/100/250/500/1000 快捷按钮组） */}
+              <FormControl>
+                <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)" mb={2}>
+                  {tt('resultsPerPage', 'Results per page')}
+                </FormLabel>
+                <HStack spacing={1} flexWrap="wrap">
+                  {[25, 50, 100, 250, 500, 1000].map((n) => {
+                    const active = currentLimit === String(n);
+                    return (
+                      <Button
+                        key={n}
+                        size="xs"
+                        variant={active ? 'solid' : 'ghost'}
+                        colorScheme={active ? 'yellow' : 'gray'}
+                        fontSize="11px"
+                        minW="40px"
+                        h="26px"
+                        onClick={() => handleLimitChange(n)}
+                        _focusVisible={{ boxShadow: '0 0 0 2px #FFD230' }}
+                      >
+                        {n}
+                      </Button>
+                    );
+                  })}
+                </HStack>
+              </FormControl>
+
+              {/* ③ 去重开关 */}
+              <FormControl display="flex" alignItems="center" justifyContent="space-between">
+                <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)" mb={0}>
+                  {tt('removeDuplicates', 'Remove duplicates')}
+                </FormLabel>
+                <Switch
+                  size="sm"
+                  colorScheme="yellow"
+                  isChecked={currentDedup}
+                  onChange={handleDeduplicateChange}
+                />
+              </FormControl>
+
+              <Divider borderColor="rgba(255,255,255,0.1)" />
+
+              {/* ④ Tag 匹配权重滑动条（C 组核心） */}
+              <TagWeightSlider
+                hybridConfig={hybridConfig}
+                onCommit={handleTagSliderCommit}
+              />
+
+              <Divider borderColor="rgba(255,255,255,0.1)" />
+
+              {/* ⑤ 高级混合搜索配置（Accordion 折叠，避免新手被复杂度淹没） */}
+              <Accordion allowToggle reduceMotion>
+                <AccordionItem border="none">
+                  <AccordionButton
+                    px={2}
+                    py={2}
+                    borderRadius="6px"
+                    _hover={{ bg: 'rgba(255,255,255,0.05)' }}
+                    _focusVisible={{ boxShadow: '0 0 0 2px #FFD230' }}
+                  >
+                    <Box flex={1} textAlign="left">
+                      <Text fontSize="xs" fontWeight="600" color="rgba(255,255,255,0.7)">
+                        {tt('advancedHybridConfig', 'Advanced hybrid config')}
+                      </Text>
+                    </Box>
+                    <AccordionIcon color="rgba(255,255,255,0.6)" />
+                  </AccordionButton>
+                  <AccordionPanel px={0} pt={3} pb={1}>
+                    {/* 复用既有 HybridSearchConfig；它内部已对 hybrid_text/image/tags/values 都有完整字段编辑 UI */}
+                    <HybridSearchConfig
+                      value={hybridConfig}
+                      onChange={onHybridConfigChange}
+                      isCollapsed={false}
+                    />
+                  </AccordionPanel>
+                </AccordionItem>
+              </Accordion>
+
+              {/* 底部：重置按钮（全面重置 hybridConfig + searchParams + toast 提示） */}
               <HStack justify="flex-end" pt={2} borderTop="1px solid rgba(255,255,255,0.06)">
                 <Button
                   size="xs"
@@ -190,7 +368,7 @@ function SearchSettingsPopover({
                   _hover={{ color: '#FFD230', bg: 'rgba(255,210,48,0.08)' }}
                   _focusVisible={{ boxShadow: '0 0 0 2px #FFD230' }}
                 >
-                  {t('resetToDefault') || 'Reset to default'}
+                  {tt('resetToDefault', 'Reset to default')}
                 </Button>
               </HStack>
             </VStack>
