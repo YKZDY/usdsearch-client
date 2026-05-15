@@ -208,6 +208,30 @@ const en = {
   exact: "Exact",
   approximate: "Approximate",
 
+  // === LM CUSTOMIZATION: SearchSettingsPopover i18n START ===
+  // Search Settings Popover (Group C: SearchSettingsPopover.jsx + TagWeightSlider.jsx)
+  // Reset / toast / customized state
+  resetToDefault: "Reset to default",
+  settingsResetTitle: "Settings reset",
+  settingsResetDesc: "All search settings restored to default",
+  searchSettingsCustomized: "Search settings (customized)",
+  // Tag matching weight slider
+  tagWeightLabel: "Tag matching weight",
+  tagWeightOff: "Off",
+  tagWeightLoose: "Loose",
+  tagWeightDefault: "Default",
+  tagWeightTagFav: "Tag-favored",
+  tagWeightStrict: "Strict",
+  tagWeightOffDesc: "Tag matching disabled — pure semantic search",
+  tagWeightLooseDesc: "Tags considered, but semantic results dominate",
+  tagWeightDefaultDesc: "Balanced — recommended for most queries",
+  tagWeightTagFavDesc: "Prefer tag matches over semantic similarity",
+  tagWeightStrictDesc: "Strict tag matching — non-tagged results filtered out",
+  tagWeightCustom: "Custom",
+  tagWeightCustomDesc: "Custom configuration (edit details in advanced hybrid config)",
+  tagWeightCustomTip: "Edit details in advanced hybrid config",
+  // === LM CUSTOMIZATION: SearchSettingsPopover i18n END ===
+
   // === HybridSearchConfig.jsx ===
   advancedHybridConfig: "Advanced Hybrid Search Configuration",
   textSearchFields: "Text Search Fields",

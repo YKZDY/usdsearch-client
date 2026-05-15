@@ -208,6 +208,30 @@ const zh = {
   exact: "精确",
   approximate: "近似",
 
+  // === LM CUSTOMIZATION: SearchSettingsPopover i18n START ===
+  // 搜索设置 Popover（C 组：SearchSettingsPopover.jsx + TagWeightSlider.jsx）
+  // 重置 / toast / 已自定义状态
+  resetToDefault: "重置为默认",
+  settingsResetTitle: "设置已重置",
+  settingsResetDesc: "所有搜索设置已恢复为默认值",
+  searchSettingsCustomized: "搜索设置（已自定义）",
+  // Tag 匹配权重滑动条
+  tagWeightLabel: "Tag 匹配权重",
+  tagWeightOff: "关闭",
+  tagWeightLoose: "宽松",
+  tagWeightDefault: "默认",
+  tagWeightTagFav: "偏向 Tag",
+  tagWeightStrict: "严格",
+  tagWeightOffDesc: "完全关闭 tag 匹配 —— 仅做语义搜索",
+  tagWeightLooseDesc: "考虑 tag，但语义结果占主导",
+  tagWeightDefaultDesc: "均衡 —— 推荐大多数查询使用",
+  tagWeightTagFavDesc: "优先匹配 tag，弱化语义相似度",
+  tagWeightStrictDesc: "严格 tag 匹配 —— 过滤掉无 tag 的结果",
+  tagWeightCustom: "自定义",
+  tagWeightCustomDesc: "自定义配置（详情请到高级混合搜索配置编辑）",
+  tagWeightCustomTip: "详情请到高级混合搜索配置编辑",
+  // === LM CUSTOMIZATION: SearchSettingsPopover i18n END ===
+
   // === HybridSearchConfig.jsx ===
   advancedHybridConfig: "高级混合搜索配置",
   textSearchFields: "文本搜索字段",
