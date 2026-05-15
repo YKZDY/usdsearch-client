@@ -1091,8 +1091,23 @@ const HybridDeepSearchUI = () => {
     const scores = urlParams.get('scores');
     if (scores === 'true') setShowScores(true);
     
+    // === LM CUSTOMIZATION: HideListView START ===
+    // 原因：List 视图入口被隐藏后，旧分享链接 ?view=list 或 localStorage 残留 viewMode=list
+    //   仍可能塞回 'list'，导致用户期望"看到 List"但 UI 找不到入口去切回 Grid。
+    //   这里在 URL 反序列化时对 'list' 做静默降级到 'grid'。同时清掉 localStorage 中
+    //   任何残留的 viewMode='list'（防御式：当前代码没主动写过该 key，但用户/浏览器扩展可能已塞过）。
+    // 合入英伟达新版时：如英伟达正式弃用 List 视图，则可以删除本块；否则保留。
     const view = urlParams.get('view');
-    if (view) setViewMode(view);
+    if (view) {
+      setViewMode(view === 'list' ? 'grid' : view);
+    }
+    try {
+      const lsView = window.localStorage?.getItem('viewMode');
+      if (lsView === 'list') {
+        window.localStorage.setItem('viewMode', 'grid');
+      }
+    } catch (_) { /* localStorage 不可用时静默忽略 */ }
+    // === LM CUSTOMIZATION: HideListView END ===
     
     const gridSizeParam = urlParams.get('gridSize');
     if (gridSizeParam) setGridSize(gridSizeParam);

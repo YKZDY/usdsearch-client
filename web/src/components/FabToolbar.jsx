@@ -5,7 +5,16 @@
 //   - v2: 所有 SearchFilters 面板功能融入 Popover 按钮，取消左侧面板
 //   - 设置图标：显示控件(去重/预览/分数/视图) + 搜索设置 + 混合搜索入口
 
-import React, { useCallback } from 'react';
+// === LM CUSTOMIZATION: ViewSettingsRefactor START ===
+// 原因：把原"显示设置" Popover 改名为"视图设置"，并拆走搜索类项到独立的 SearchSettingsPopover
+//        （顶栏齿轮触发，组件位于 components/SearchSettingsPopover.jsx）。
+//        因需要互斥（开视图设置时关闭搜索设置；反之亦然），把原本 uncontrolled 的 Popover
+//        改造成受控（useDisclosure + 监听 close-view-settings CustomEvent）。
+//        因此 import 列表新增 useEffect（react）+ useDisclosure（chakra）+ 删掉 RadioGroup/Radio
+//        （随"搜索方法"一并被 LM 注释化保留，下方仍能 git 追溯）。
+// 合入英伟达新版时：保留新增 import；如英伟达将来想恢复"搜索方法"等项，可以从下方 LM 注释
+//        块里恢复对应 RadioGroup/Radio JSX 与 import。
+import React, { useCallback, useEffect } from 'react';
 import ResultsTitleBar from './ResultsTitleBar';
 import {
   Box,
@@ -23,9 +32,11 @@ import {
   IconButton,
   Switch,
   Divider,
-  RadioGroup,
-  Radio,
+  // RadioGroup,  // 随"搜索方法"被搬到 SearchSettingsPopover；保留位置便于 NVIDIA 合入对照
+  // Radio,
+  useDisclosure,
 } from '@chakra-ui/react';
+// === LM CUSTOMIZATION: ViewSettingsRefactor END ===
 import {
   SettingsIcon,
   ChevronDownIcon,
@@ -157,6 +168,25 @@ function FabToolbar({
   const filterHandleChange = useCallback((key, val) => {
     setSearchParams(prev => ({ ...prev, [key]: val }));
   }, [setSearchParams]);
+
+  // === LM CUSTOMIZATION: ViewSettingsRefactor START ===
+  // 视图设置 Popover 受控状态：与 SearchSettingsPopover 互斥
+  //   - 打开本 Popover 时派发 close-search-settings 关闭对方
+  //   - 监听 close-view-settings 由对方派发，关闭本 Popover
+  // 合入英伟达新版时：本块保留即可；如英伟达原版未来增加多 Popover 互斥，
+  //   也是同样的事件总线模式，不会冲突。
+  const viewSettings = useDisclosure();
+  useEffect(() => {
+    const handleClose = () => viewSettings.onClose();
+    window.addEventListener('close-view-settings', handleClose);
+    return () => window.removeEventListener('close-view-settings', handleClose);
+  }, [viewSettings]);
+  const handleOpenViewSettings = useCallback(() => {
+    // 互斥：通知搜索设置 Popover 关闭
+    window.dispatchEvent(new CustomEvent('close-search-settings'));
+    viewSettings.onOpen();
+  }, [viewSettings]);
+  // === LM CUSTOMIZATION: ViewSettingsRefactor END ===
 
   // const comingSoon = tr('fabToolbarComingSoon', { en: 'Coming soon', zh: '即将上线' });
 
@@ -368,34 +398,47 @@ function FabToolbar({
 
 
 
-          {/* ── 设置图标 Popover ── */}
-          <Popover placement="bottom-end" isLazy closeOnBlur>
+          {/* ── 视图设置 Popover（原"显示设置"，搜索类项已搬到 SearchSettingsPopover） ── */}
+          {/* === LM CUSTOMIZATION: ViewSettingsRefactor START ===
+               把原本 uncontrolled 的 Popover 改造为 useDisclosure 受控；
+               aria-label / Tooltip / 标题 i18n 全部改为 viewSettings；
+               搜索类项（去重/每页结果数/搜索方法/高级混合搜索配置入口）整体注释化保留，
+               已迁移到 SearchSettingsPopover.jsx。 */}
+          <Popover
+            placement="bottom-end"
+            isLazy
+            closeOnBlur
+            isOpen={viewSettings.isOpen}
+            onClose={viewSettings.onClose}
+          >
             <PopoverTrigger>
               <IconButton
                 size="sm"
-                aria-label="Display settings"
+                aria-label={tr('viewSettings', { en: 'View settings', zh: '视图设置' })}
                 icon={<SettingsIcon boxSize={3} />}
                 sx={filterButtonSx}
+                onClick={handleOpenViewSettings}
               />
             </PopoverTrigger>
             {/* Portal：同排序 Popover 的原因 —— 逃离 .fab-toolbar 的 sticky+z-index stacking context */}
             <Portal>
-            <PopoverContent sx={popoverContentSx} minW="300px" maxW="380px">
+            <PopoverContent sx={popoverContentSx} minW="260px" maxW="320px">
               <PopoverBody p={4}>
                 <VStack spacing={3} align="stretch">
                   <Text fontSize="xs" fontWeight="600" color="rgba(255,255,255,0.6)" textTransform="uppercase" letterSpacing="0.5px">
-                    {tr('fabToolbarSettings', { en: 'Display Settings', zh: '显示设置' })}
+                    {tr('viewSettings', { en: 'View Settings', zh: '视图设置' })}
                   </Text>
 
-                  {/* 去重 */}
-                  <FormControl display="flex" alignItems="center" justifyContent="space-between">
-                    <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)" mb="0">
-                      {tr('removeDuplicates', { en: 'Remove duplicates', zh: '去重' })}
-                    </FormLabel>
-                    <Switch size="sm" colorScheme="yellow"
-                      isChecked={deduplicateByHash || false}
-                      onChange={onRemoveDuplicatesChange} />
-                  </FormControl>
+                  {/* 去重开关：搬到 SearchSettingsPopover；这里整段注释保留，方便 git 追溯与未来恢复
+                      <FormControl display="flex" alignItems="center" justifyContent="space-between">
+                        <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)" mb="0">
+                          {tr('removeDuplicates', { en: 'Remove duplicates', zh: '去重' })}
+                        </FormLabel>
+                        <Switch size="sm" colorScheme="yellow"
+                          isChecked={deduplicateByHash || false}
+                          onChange={onRemoveDuplicatesChange} />
+                      </FormControl>
+                  */}
 
                   {/* 仅预览 */}
                   <FormControl display="flex" alignItems="center" justifyContent="space-between">
@@ -423,12 +466,20 @@ function FabToolbar({
                       {tr('view', { en: 'View', zh: '视图' })}
                     </FormLabel>
                     <HStack spacing={1} bg="rgba(255,255,255,0.05)" borderRadius="md" p={1}>
+                      {/* === LM CUSTOMIZATION: HideListView START ===
+                           原因：用户决定隐藏 List 视图选项（当前 Grid 已能覆盖所有展示需求；List 增加认知复杂度）。
+                           保留代码不删，避免破坏 onSetViewModeList 接口、URL ?view=list 兼容、未来恢复路径。
+                           合入英伟达新版时：保留 List 按钮被注释这一改动；如英伟达更新了 List 按钮，
+                           可以用更新后的 List 按钮 JSX 替换下面注释中的内容，再保持注释包裹。 */}
+                      {/*
                       <IconButton size="xs"
                         variant={viewMode === 'list' ? 'solid' : 'ghost'}
                         colorScheme={viewMode === 'list' ? 'yellow' : 'gray'}
                         icon={<HamburgerIcon />}
                         onClick={onSetViewModeList}
                         aria-label="List view" />
+                      */}
+                      {/* === LM CUSTOMIZATION: HideListView END === */}
                       <IconButton size="xs"
                         variant={viewMode === 'grid' ? 'solid' : 'ghost'}
                         colorScheme={viewMode === 'grid' ? 'yellow' : 'gray'}
@@ -444,74 +495,73 @@ function FabToolbar({
                     </HStack>
                   </FormControl>
 
-                  <Divider borderColor="rgba(255,255,255,0.1)" />
-
-                  {/* 搜索设置 */}
-                  <Text fontSize="xs" fontWeight="600" color="rgba(255,255,255,0.6)" textTransform="uppercase" letterSpacing="0.5px">
-                    {tr('searchSettings', { en: 'Search Settings', zh: '搜索设置' })}
-                  </Text>
-
-                  <FormControl>
-                    <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)">
-                      {tr('resultsPerPage', { en: 'Results per page', zh: '每页结果数' })}
-                    </FormLabel>
-                    <HStack spacing={1} flexWrap="wrap">
-                      {[25, 50, 100, 250, 500, 1000].map(n => (
-                        <Button key={n} size="xs"
-                          variant={String(searchParams?.limit) === String(n) ? 'solid' : 'ghost'}
-                          colorScheme={String(searchParams?.limit) === String(n) ? 'yellow' : 'gray'}
-                          fontSize="11px" minW="40px" h="26px"
-                          onClick={() => {
-                            setSearchParams(prev => ({ ...prev, limit: n }));
-                            onTriggerSearch?.();
-                          }}
-                        >
-                          {n}
-                        </Button>
-                      ))}
-                    </HStack>
-                  </FormControl>
-
-                  <FormControl>
-                    <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)">
-                      {tr('searchMethod', { en: 'Search method', zh: '搜索方法' })}
-                    </FormLabel>
-                    <RadioGroup size="sm"
-                      value={searchParams?.embedding_knn_search_method || 'approximate'}
-                      onChange={(value) => {
-                        setSearchParams(prev => ({
-                          ...prev, embedding_knn_search_method: value,
-                        }));
-                        onTriggerSearch?.();
-                      }}>
-                      <HStack spacing={4}>
-                        <Radio value="exact" size="sm" colorScheme="yellow">
-                          <Text fontSize="xs" color="rgba(255,255,255,0.85)">{tr('exact', { en: 'Exact', zh: '精确' })}</Text>
-                        </Radio>
-                        <Radio value="approximate" size="sm" colorScheme="yellow">
-                          <Text fontSize="xs" color="rgba(255,255,255,0.85)">{tr('approximate', { en: 'Approx', zh: '近似' })}</Text>
-                        </Radio>
-                      </HStack>
-                    </RadioGroup>
-                  </FormControl>
-
-                  {/* 混合搜索高级配置入口 */}
-                  {onOpenHybridConfig && (
-                    <>
-                      <Divider borderColor="rgba(255,255,255,0.1)" />
-                      <Button size="sm" variant="ghost" color="rgba(255,255,255,0.6)"
-                        _hover={{ color: '#FFD230', bg: 'rgba(255,210,48,0.08)' }}
-                        onClick={onOpenHybridConfig}
-                        fontSize="xs" justifyContent="flex-start" px={0}>
-                        {tr('advancedHybridConfig', { en: 'Advanced Hybrid Search Config...', zh: '高级混合搜索配置...' })}
-                      </Button>
-                    </>
-                  )}
+                  {/* --- 以下为被迁移到 SearchSettingsPopover 的原本搜索类项 ——
+                       以 JSX 注释形式保留供未来参考；不使用 LM CUSTOMIZATION 标记以避免 grep 误计。
+                       外层的 ViewSettingsRefactor 标记块已覆盖本范围。
+                       <Divider borderColor="rgba(255,255,255,0.1)" />
+                       <Text fontSize="xs" fontWeight="600" color="rgba(255,255,255,0.6)" textTransform="uppercase" letterSpacing="0.5px">
+                         {tr('searchSettings', { en: 'Search Settings', zh: '搜索设置' })}
+                       </Text>
+                       <FormControl>
+                         <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)">
+                           {tr('resultsPerPage', { en: 'Results per page', zh: '每页结果数' })}
+                         </FormLabel>
+                         <HStack spacing={1} flexWrap="wrap">
+                           {[25, 50, 100, 250, 500, 1000].map(n => (
+                             <Button key={n} size="xs"
+                               variant={String(searchParams?.limit) === String(n) ? 'solid' : 'ghost'}
+                               colorScheme={String(searchParams?.limit) === String(n) ? 'yellow' : 'gray'}
+                               fontSize="11px" minW="40px" h="26px"
+                               onClick={() => {
+                                 setSearchParams(prev => ({ ...prev, limit: n }));
+                                 onTriggerSearch?.();
+                               }}
+                             >
+                               {n}
+                             </Button>
+                           ))}
+                         </HStack>
+                       </FormControl>
+                       <FormControl>
+                         <FormLabel fontSize="xs" color="rgba(255,255,255,0.85)">
+                           {tr('searchMethod', { en: 'Search method', zh: '搜索方法' })}
+                         </FormLabel>
+                         <RadioGroup size="sm"
+                           value={searchParams?.embedding_knn_search_method || 'approximate'}
+                           onChange={(value) => {
+                             setSearchParams(prev => ({
+                               ...prev, embedding_knn_search_method: value,
+                             }));
+                             onTriggerSearch?.();
+                           }}>
+                           <HStack spacing={4}>
+                             <Radio value="exact" size="sm" colorScheme="yellow">
+                               <Text fontSize="xs" color="rgba(255,255,255,0.85)">{tr('exact', { en: 'Exact', zh: '精确' })}</Text>
+                             </Radio>
+                             <Radio value="approximate" size="sm" colorScheme="yellow">
+                               <Text fontSize="xs" color="rgba(255,255,255,0.85)">{tr('approximate', { en: 'Approx', zh: '近似' })}</Text>
+                             </Radio>
+                           </HStack>
+                         </RadioGroup>
+                       </FormControl>
+                       {onOpenHybridConfig && (
+                         <>
+                           <Divider borderColor="rgba(255,255,255,0.1)" />
+                           <Button size="sm" variant="ghost" color="rgba(255,255,255,0.6)"
+                             _hover={{ color: '#FFD230', bg: 'rgba(255,210,48,0.08)' }}
+                             onClick={onOpenHybridConfig}
+                             fontSize="xs" justifyContent="flex-start" px={0}>
+                             {tr('advancedHybridConfig', { en: 'Advanced Hybrid Search Config...', zh: '高级混合搜索配置...' })}
+                           </Button>
+                         </>
+                       )}
+                     --- 迁移保留区结束 --- */}
                 </VStack>
               </PopoverBody>
             </PopoverContent>
             </Portal>
           </Popover>
+          {/* === LM CUSTOMIZATION: ViewSettingsRefactor END === */}
         </HStack>
         </FilterGroupProvider>
       </HStack>

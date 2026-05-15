@@ -44,7 +44,13 @@ import {
     PopoverTrigger, PopoverContent, PopoverArrow, PopoverCloseButton,
     PopoverHeader, PopoverBody, Divider, Select, Link, Tooltip
 } from '@chakra-ui/react';
-import { LockIcon, UnlockIcon, InfoIcon, ExternalLinkIcon, ChevronDownIcon, LinkIcon } from '@chakra-ui/icons';
+// === LM CUSTOMIZATION: SearchSettingsTrigger START ===
+// 原因：在顶栏搜索框右侧加一个齿轮 IconButton 作为"搜索设置" Popover 的触发器
+//        （Popover 主体在 components/SearchSettingsPopover.jsx，挂在 HybridDeepSearchUI 内）；
+//        触发器与 Popover 通过 CustomEvent('open-search-settings') 解耦。
+// 合入英伟达新版时：仅追加了 SettingsIcon 到原本就存在的 @chakra-ui/icons 解构 import，冲突可控。
+import { LockIcon, UnlockIcon, InfoIcon, ExternalLinkIcon, ChevronDownIcon, LinkIcon, SettingsIcon } from '@chakra-ui/icons';
+// === LM CUSTOMIZATION: SearchSettingsTrigger END ===
 import { motion } from 'framer-motion';
 // === LM CUSTOMIZATION: i18n START ===
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
@@ -1456,6 +1462,40 @@ const LanguageSwitcher = () => {
     );
 };
 
+// === LM CUSTOMIZATION: SearchSettingsTrigger START ===
+// 顶栏"搜索设置"齿轮按钮抽出来作为独立内部组件，让 useTranslation() 能在 LanguageProvider 子树内合法调用
+// （App 组件本身没有调 useTranslation，无法直接在其 JSX 里使用 t）。
+// 点击后派发 CustomEvent('open-search-settings')，由 SearchSettingsPopover 监听并打开。
+// 合入英伟达新版时：整个组件 + JSX 调用都包在 LM 块里，删除时只需删本块和 JSX 调用处即可。
+const SearchSettingsTriggerButton = () => {
+    const { t } = useTranslation();
+    const label = t('searchSettings') || 'Search settings';
+    return (
+        <Tooltip label={label} placement="bottom" hasArrow>
+            <IconButton
+                size="md"
+                variant="ghost"
+                aria-label={label}
+                icon={<SettingsIcon boxSize="18px" />}
+                color="rgba(255,255,255,0.75)"
+                bg="rgba(255,255,255,0.04)"
+                border="1px solid rgba(255,255,255,0.08)"
+                borderRadius="999px"
+                h="40px"
+                w="40px"
+                ml={2}
+                flexShrink={0}
+                _hover={{ color: '#FFD230', bg: 'rgba(255,210,48,0.08)', borderColor: 'rgba(255,210,48,0.4)' }}
+                _active={{ bg: 'rgba(255,210,48,0.16)' }}
+                _focusVisible={{ boxShadow: '0 0 0 2px #FFD230' }}
+                transition="color 200ms ease, background 200ms ease, border-color 200ms ease"
+                onClick={() => window.dispatchEvent(new CustomEvent('open-search-settings'))}
+            />
+        </Tooltip>
+    );
+};
+// === LM CUSTOMIZATION: SearchSettingsTrigger END ===
+
 // App wrapper to initialize persistent cache
 const App = () => {
     // === LM CUSTOMIZATION: Sidebar state START ===
@@ -1494,7 +1534,15 @@ const App = () => {
                     
                     {/* 中间：胶囊搜索框（Fab 风格 radius 9999px） */}
                     <TopSearchBar style={{ margin: '0 auto' }} />
-                    
+
+                    {/* === LM CUSTOMIZATION: SearchSettingsTrigger START ===
+                         紧贴搜索框右侧的"搜索设置"齿轮触发器；点击后派发 CustomEvent，
+                         由 SearchSettingsPopover（挂在 HybridDeepSearchUI 内）监听并打开。
+                         此处不直接持有 hybridConfig 等 state，避免 index.js 闭包污染。
+                         合入英伟达新版时：本块整体保留即可，与英伟达原版顶栏 Flex 不冲突。 */}
+                    <SearchSettingsTriggerButton />
+                    {/* === LM CUSTOMIZATION: SearchSettingsTrigger END === */}
+
                     {/* 右侧：功能图标（保持不变） */}
                     <HeaderIcons handleSearch={() => window.dispatchEvent(new Event('trigger-search'))} />
                 </Flex>
