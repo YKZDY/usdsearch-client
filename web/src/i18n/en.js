@@ -651,6 +651,8 @@ const en = {
   ssoTokenInvalid: "Received invalid token format",
   ssoPopupBlocked: "Login popup was blocked by the browser. Please allow popups and retry.",
   ssoPopupClosed: "Login popup was closed before completion",
+  ssoWaitingAuth: "Waiting for SSO authentication…",
+  orDivider: "OR",
   ssoLoginFailed: "Login failed: {message}",
   ssoBridgeDebugTitle: "SSO Bridge — Debug",
   ssoBridgeDebugWaiting: "Detecting token…",

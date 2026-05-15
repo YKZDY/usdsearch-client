@@ -71,9 +71,11 @@ import { clearAuthByUserAction, getSSOToken, persistSSOLogin, clearSSOLogin } fr
 // === LM CUSTOMIZATION: SSOPostMessage START ===
 // 原因：本地开发环境（localhost:3000）与 SSO 弹窗完成后落在的 lightart-dev.woa.com
 //       跨域，localStorage 互相隔离读不到 token；根据需求文档选型「postMessage
-//       跨域中转」方案，本项引入 createSSOBridge / buildSSOUrl 以接收跨域 token。
+//       跨域中转」方案。2026-05-15 改回 demo 极简模式（只走 localStorage 轮询），
+//       sso-bridge 工具暂未启用，文件保留以备后续切换。
 // 合入英伟达新版时：本 import 块可直接移除（NVIDIA 原版无 SSO 弹窗 postMessage 通道）。
-import { createSSOBridge, buildSSOUrl } from "./utils/ssoBridge";
+// === LM CUSTOMIZATION: SSOPostMessage 暂时下线（保留 import 占位） ===
+// import { createSSOBridge, buildSSOUrl } from "./utils/ssoBridge";
 // === LM CUSTOMIZATION: SSOPostMessage END ===
 
 // === LM CUSTOMIZATION: Theme START ===
@@ -376,17 +378,16 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
     // === LM CUSTOMIZATION: DeviceFlowFallback END ===
 
     // === SSO 弹窗登录逻辑 ===
+    // === LM CUSTOMIZATION: SSOLogin START ===
+    // 简化版：对齐 demo (lightart-dev.woa.com/usdsearch) 的极简实现 —
+    //   仅 localStorage 轮询（500ms）等待运维侧反向代理回写 omni_access_token，
+    //   拿到后关闭弹窗 + createApiToken 换永久凭证（本地降级 JWT）。
+    //   不再使用 postMessage bridge，避免跨域 source/origin 复杂度。
+    // 合入英伟达新版时：整块逻辑可整体替换为 NVIDIA 原版认证机制。
     const [ssoLoading, setSsoLoading] = useState(false);
     const [ssoError, setSsoError] = useState(null);
     const ssoPollingRef = useRef(null);
     const ssoWindowRef = useRef(null);
-    // === LM CUSTOMIZATION: SSOPostMessage START ===
-    // postMessage 通道句柄 / 双通道一次性锁 / 60s 兜底超时 / token 处理闭包引用
-    const ssoBridgeRef = useRef(null);
-    const ssoFiredRef = useRef(false);
-    const ssoTimeoutRef = useRef(null);
-    const ssoTokenProcessorRef = useRef(null);
-    // === LM CUSTOMIZATION: SSOPostMessage END ===
 
     // 清理 SSO 轮询
     const cleanupSSOPolling = useCallback(() => {
@@ -394,37 +395,21 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
             clearInterval(ssoPollingRef.current);
             ssoPollingRef.current = null;
         }
-        // === LM CUSTOMIZATION: SSOPostMessage START ===
-        // 同步清理 postMessage 通道 + 兜底超时，避免内存泄漏与残留监听干扰下次登录
-        if (ssoBridgeRef.current) {
-            try { ssoBridgeRef.current.stop(); } catch (e) { /* ignore */ }
-            ssoBridgeRef.current = null;
-        }
-        if (ssoTimeoutRef.current) {
-            clearTimeout(ssoTimeoutRef.current);
-            ssoTimeoutRef.current = null;
-        }
-        ssoTokenProcessorRef.current = null;
-        // === LM CUSTOMIZATION: SSOPostMessage END ===
     }, []);
+    // === LM CUSTOMIZATION: SSOLogin END ===
 
     // SSO 登录流程
+    // === LM CUSTOMIZATION: SSOLogin START ===
+    // demo 极简版（参考 usdsearch-explorer/index.html）：
+    //   1) window.open SSO_LOGIN_URL
+    //   2) 500ms 轮询 localStorage.omni_access_token
+    //   3) 拿到 → close + createApiToken 换凭证（本地降级 JWT）
+    //   4) 用户手关弹窗 → 静默退出 loading
     const handleSSOLogin = useCallback(async () => {
         setSsoError(null);
         setSsoLoading(true);
 
-        // === LM CUSTOMIZATION: SSOPostMessage START ===
-        // 重置一次性锁，保证本轮登录两通道仅触发一次 token 处理
-        ssoFiredRef.current = false;
-        // === LM CUSTOMIZATION: SSOPostMessage END ===
-
-        // 打开 SSO 弹窗
-        // === LM CUSTOMIZATION: SSOPostMessage START ===
-        // 原原始 URL 仅使用 AUTH_CONFIG.SSO_LOGIN_URL；现需追加 opener_origin 参数，
-        // 供远程中转脚本识别主页 origin 并安全地 postMessage 回传 token。
-        const baseSsoUrl = AUTH_CONFIG.SSO_LOGIN_URL || '/omni/auth/login';
-        const ssoLoginUrl = buildSSOUrl(baseSsoUrl, window.location.origin);
-        // === LM CUSTOMIZATION: SSOPostMessage END ===
+        const ssoLoginUrl = AUTH_CONFIG.SSO_LOGIN_URL || '/omni/auth/login';
         const ssoWindow = window.open(ssoLoginUrl, 'sso_login', 'width=500,height=600');
         ssoWindowRef.current = ssoWindow;
 
@@ -434,21 +419,11 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
             return;
         }
 
-        // === LM CUSTOMIZATION: SSOPostMessage START ===
-        // 抽取 token 处理逻辑为闭包，localStorage 轮询 与 postMessage 通道共享。
-        // channel 参数仅用于调试日志，不影响业务逻辑。
-        const processToken = async (token, channel) => {
-            if (ssoFiredRef.current) {
-                if (AUTH_CONFIG.SSO_DEBUG) {
-                    // eslint-disable-next-line no-console
-                    console.log('[SSO]', 'token from', channel, 'arrived but already fired — ignored');
-                }
-                return;
-            }
-            ssoFiredRef.current = true;
-            if (ssoBridgeRef.current && typeof ssoBridgeRef.current.markFired === 'function') {
-                ssoBridgeRef.current.markFired();
-            }
+        // 一次性锁：避免轮询拿到 token 后正在 await createApiToken 期间下一轮 tick 重复触发
+        let fired = false;
+        const processToken = async (token) => {
+            if (fired) return;
+            fired = true;
             cleanupSSOPolling();
 
             // 关闭弹窗
@@ -459,7 +434,7 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
             try {
                 if (AUTH_CONFIG.SSO_DEBUG) {
                     // eslint-disable-next-line no-console
-                    console.log('[SSO]', 'processing token via channel:', channel);
+                    console.log('[SSO]', 'processing token from localStorage');
                 }
                 // 用 JWT 创建永久 API Token
                 toast({
@@ -564,67 +539,14 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                 setSsoLoading(false);
             }
         };
-        ssoTokenProcessorRef.current = processToken;
 
-        // 启动 postMessage 通道 bridge
-        const bridge = createSSOBridge({
-            trustedOrigins: AUTH_CONFIG.SSO_BRIDGE_TRUSTED_ORIGINS || [],
-            ssoWindowRef,
-            debug: AUTH_CONFIG.SSO_DEBUG,
-            onToken: ({ token }) => {
-                processToken(token, 'postMessage');
-            },
-            onTimeout: () => {
-                if (ssoFiredRef.current) return;
-                if (AUTH_CONFIG.SSO_DEBUG) {
-                    // eslint-disable-next-line no-console
-                    console.log('[SSO]', 'bridge reported timeout');
-                }
-                // 中转脚本超时仅提示；不主动结束 loading，交由 60s 兜底或用户手关弹窗。
-                toast({
-                    title: t('ssoTimeout') || '登录超时，请重试',
-                    status: 'warning',
-                    duration: 4000,
-                });
-            },
-            onError: (messageKey) => {
-                if (ssoFiredRef.current) return;
-                const description = (messageKey && t(messageKey)) || messageKey || '';
-                toast({
-                    title: t('error') || 'Error',
-                    description,
-                    status: 'error',
-                    duration: 5000,
-                });
-            },
-        });
-        bridge.start();
-        ssoBridgeRef.current = bridge;
-
-        // 60s 兜底超时：避免任何异常路径下按钮永久转圈
-        ssoTimeoutRef.current = setTimeout(() => {
-            if (ssoFiredRef.current) return;
-            if (AUTH_CONFIG.SSO_DEBUG) {
-                // eslint-disable-next-line no-console
-                console.log('[SSO]', 'safety timeout (60s) reached, aborting');
-            }
-            cleanupSSOPolling();
-            setSsoLoading(false);
-            toast({
-                title: t('ssoTimeoutLong') || t('ssoTimeout') || '登录超时',
-                status: 'error',
-                duration: 5000,
-            });
-        }, 60000);
-        // === LM CUSTOMIZATION: SSOPostMessage END ===
-
-        // 轮询 localStorage 检测 token（同域生产环境主通道 / postMessage 未生效时的兜底）
-        ssoPollingRef.current = setInterval(async () => {
+        // 500ms 轮询 localStorage（demo 同款）
+        ssoPollingRef.current = setInterval(() => {
             const token = getSSOToken();
 
-            // 检查弹窗是否被用户手动关闭
+            // 用户手关弹窗：静默退出
             if (ssoWindow.closed && !token) {
-                if (ssoFiredRef.current) return;
+                if (fired) return;
                 cleanupSSOPolling();
                 setSsoLoading(false);
                 if (AUTH_CONFIG.SSO_DEBUG) {
@@ -634,14 +556,10 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                 return;
             }
 
-            if (token) {
-                // === LM CUSTOMIZATION: SSOPostMessage START ===
-                // 复用跨通道的 processToken（有一次性锁保护，不会与 postMessage 重复执行）
-                processToken(token, 'localStorage');
-                // === LM CUSTOMIZATION: SSOPostMessage END ===
-            }
+            if (token) processToken(token);
         }, 500);
     }, [backend, selectedServer, auth, setAuth, toast, t, cleanupSSOPolling]);
+    // === LM CUSTOMIZATION: SSOLogin END ===
 
     // === LM CUSTOMIZATION: 监听 auth-auto-device-flow 事件，自动启动 SSO 登录 ===
     // useAuthGuard 检测到无 token 时会派发此事件，改造后触发 SSO 弹窗
@@ -676,22 +594,77 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
         };
     }, [cleanupSSOPolling]);
 
+    // === LM CUSTOMIZATION: SSOLogin UI helpers START ===
+    // 从 JWT (omni_access_token) 解码出用户名（sub），用于已登录态展示真实身份。
+    // 失败时回退 'user'，与 demo (lightart-dev.woa.com/usdsearch) 行为一致。
+    const ssoUsername = useMemo(() => {
+        if (!auth.password) return null;
+        try {
+            const jwt = localStorage.getItem('omni_access_token');
+            if (!jwt) return null;
+            const payload = JSON.parse(
+                atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
+            );
+            return payload.sub || null;
+        } catch (_e) {
+            return null;
+        }
+    }, [auth.password]);
+
+    const isLocalDev = typeof window !== 'undefined' && (
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1'
+    );
+    // === LM CUSTOMIZATION: SSOLogin UI helpers END ===
+
     return (
         <>
+        {/* === LM CUSTOMIZATION: SSOLoginCard START === */}
+        {/* 登录卡片 UI（极简加强版）：使用 LA 品牌令牌（金色 #FFD230）替代硬编码。
+            已登录态：绿点 + ✓ + 用户名 · 服务器；未登录态：金色主按钮 + 本地 OR 分隔线 + Device Flow 次按钮。
+            合入英伟达新版时：本块可整体移除或保留，不依赖 NVIDIA 原始 UI 结构。 */}
         <VStack spacing={4} align="stretch">
             {auth.password ? (
                 /* === 已登录状态 === */
                 <VStack align="stretch" spacing={3}>
                     <HStack spacing={2} align="center">
-                        <Box w={2} h={2} bg="#76b900" borderRadius="full" />
-                        <Text fontSize="sm" color="#76b900" fontWeight="medium">
-                            {t('authenticatedWithNucleus') || '已通过 Nucleus 认证'}
+                        <Box
+                            w={2}
+                            h={2}
+                            bg={LA.success}
+                            borderRadius="full"
+                            boxShadow={`0 0 8px ${LA.success}`}
+                        />
+                        <Text fontSize="sm" color={LA.success} fontWeight="semibold">
+                            {t('authenticatedWithNucleus') || '✓ 已通过 Nucleus 认证'}
                         </Text>
                     </HStack>
+                    {(ssoUsername || selectedServer) && (
+                        <Text
+                            fontSize="xs"
+                            color={LA.textMuted}
+                            pl={4}
+                            letterSpacing="0.02em"
+                            noOfLines={1}
+                            title={`${ssoUsername || ''}${ssoUsername && selectedServer ? ' · ' : ''}${selectedServer || ''}`}
+                        >
+                            {ssoUsername && (
+                                <Box as="span" color={LA.textSecondary} fontWeight="medium">
+                                    {ssoUsername}
+                                </Box>
+                            )}
+                            {ssoUsername && selectedServer && (
+                                <Box as="span" mx={1.5} opacity={0.5}>·</Box>
+                            )}
+                            {selectedServer}
+                        </Text>
+                    )}
                     <Button
                         size="sm"
                         variant="outline"
-                        colorScheme="red"
+                        borderColor={LA.border}
+                        color={LA.textMuted}
+                        _hover={{ borderColor: LA.danger, color: LA.danger, bg: 'transparent' }}
                         onClick={() => {
                             const server = selectedServer || '';
                             const resolvedHost = resolveNucleusHost(server) || '';
@@ -711,16 +684,23 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                 <VStack spacing={3} align="stretch">
                     <Button
                         size="md"
-                        bg="#FFD230"
+                        bg={LA.primary}
                         color="black"
-                        _hover={{ bg: "#F6C80F" }}
-                        _active={{ bg: "#D4A800" }}
+                        _hover={{
+                            bg: LA.primaryHover,
+                            transform: 'translateY(-1px)',
+                            boxShadow: `0 6px 16px ${LA.primaryDim}`,
+                        }}
+                        _active={{ bg: LA.primaryHover, transform: 'translateY(0)' }}
+                        _focusVisible={{ boxShadow: `0 0 0 3px ${LA.primaryDim}` }}
+                        transition="transform 0.15s ease, box-shadow 0.2s ease, background 0.15s ease"
                         width="100%"
                         onClick={handleSSOLogin}
                         isLoading={ssoLoading}
                         loadingText={t('ssoLoggingIn') || '登录中…'}
                         leftIcon={<UnlockIcon />}
-                        fontWeight="semibold"
+                        fontWeight="bold"
+                        letterSpacing="0.02em"
                         borderRadius="md"
                         py={5}
                     >
@@ -733,47 +713,71 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                               连接当前 backend (例如 ov.qq.com)，与原 NVIDIA 设备码登录路径一致。
                        生产域 (market.lightart-dev.woa.com) 与 SSO 同主域，无需此入口，自动隐藏。
                        合入英伟达新版时：本块可整体移除（NVIDIA 原版默认即 Device Flow） */}
-                    {(typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) && (
-                        <Button
-                            size="xs"
-                            variant="ghost"
-                            color="gray.400"
-                            _hover={{ color: 'gray.200', bg: 'whiteAlpha.100' }}
-                            onClick={handleStartDeviceFlow}
-                            isLoading={deviceFlowAuth.isLoading}
-                            loadingText={t('connectingToNucleus') || '正在连接 Nucleus 服务器...'}
-                            isDisabled={ssoLoading}
-                            aria-label={t('useDeviceFlowFallback') || '使用设备码登录（本地开发）'}
-                        >
-                            {t('useDeviceFlowFallback') || '使用设备码登录（本地开发）'}
-                        </Button>
+                    {isLocalDev && (
+                        <>
+                            <HStack spacing={3} align="center" py={1}>
+                                <Box flex="1" h="1px" bg={LA.border} opacity={0.6} />
+                                <Text
+                                    fontSize="10px"
+                                    color={LA.textMuted}
+                                    fontWeight="bold"
+                                    letterSpacing="0.15em"
+                                    textTransform="uppercase"
+                                >
+                                    {t('orDivider') || 'OR'}
+                                </Text>
+                                <Box flex="1" h="1px" bg={LA.border} opacity={0.6} />
+                            </HStack>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                borderColor={LA.border}
+                                color={LA.textSecondary}
+                                _hover={{
+                                    borderColor: LA.primary,
+                                    color: LA.primary,
+                                    bg: LA.primaryDim,
+                                }}
+                                _focusVisible={{ boxShadow: `0 0 0 2px ${LA.primaryDim}` }}
+                                transition="all 0.15s ease"
+                                onClick={handleStartDeviceFlow}
+                                isLoading={deviceFlowAuth.isLoading}
+                                loadingText={t('connectingToNucleus') || '正在连接 Nucleus 服务器...'}
+                                isDisabled={ssoLoading}
+                                aria-label={t('useDeviceFlowFallback') || '使用设备码登录（本地开发）'}
+                                fontWeight="medium"
+                            >
+                                {t('useDeviceFlowFallback') || '使用设备码登录（本地开发）'}
+                            </Button>
+                        </>
                     )}
                     {/* === LM CUSTOMIZATION: DeviceFlowFallback END === */}
 
                     {ssoError && (
-                        <Text fontSize="xs" color="red.400" textAlign="center">
+                        <Text fontSize="xs" color={LA.danger} textAlign="center" lineHeight="1.5">
                             {ssoError}
                         </Text>
                     )}
 
                     {ssoLoading && (
-                        <HStack justify="center" spacing={2}>
+                        <HStack justify="center" spacing={2} pt={1}>
                             <Box
                                 as="span"
                                 w={2}
                                 h={2}
-                                bg="#FFD230"
+                                bg={LA.primary}
                                 borderRadius="full"
                                 animation="pulse 1.5s ease-in-out infinite"
                             />
-                            <Text fontSize="xs" color="gray.400">
-                                等待 SSO 认证完成...
+                            <Text fontSize="xs" color={LA.textMuted}>
+                                {t('ssoWaitingAuth') || '等待 SSO 认证完成...'}
                             </Text>
                         </HStack>
                     )}
                 </VStack>
             )}
         </VStack>
+        {/* === LM CUSTOMIZATION: SSOLoginCard END === */}
 
         {/* === LM CUSTOMIZATION: DeviceFlowFallback Modal START === */}
         {/* 原因：仅在本地开发使用的兜底登录 Modal——显示 verification_uri / user_code，

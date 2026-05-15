@@ -647,6 +647,8 @@ const zh = {
   ssoTokenInvalid: "收到的 Token 格式无效",
   ssoPopupBlocked: "登录弹窗被浏览器拦截，请允许弹窗后重试",
   ssoPopupClosed: "登录弹窗在完成前被关闭",
+  ssoWaitingAuth: "等待 SSO 认证完成…",
+  orDivider: "或",
   ssoLoginFailed: "登录失败：{message}",
   ssoBridgeDebugTitle: "SSO 中转 — 调试模式",
   ssoBridgeDebugWaiting: "正在检测 Token…",
