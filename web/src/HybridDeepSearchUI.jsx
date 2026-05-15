@@ -520,10 +520,15 @@ const HybridDeepSearchUI = () => {
   // 在多选模式 ON 时，document 级监听 mousedown/mouseup，识别"短按 + 无位移 + 非交互元素"
   // 即可退出多选；覆盖顶部搜索栏空白、左侧产品类型树空白、结果区 titleBar 空白等所有结果容器外区域。
   // 反馈方式：依靠 SelectionModeBar 自身的淡出动画 + Badge 脉冲，无额外涟漪噪音。
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // [Group A 任务 6 修复] Drawer 打开时的空白点击应让 Drawer 自己处理（关 Drawer），
+  // 不应顺带退出多选模式。通过 shouldSkip 把 isDetailsOpen 状态注入。
   useExitMultiSelectOnEmptyClick({
     enabled: isMultiSelectMode,
     onExit: clearSelection,
+    shouldSkip: () => isDetailsOpen, // Drawer 打开时跳过退出多选
   });
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   // Deselect all but KEEP multi-select mode（"取消全选"按钮走这里）
   // 用户清空选中后仍可继续单击/框选卡片，bar 不会消失
@@ -3339,7 +3344,9 @@ const HybridDeepSearchUI = () => {
           合入英伟达新版时：保留本块；旗标关闭即等价于原版。 */}
       {FEATURE_FLAGS.SINGLE_CLICK_DRAWER ? (
         <AssetDetailsDrawer
-          isOpen={isDetailsOpen && !!selectedItem}
+          /* TC-A4 修复：isOpen 不再依赖 !!selectedItem，让切换卡片时
+             Drawer 持续保持打开（asset 内部用 displayAsset 缓存避免空态闪现）。 */
+          isOpen={isDetailsOpen}
           asset={selectedItem}
           onClose={onDetailsClose}
           getHeaders={getHeaders}

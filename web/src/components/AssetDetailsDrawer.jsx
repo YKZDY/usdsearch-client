@@ -1,23 +1,22 @@
 /**
- * AssetDetailsDrawer — Group A 任务 4 骨架版 + 任务 5 内部布局
+ * AssetDetailsDrawer — Group A 修复版（TC-A4/A5/A8）
  *
  * 用途：替代 AssetDetailsModal，作为右侧详情抽屉的容器组件。
- * 任务 4：骨架 + 插槽 + 折叠态 + 关闭逻辑 ✅
- * 任务 5：5 个区块的具体内容（预览 / 标题 / 元数据 / tags 插槽 / 高级 Accordion）+ 底部操作按钮
  *
- * 设计契约（详见 DRAWER-API.md）：
- *  - placement="right"
- *  - 不阻挡背后列表点击：blockScrollOnMount=false + 透明遮罩
- *  - 折叠态切换：480px ↔ 56px，localStorage 持久化
- *  - 关闭：Esc / 关闭按钮 / 点遮罩
- *  - props.advancedPanelContent / tagsAreaContent 为 B 组提供的插槽
+ * 本轮修复要点：
+ *  - TC-A4：切换卡片时不再"关闭再打开"。父组件已让 isOpen 持续 true，
+ *           本组件用 displayAsset 缓存最后一次非空 asset，避免空态闪现。
+ *  - TC-A5：折叠/关闭按钮分离 — 折叠按钮放左侧顶栏，关闭按钮保留右侧默认。
+ *           新增左边缘 resize 手柄（4px wide hover 显形），360-720px 拖拽调宽，localStorage 持久化。
+ *  - TC-A8：标题改为资产文件名（从 url 末段或 base_key 取），路径降为副信息单行 truncate。
+ *           新增"创建时间"字段。底部去掉"下载"按钮（保留复制路径 + 在 Omniverse 打开）。
+ *           整体视觉重做：卡片化 metadata、图片圆角阴影、品牌色用于强调按钮。
  *
  * Group A ↔ B 契约：
  *  - B 组通过 `tagsAreaContent` 注入完整 tag 编辑器
- *  - B 组通过 `advancedPanelContent` 注入折叠的高级面板（依赖/USD属性/索引管理等）
- *  - 抽屉本身不持有这些状态，纯作为容器透传
+ *  - B 组通过 `advancedPanelContent` 注入折叠的高级面板
  */
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   Drawer,
   DrawerOverlay,
@@ -39,13 +38,13 @@ import {
   AccordionIcon,
   useBreakpointValue,
   useToast,
+  Tooltip,
 } from '@chakra-ui/react';
 import {
   ChevronRightIcon,
   ChevronLeftIcon,
   CopyIcon,
   ExternalLinkIcon,
-  DownloadIcon,
 } from '@chakra-ui/icons';
 import { useTranslation } from '../i18n/LanguageContext';
 import { fabColors, fabRadius, fabSpacing, brandColors } from '../theme/fabTokens';
@@ -53,7 +52,10 @@ import AssetImage from './AssetImage';
 import { formatFileSize, formatDate } from '../utils/formatUtils';
 
 const COLLAPSED_KEY = 'detailsDrawerCollapsed';
-const DRAWER_WIDTH_EXPANDED = '480px';
+const WIDTH_KEY = 'detailsDrawerWidth';
+const DRAWER_WIDTH_DEFAULT = 480;
+const DRAWER_WIDTH_MIN = 360;
+const DRAWER_WIDTH_MAX = 720;
 const DRAWER_WIDTH_COLLAPSED = '56px';
 
 /** 读取折叠态持久化值，失败时回退 false */
@@ -74,6 +76,21 @@ function writeCollapsedState(collapsed) {
   }
 }
 
+/** 读取宽度（持久化），合法范围 360-720，默认 480 */
+function readDrawerWidth() {
+  try {
+    const v = parseInt(localStorage.getItem(WIDTH_KEY) || '', 10);
+    if (Number.isFinite(v) && v >= DRAWER_WIDTH_MIN && v <= DRAWER_WIDTH_MAX) return v;
+  } catch (_) { /* ignore */ }
+  return DRAWER_WIDTH_DEFAULT;
+}
+
+function writeDrawerWidth(width) {
+  try {
+    localStorage.setItem(WIDTH_KEY, String(width));
+  } catch (_) { /* ignore */ }
+}
+
 /** 从 url / base_key 中推断格式后缀（usd / usda / usdz / png / jpg ...） */
 function inferFormat(asset) {
   const path = asset?.source?.url || asset?.source?.base_key || asset?.url || '';
@@ -81,8 +98,21 @@ function inferFormat(asset) {
   return m ? m[1].toUpperCase() : null;
 }
 
+/** 取资产文件名：path 末段去掉查询串，没有就用 name / id */
+function inferAssetName(asset) {
+  if (asset?.name) return asset.name;
+  const path = asset?.source?.url || asset?.source?.base_key || asset?.url || '';
+  if (!path) return asset?.id || '—';
+  // 去查询串和锚点
+  const cleaned = String(path).split('?')[0].split('#')[0];
+  // 去掉协议头与最后的斜杠
+  const seg = cleaned.replace(/\/$/, '').split(/[\\/]/).pop();
+  return seg || cleaned;
+}
+
 /**
- * 单条元数据：左标签 + 右值。窄宽时也保持单行 truncate。
+ * 单条元数据（卡片化）：左标签 + 右值。
+ * 视觉升级：md+ 一行展示，紧凑分隔线，hover 高亮。
  */
 const MetaRow = React.memo(function MetaRow({ label, value, title }) {
   return (
@@ -90,15 +120,21 @@ const MetaRow = React.memo(function MetaRow({ label, value, title }) {
       direction={{ base: 'column', sm: 'row' }}
       gap={{ base: 0, sm: fabSpacing['3'] }}
       align={{ base: 'flex-start', sm: 'baseline' }}
-      py={1}
+      px={fabSpacing['3']}
+      py={fabSpacing['2']}
       borderBottom="1px solid"
       borderColor={fabColors.borderFaint}
+      _last={{ borderBottom: '0' }}
+      _hover={{ bg: 'rgba(255,255,255,0.02)' }}
+      transition="background 120ms ease"
     >
       <Text
         fontSize="xs"
         color={fabColors.textSecondary}
         minW={{ sm: '88px' }}
         flexShrink={0}
+        textTransform="uppercase"
+        letterSpacing="0.04em"
       >
         {label}
       </Text>
@@ -108,6 +144,7 @@ const MetaRow = React.memo(function MetaRow({ label, value, title }) {
         noOfLines={1}
         title={title || (typeof value === 'string' ? value : undefined)}
         wordBreak="break-all"
+        fontWeight="500"
       >
         {value}
       </Text>
@@ -117,19 +154,6 @@ const MetaRow = React.memo(function MetaRow({ label, value, title }) {
 
 /**
  * AssetDetailsDrawer
- *
- * @param {object}        props
- * @param {boolean}       props.isOpen           是否打开
- * @param {object|null}   props.asset            当前展示的资产对象（null 时显示空态骨架）
- * @param {() => void}    props.onClose          关闭回调（Esc / 关闭按钮 / 遮罩）
- * @param {(asset)=>void} [props.onSelectAsset]  抽屉内切换资产（如下一个 / 上一个），任务 8 用
- * @param {ReactNode}     [props.tagsAreaContent]      tags 区域插槽（B 组填充）
- * @param {ReactNode}     [props.advancedPanelContent] 高级折叠面板插槽（B 组填充）
- * @param {ReactNode}     [props.actionButtons]        底部操作按钮区插槽（覆盖默认按钮，可选）
- * @param {() => object}  [props.getHeaders]     用于 AssetImage 拉真实图（鉴权头）
- * @param {string}        [props.apiUrl]         用于 AssetImage 的 API base
- * @param {string}        [props.serverUrl]      Omniverse 跳转用的 server URL（任务 5 操作按钮）
- * @param {(text)=>void}  [props.copyToClipboard] 复制到剪贴板回调（来自父组件）
  */
 const AssetDetailsDrawer = ({
   isOpen,
@@ -145,14 +169,30 @@ const AssetDetailsDrawer = ({
   copyToClipboard,
 }) => {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = React.useState(readCollapsedState);
+  const [collapsed, setCollapsed] = useState(readCollapsedState);
+  const [drawerWidth, setDrawerWidth] = useState(readDrawerWidth);
   const triggerElementRef = useRef(null);
   const toast = useToast();
 
-  // 移动端强制全屏宽度（不受 collapsed 控制）
+  // === LM CUSTOMIZATION: SelectionDrawer START ===
+  // TC-A4 修复：缓存最后一次非空 asset。当父组件短暂传入 null（切换中间态）时，
+  // displayAsset 仍展示旧内容，避免空态/Skeleton 闪现导致的"关闭再打开"视觉错觉。
+  // 仅当 isOpen=false 时才清空 displayAsset。
+  const [displayAsset, setDisplayAsset] = useState(asset || null);
+  useEffect(() => {
+    if (asset) {
+      setDisplayAsset(asset);
+    } else if (!isOpen) {
+      setDisplayAsset(null);
+    }
+    // 抽屉打开但 asset 暂时为 null：保留 displayAsset 不变（防闪烁）
+  }, [asset, isOpen]);
+  // === LM CUSTOMIZATION: SelectionDrawer END ===
+
+  // 移动端强制全屏宽度
   const responsiveWidth = useBreakpointValue({
     base: '100vw',
-    md: collapsed ? DRAWER_WIDTH_COLLAPSED : DRAWER_WIDTH_EXPANDED,
+    md: collapsed ? DRAWER_WIDTH_COLLAPSED : `${drawerWidth}px`,
   });
 
   /** 切换折叠态（持久化） */
@@ -164,22 +204,55 @@ const AssetDetailsDrawer = ({
     });
   }, []);
 
+  // === LM CUSTOMIZATION: SelectionDrawer START ===
+  // TC-A5：左边缘 resize 拖拽 — onMouseDown 起拖，document level 监听 mousemove/mouseup
+  // 范围 360-720px，松手后写 localStorage。SSR 安全 + 移除监听守卫。
+  const resizingRef = useRef(false);
+  const handleResizeStart = useCallback((e) => {
+    e.preventDefault();
+    resizingRef.current = true;
+    const startX = e.clientX;
+    const startWidth = drawerWidth;
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (ev) => {
+      if (!resizingRef.current) return;
+      // 抽屉在右侧：鼠标向左移 = 拓宽（dx 取反）
+      const dx = startX - ev.clientX;
+      const next = Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, startWidth + dx));
+      setDrawerWidth(next);
+    };
+    const onUp = () => {
+      resizingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      // 用最新的 setState 回调拿值持久化（drawerWidth 闭包陈旧）
+      setDrawerWidth((cur) => {
+        writeDrawerWidth(cur);
+        return cur;
+      });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [drawerWidth]);
+  // === LM CUSTOMIZATION: SelectionDrawer END ===
+
   /** 抽屉打开前记录触发元素，关闭后焦点回归（a11y） */
   useEffect(() => {
     if (isOpen) {
       triggerElementRef.current = document.activeElement;
     } else if (triggerElementRef.current && typeof triggerElementRef.current.focus === 'function') {
-      // 关闭后让焦点回到触发卡片（避免焦点丢到 body）
       try {
         triggerElementRef.current.focus({ preventScroll: true });
-      } catch (_) {
-        /* ignore */
-      }
+      } catch (_) { /* ignore */ }
       triggerElementRef.current = null;
     }
   }, [isOpen]);
 
-  /** 服务器切换时强制关闭抽屉（避免展示无效数据） */
+  /** 服务器切换时强制关闭抽屉 */
   useEffect(() => {
     const handler = () => {
       if (isOpen) onClose?.();
@@ -188,9 +261,9 @@ const AssetDetailsDrawer = ({
     return () => window.removeEventListener('server-changed', handler);
   }, [isOpen, onClose]);
 
-  /** 复制路径：优先用父组件传的 copyToClipboard，否则走 navigator.clipboard */
+  /** 复制路径 */
   const handleCopyPath = useCallback(() => {
-    const text = asset?.source?.url || asset?.source?.base_key || asset?.url || '';
+    const text = displayAsset?.source?.url || displayAsset?.source?.base_key || displayAsset?.url || '';
     if (!text) return;
     if (typeof copyToClipboard === 'function') {
       copyToClipboard(text);
@@ -199,40 +272,37 @@ const AssetDetailsDrawer = ({
     try {
       navigator.clipboard?.writeText(text);
       toast?.({ title: t('detailsDrawerCopyPath'), status: 'success', duration: 1500 });
-    } catch (_) {
-      /* ignore */
-    }
-  }, [asset, copyToClipboard, toast, t]);
+    } catch (_) { /* ignore */ }
+  }, [displayAsset, copyToClipboard, toast, t]);
 
-  /** 在 Omniverse 打开（暂用 omniverse:// 协议；占位实现） */
+  /** 在 Omniverse 打开 */
   const handleOpenInOmniverse = useCallback(() => {
-    const url = asset?.source?.url || asset?.source?.base_key || '';
+    const url = displayAsset?.source?.url || displayAsset?.source?.base_key || '';
     if (!url) return;
     const omniUrl = url.startsWith('omniverse://') ? url : `omniverse://${url.replace(/^https?:\/\//, '')}`;
     try {
       window.open(omniUrl, '_self');
-    } catch (_) {
-      /* ignore */
-    }
-  }, [asset]);
+    } catch (_) { /* ignore */ }
+  }, [displayAsset]);
 
-  /** 下载（占位：直接打开原 URL） */
-  const handleDownload = useCallback(() => {
-    const url = asset?.source?.url || asset?.source?.base_key || '';
-    if (!url) return;
-    try {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = '';
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.click();
-    } catch (_) {
-      /* ignore */
-    }
-  }, [asset]);
+  // === LM CUSTOMIZATION: SelectionDrawer START ===
+  // TC-A8 元数据预算（用 displayAsset 取值，配合 useMemo 减少重算）
+  const meta = useMemo(() => {
+    const a = displayAsset;
+    const sizeText = a?.source?.size != null ? formatFileSize(a.source.size) : null;
+    const formatText = inferFormat(a);
+    const modifiedRaw = a?.source?.modified_timestamp;
+    const createdRaw = a?.source?.created_timestamp;
+    const modifiedText = modifiedRaw ? formatDate(modifiedRaw) : null;
+    const createdText = createdRaw ? formatDate(createdRaw) : null;
+    const creatorText = a?.source?.created_by || null;
+    const pathText = a?.source?.url || a?.url || a?.source?.base_key || '';
+    const nameText = inferAssetName(a);
+    return { sizeText, formatText, modifiedText, createdText, creatorText, pathText, nameText };
+  }, [displayAsset]);
+  // === LM CUSTOMIZATION: SelectionDrawer END ===
 
-  // 折叠时只显示一条窄竖条 + 展开按钮
+  // 折叠态：极窄竖条 + 上方一对独立按钮（避免重叠）
   if (collapsed) {
     return (
       <Drawer
@@ -243,13 +313,10 @@ const AssetDetailsDrawer = ({
         trapFocus={false}
         autoFocus={false}
         // === LM CUSTOMIZATION: SelectionDrawer START ===
-        // 原因：折叠态保持与展开态一致的 220ms slide-in 动画契约
-        // 合入英伟达新版时：原版无 Drawer，可保留
         motionPreset="slideInRight"
         preserveScrollBarGap
         // === LM CUSTOMIZATION: SelectionDrawer END ===
       >
-        {/* 透明遮罩：不挡背后点击，但点击仍触发关闭 */}
         <DrawerOverlay bg="transparent" />
         <DrawerContent
           maxW={DRAWER_WIDTH_COLLAPSED}
@@ -258,30 +325,31 @@ const AssetDetailsDrawer = ({
           borderColor={fabColors.borderSubdued}
           boxShadow="-4px 0 24px rgba(0,0,0,0.3)"
         >
-          <Flex direction="column" align="center" pt={fabSpacing['3']} gap={fabSpacing['2']}>
-            <IconButton
-              aria-label={t('detailsDrawerExpand')}
-              icon={<ChevronLeftIcon />}
-              size="sm"
-              variant="ghost"
-              onClick={toggleCollapsed}
-            />
-            <DrawerCloseButton position="static" />
-          </Flex>
+          {/* TC-A5：折叠态把展开按钮放上方居中，关闭按钮放下方，避免重叠 */}
+          <VStack pt={fabSpacing['3']} spacing={fabSpacing['2']}>
+            <Tooltip label={t('detailsDrawerExpand')} placement="left" hasArrow>
+              <IconButton
+                aria-label={t('detailsDrawerExpand')}
+                icon={<ChevronLeftIcon />}
+                size="sm"
+                variant="ghost"
+                onClick={toggleCollapsed}
+              />
+            </Tooltip>
+            <Tooltip label={t('detailsDrawerClose')} placement="left" hasArrow>
+              <IconButton
+                aria-label={t('detailsDrawerClose')}
+                icon={<Box as="span" fontSize="lg" lineHeight="1">×</Box>}
+                size="sm"
+                variant="ghost"
+                onClick={onClose}
+              />
+            </Tooltip>
+          </VStack>
         </DrawerContent>
       </Drawer>
     );
   }
-
-  // 提取出元数据（提前算，asset 可能为 null）
-  const sizeText = asset?.source?.size != null ? formatFileSize(asset.source.size) : null;
-  const formatText = inferFormat(asset);
-  const modifiedText = asset?.source?.modified_timestamp || asset?.source?.created_timestamp
-    ? formatDate(asset?.source?.modified_timestamp || asset?.source?.created_timestamp)
-    : null;
-  const creatorText = asset?.source?.created_by || null;
-  const pathText = asset?.source?.url || asset?.url || asset?.source?.base_key || '';
-  const titleText = asset?.name || asset?.source?.base_key || asset?.id || '—';
 
   return (
     <Drawer
@@ -292,12 +360,9 @@ const AssetDetailsDrawer = ({
       trapFocus
       autoFocus={false}
       // === LM CUSTOMIZATION: SelectionDrawer START ===
-      // 原因：方案 B 需要稳定的 220ms slide-in 动画契约（任务 8 a11y/性能调优）
-      // 合入英伟达新版时：原版无 Drawer，可保留这两条 prop
       motionPreset="slideInRight"
       preserveScrollBarGap
       // === LM CUSTOMIZATION: SelectionDrawer END ===
-      // 关闭快捷键由 Chakra 默认处理 Esc
     >
       <DrawerOverlay bg="transparent" />
       <DrawerContent
@@ -305,30 +370,56 @@ const AssetDetailsDrawer = ({
         bg={fabColors.bgElevatedLow}
         borderLeft="1px solid"
         borderColor={fabColors.borderSubdued}
-        boxShadow="-4px 0 24px rgba(0,0,0,0.3)"
+        boxShadow="-8px 0 32px rgba(0,0,0,0.45)"
+        position="relative"
       >
+        {/* === LM CUSTOMIZATION: SelectionDrawer START === */}
+        {/* TC-A5：左边缘 resize 拖拽手柄。默认 4px 透明，hover 显形为品牌色。 */}
+        <Box
+          aria-label="resize drawer"
+          role="separator"
+          onMouseDown={handleResizeStart}
+          position="absolute"
+          left="0"
+          top="0"
+          bottom="0"
+          width="4px"
+          cursor="ew-resize"
+          zIndex={1}
+          _hover={{ bg: brandColors.primary, opacity: 0.6 }}
+          transition="background 120ms ease, opacity 120ms ease"
+          display={{ base: 'none', md: 'block' }}
+        />
+        {/* === LM CUSTOMIZATION: SelectionDrawer END === */}
+
         <DrawerCloseButton aria-label={t('detailsDrawerClose')} />
 
-        {/* 顶栏：折叠按钮（桌面端） */}
+        {/* TC-A5 顶栏：折叠按钮放左侧（与右上 close 分开） */}
         <Flex
           align="center"
           justify="space-between"
           px={fabSpacing['4']}
-          py={fabSpacing['2']}
+          py={fabSpacing['3']}
           borderBottom="1px solid"
           borderColor={fabColors.borderFaint}
+          bg={`linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%)`}
         >
-          <Heading size="sm" color={fabColors.textPrimary}>
-            {t('detailsDrawerTitle')}
-          </Heading>
-          <IconButton
-            aria-label={t('detailsDrawerCollapse')}
-            icon={<ChevronRightIcon />}
-            size="sm"
-            variant="ghost"
-            display={{ base: 'none', md: 'inline-flex' }}
-            onClick={toggleCollapsed}
-          />
+          <HStack spacing={fabSpacing['2']}>
+            <Tooltip label={t('detailsDrawerCollapse')} placement="bottom" hasArrow>
+              <IconButton
+                aria-label={t('detailsDrawerCollapse')}
+                icon={<ChevronRightIcon />}
+                size="sm"
+                variant="ghost"
+                display={{ base: 'none', md: 'inline-flex' }}
+                onClick={toggleCollapsed}
+              />
+            </Tooltip>
+            <Heading size="sm" color={fabColors.textPrimary} letterSpacing="0.01em">
+              {t('detailsDrawerTitle')}
+            </Heading>
+          </HStack>
+          {/* 右上保留给 DrawerCloseButton 默认位置 */}
         </Flex>
 
         {/* 内容滚动区 */}
@@ -336,24 +427,27 @@ const AssetDetailsDrawer = ({
           flex="1"
           overflowY="auto"
           px={fabSpacing['4']}
-          py={fabSpacing['3']}
+          py={fabSpacing['4']}
         >
-          {asset ? (
+          {displayAsset ? (
             <VStack align="stretch" spacing={fabSpacing['4']}>
-              {/* 区块 1：顶部预览（真实 AssetImage） */}
+              {/* 区块 1：预览图（圆角 + 阴影 + 棋盘背景兜底） */}
               <Box
                 data-section="preview"
-                bg="blackAlpha.300"
-                borderRadius={fabRadius['2']}
+                bg="blackAlpha.500"
+                borderRadius={fabRadius['3']}
                 overflow="hidden"
                 display="flex"
                 alignItems="center"
                 justifyContent="center"
                 minH="220px"
-                maxH="280px"
+                maxH="300px"
+                boxShadow="0 4px 16px rgba(0,0,0,0.3)"
+                border="1px solid"
+                borderColor={fabColors.borderFaint}
               >
                 <AssetImage
-                  result={asset}
+                  result={displayAsset}
                   getHeaders={getHeaders}
                   apiUrl={apiUrl}
                   width="100%"
@@ -362,40 +456,62 @@ const AssetDetailsDrawer = ({
                 />
               </Box>
 
-              {/* 区块 2：标题 / 路径 */}
+              {/* 区块 2：标题 = 资产文件名（不再显示完整 url 占两行）+ 路径副信息 */}
               <Box data-section="title">
-                <Heading size="md" noOfLines={2} color={fabColors.textPrimary}>
-                  {titleText}
-                </Heading>
-                <Text
-                  fontSize="xs"
-                  color={fabColors.textSecondary}
-                  noOfLines={1}
-                  title={pathText}
-                  mt={1}
+                <Heading
+                  size="md"
+                  color={fabColors.textPrimary}
+                  noOfLines={2}
+                  wordBreak="break-all"
+                  letterSpacing="-0.01em"
+                  title={meta.nameText}
                 >
-                  {pathText}
-                </Text>
+                  {meta.nameText}
+                </Heading>
+                {meta.pathText && (
+                  <Text
+                    fontSize="xs"
+                    color={fabColors.textSecondary}
+                    noOfLines={1}
+                    title={meta.pathText}
+                    mt={1}
+                    fontFamily="mono"
+                  >
+                    {meta.pathText}
+                  </Text>
+                )}
               </Box>
 
-              {/* 区块 3：核心元数据（DefinitionList 风格，窄宽自动单列） */}
-              <Box data-section="metadata">
+              {/* 区块 3：核心元数据（卡片化容器） */}
+              <Box
+                data-section="metadata"
+                bg={fabColors.bgElevatedHigh}
+                borderRadius={fabRadius['2']}
+                border="1px solid"
+                borderColor={fabColors.borderFaint}
+                overflow="hidden"
+              >
                 <VStack align="stretch" spacing={0}>
                   <MetaRow
                     label={t('detailsDrawerMetaSize')}
-                    value={sizeText || t('detailsDrawerMetaUnknown')}
+                    value={meta.sizeText || t('detailsDrawerMetaUnknown')}
                   />
                   <MetaRow
                     label={t('detailsDrawerMetaFormat')}
-                    value={formatText || t('detailsDrawerMetaUnknown')}
+                    value={meta.formatText || t('detailsDrawerMetaUnknown')}
+                  />
+                  {/* TC-A8 新增：创建时间字段 */}
+                  <MetaRow
+                    label={t('detailsDrawerMetaCreated')}
+                    value={meta.createdText || t('detailsDrawerMetaUnknown')}
                   />
                   <MetaRow
                     label={t('detailsDrawerMetaModified')}
-                    value={modifiedText || t('detailsDrawerMetaUnknown')}
+                    value={meta.modifiedText || t('detailsDrawerMetaUnknown')}
                   />
                   <MetaRow
                     label={t('detailsDrawerMetaCreator')}
-                    value={creatorText || t('detailsDrawerMetaUnknown')}
+                    value={meta.creatorText || t('detailsDrawerMetaUnknown')}
                   />
                 </VStack>
               </Box>
@@ -403,19 +519,19 @@ const AssetDetailsDrawer = ({
               {/* 区块 4：tags 区域插槽（B 组填充） */}
               <Box data-section="tags">
                 {tagsAreaContent ?? (
-                  <Text fontSize="xs" color={fabColors.textSecondary}>
+                  <Text fontSize="xs" color={fabColors.textSecondary} fontStyle="italic">
                     {t('detailsDrawerTagsSlot')}
                   </Text>
                 )}
               </Box>
 
-              {/* 区块 5：高级折叠面板（默认折叠，B 组填 advancedPanelContent） */}
+              {/* 区块 5：高级折叠面板 */}
               <Box data-section="advanced">
                 <Accordion allowToggle defaultIndex={[]}>
                   <AccordionItem border="0">
                     <AccordionButton
-                      px={2}
-                      py={2}
+                      px={fabSpacing['3']}
+                      py={fabSpacing['2']}
                       _hover={{ bg: fabColors.bgElevatedHigh }}
                       borderRadius={fabRadius['1']}
                     >
@@ -424,9 +540,9 @@ const AssetDetailsDrawer = ({
                       </Box>
                       <AccordionIcon />
                     </AccordionButton>
-                    <AccordionPanel px={0} pt={2}>
+                    <AccordionPanel px={0} pt={fabSpacing['2']}>
                       {advancedPanelContent ?? (
-                        <Text fontSize="xs" color={fabColors.textSecondary}>
+                        <Text fontSize="xs" color={fabColors.textSecondary} fontStyle="italic">
                           {t('detailsDrawerAdvancedSlot')}
                         </Text>
                       )}
@@ -436,10 +552,8 @@ const AssetDetailsDrawer = ({
               </Box>
             </VStack>
           ) : (
-            // 空态：asset 为 null 时显示骨架 + 引导文案
+            // 空态
             // === LM CUSTOMIZATION: SelectionDrawer START ===
-            // 原因：任务 8 a11y — 给 Skeleton 加载态加 role/aria，屏幕阅读器可识别"加载中"
-            // 合入英伟达新版时：原版无 Drawer，可保留
             <VStack
               align="stretch"
               spacing={fabSpacing['3']}
@@ -449,7 +563,7 @@ const AssetDetailsDrawer = ({
               aria-label={t('detailsDrawerEmptyHint')}
             >
             {/* === LM CUSTOMIZATION: SelectionDrawer END === */}
-              <Skeleton height="220px" borderRadius={fabRadius['2']} />
+              <Skeleton height="220px" borderRadius={fabRadius['3']} />
               <Skeleton height="24px" />
               <Skeleton height="16px" width="60%" />
               <Skeleton height="80px" />
@@ -460,8 +574,8 @@ const AssetDetailsDrawer = ({
           )}
         </Box>
 
-        {/* 底部操作按钮区：actionButtons 优先；否则渲染默认 3 按钮 */}
-        {asset && (
+        {/* 底部操作按钮区：TC-A8 去掉"下载"，仅留 复制路径 + 在 Omniverse 打开 */}
+        {displayAsset && (
           <HStack
             px={fabSpacing['4']}
             py={fabSpacing['3']}
@@ -470,6 +584,7 @@ const AssetDetailsDrawer = ({
             spacing={fabSpacing['2']}
             justify="flex-end"
             flexWrap="wrap"
+            bg={`linear-gradient(0deg, rgba(0,0,0,0.2) 0%, transparent 100%)`}
           >
             {actionButtons ?? (
               <>
@@ -484,21 +599,15 @@ const AssetDetailsDrawer = ({
                 </Button>
                 <Button
                   size="sm"
-                  variant="ghost"
-                  leftIcon={<DownloadIcon />}
-                  onClick={handleDownload}
-                  aria-label={t('detailsDrawerDownload')}
-                >
-                  {t('detailsDrawerDownload')}
-                </Button>
-                <Button
-                  size="sm"
                   bg={brandColors.primary}
                   color="black"
-                  _hover={{ bg: brandColors.primary, opacity: 0.85 }}
+                  _hover={{ bg: brandColors.primary, opacity: 0.85, transform: 'translateY(-1px)' }}
+                  _active={{ transform: 'translateY(0)' }}
+                  transition="all 120ms ease"
                   leftIcon={<ExternalLinkIcon />}
                   onClick={handleOpenInOmniverse}
                   aria-label={t('detailsDrawerOpenInOmniverse')}
+                  fontWeight="600"
                 >
                   {t('detailsDrawerOpenInOmniverse')}
                 </Button>

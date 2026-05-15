@@ -743,9 +743,14 @@ const HybridSearchResultItem = memo(({
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // Tooltip text based on mode
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示已不准确
+  // 合入英伟达新版时：保留
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? t('clickOrDoubleClickHint')
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
     ? "rgba(255, 210, 48, 0.15)"

@@ -341,9 +341,14 @@ const VirtualizedResultGridItem = memo(({
   }, [onSelectionChange, result, index]);
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示“单击选中·双击查看详情”已不准确。
+  // SINGLE_CLICK_DRAWER 开启时不显示 tooltip（避免干扰 hover）。
+  // 合入英伟达新版时：保留
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? t('clickOrDoubleClickHint')
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   // Border color: subtle hint in multi-select mode for unselected cards
   const defaultBorderColor = isMultiSelectMode && !isSelected
@@ -693,9 +698,14 @@ const VirtualizedResultListItem = memo(({
   }, [onSelectionChange, result, index]);
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示“单击选中·双击查看详情”已不准确。
+  // SINGLE_CLICK_DRAWER 开启时不显示 tooltip（避免干扰 hover）。
+  // 合入英伟达新版时：保留
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? t('clickOrDoubleClickHint')
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
     ? "rgba(255, 210, 48, 0.15)"

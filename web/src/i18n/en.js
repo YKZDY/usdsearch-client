@@ -263,6 +263,11 @@ const en = {
   clickToViewDetails: "Click to view details",
   clickToSelect: "Click to select/deselect",
   clickOrDoubleClickHint: "Click to select · Double-click for details",
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示会误导
+  // 合入英伟达新版时：保留
+  hintCheckboxToggle: "Checkbox · Ctrl+click · Shift+click range",
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
   // === V2: Batch tagging ===
   batchTag: "Batch tag",
   batchTagDialogTitle: "Tag {count} assets",
@@ -380,6 +385,7 @@ const en = {
   // Task 5: 5-section layout + action button copy
   detailsDrawerMetaSize: "Size",
   detailsDrawerMetaFormat: "Format",
+  detailsDrawerMetaCreated: "Created",
   detailsDrawerMetaModified: "Modified",
   detailsDrawerMetaCreator: "Creator",
   detailsDrawerMetaUnknown: "Unknown",

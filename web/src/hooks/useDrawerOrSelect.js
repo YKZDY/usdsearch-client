@@ -189,8 +189,8 @@ export function useDrawerOrSelect({
 
   /**
    * 双击：
-   *  - drawerEnabled=true：双击不再有特殊语义（方案 B 下单击本体已=打开 Drawer）。
-   *    保留为 no-op，避免与单击产生冲突。
+   *  - drawerEnabled=true：双击本体 = 等同单击本体 = 打开 Drawer
+   *    （用户实测反馈：双击不应无反应；同时双击复选框=维持 toggle 行为，由 onClick 已处理）
    *  - drawerEnabled=false：旗标关闭时由外层 useClickOrDoubleClick 接管，
    *    本 hook 此分支不会被调用（外层 if 跳过）。
    */
@@ -199,9 +199,13 @@ export function useDrawerOrSelect({
     if (!drawerEnabled) {
       // 兼容旧版：双击打开 Modal（仅在外层未接管时作为兜底）
       onOpenLegacyModal?.(asset);
+      return;
     }
-    // drawerEnabled=true：no-op
-  }, [enabled, drawerEnabled, onOpenLegacyModal]);
+    // drawerEnabled=true：双击本体 → 打开 Drawer；双击复选框 → 不触发（onClick 的 toggle 已处理两次）
+    if (!isCheckboxClick(event)) {
+      onOpenDrawer?.(asset);
+    }
+  }, [enabled, drawerEnabled, onOpenLegacyModal, onOpenDrawer]);
 
   /** 暴露 anchor 给外部用于调试 / 测试（不参与渲染） */
   const getAnchorId = useCallback(() => anchorIdRef.current, []);

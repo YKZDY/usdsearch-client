@@ -262,6 +262,11 @@ const zh = {
   selectAll: "全选",
   clickToViewDetails: "点击查看详情",
   clickOrDoubleClickHint: "单击选中 · 双击查看详情",
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示会误导
+  // 合入英伟达新版时：保留
+  hintCheckboxToggle: "点复选框 · Ctrl+点击 · Shift+点击区间",
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
   // === V2: 批量打标签 ===
   batchTag: "批量打标签",
   batchTagDialogTitle: "给 {count} 个资产添加标签",
@@ -380,6 +385,7 @@ const zh = {
   // 任务 5：5 区块布局 + 操作按钮文案
   detailsDrawerMetaSize: "大小",
   detailsDrawerMetaFormat: "格式",
+  detailsDrawerMetaCreated: "创建时间",
   detailsDrawerMetaModified: "修改时间",
   detailsDrawerMetaCreator: "创建者",
   detailsDrawerMetaUnknown: "未知",
