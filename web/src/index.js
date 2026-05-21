@@ -540,6 +540,72 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
             }
         };
 
+        // === LM CUSTOMIZATION: SSO timeout + dev env hint START ===
+        // 原因：
+        //  1. dev 环境（localhost:3000）下，弹窗 cookie 写在 market 域，
+        //     localhost 主页因同源策略读不到 → getSSOToken() 永远返回 null →
+        //     轮询永远不会命中 → loading 状态会一直转。这是浏览器物理限制，
+        //     不是代码 bug，但用户视角很容易误以为是 bug。
+        //  2. 即便在生产域，如果用户中途关掉 SAML 流程或网络异常，也需要
+        //     有总体超时保护，避免 setSsoLoading(true) 永远不被复位。
+        //
+        // 修复策略：
+        //  A. 60s 总超时（safety net）：拿不到 token 就退出 loading + Toast 提示
+        //  B. dev 环境额外提示：3s 后还在 loading 就 Toast 解释这是预期行为，
+        //     建议部署到 staging 验证
+        //
+        // 参考侦察：docs/SSO侦察/plan-A-spec.md § 2.6 边界场景"后端没改完"
+        // 合入英伟达新版时：本块整体可移除（NVIDIA 原版无 IOA SAML 流程）。
+        const isLocalDev = typeof window !== 'undefined' && (
+            window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1'
+        );
+
+        // dev 环境 3s 自动提示（5s 内若未拿到 token，弹 Toast 解释跨域限制）
+        let devHintTimer = null;
+        if (isLocalDev) {
+            devHintTimer = setTimeout(() => {
+                if (fired) return;
+                if (AUTH_CONFIG.SSO_DEBUG) {
+                    // eslint-disable-next-line no-console
+                    console.warn(
+                        '[SSO]',
+                        'dev env detected: market-domain cookies are unreadable from localhost ' +
+                        'due to same-origin policy. The popup will not auto-close on dev. ' +
+                        'Deploy to market.lightart-dev.woa.com staging for full SSO validation.'
+                    );
+                }
+                toast({
+                    title: t('ssoDevEnvHintTitle') || '本地开发环境提示',
+                    description: t('ssoDevEnvHintDesc') ||
+                        '完整 SSO 闭环依赖同域 cookie，localhost 跨域读不到 market 域 cookie，弹窗不会自动关闭。请部署到 staging 验证完整流程。',
+                    status: 'info',
+                    duration: 10000,
+                    isClosable: true,
+                });
+            }, 3000);
+        }
+
+        // 总超时保护（60s）：避免 loading 永远转
+        const ssoTimeoutTimer = setTimeout(() => {
+            if (fired) return;
+            cleanupSSOPolling();
+            setSsoLoading(false);
+            if (devHintTimer) clearTimeout(devHintTimer);
+            // 只有弹窗还活着才提示用户去关，否则视为已关
+            if (ssoWindow && !ssoWindow.closed) {
+                try { ssoWindow.close(); } catch (e) { /* ignore */ }
+            }
+            setSsoError(t('ssoTimeout') || '登录超时，请重试');
+            toast({
+                title: t('ssoTimeout') || '登录超时',
+                description: t('ssoTimeoutLong') || '登录耗时过长，请关闭弹窗后重试',
+                status: 'warning',
+                duration: 8000,
+            });
+        }, 60000);
+        // === LM CUSTOMIZATION: SSO timeout + dev env hint END ===
+
         // 500ms 轮询 localStorage（demo 同款）
         ssoPollingRef.current = setInterval(() => {
             const token = getSSOToken();
@@ -548,15 +614,22 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
             if (ssoWindow.closed && !token) {
                 if (fired) return;
                 cleanupSSOPolling();
+                clearTimeout(ssoTimeoutTimer);
+                if (devHintTimer) clearTimeout(devHintTimer);
                 setSsoLoading(false);
                 if (AUTH_CONFIG.SSO_DEBUG) {
                     // eslint-disable-next-line no-console
-                    console.log('[SSO]', 'popup closed by user before token arrival');
+                    console.log('[SSO]', 'popup closed by user before token arrival',
+                        isLocalDev ? '(dev env: this is expected — see ssoDevEnvHint toast)' : '');
                 }
                 return;
             }
 
-            if (token) processToken(token);
+            if (token) {
+                clearTimeout(ssoTimeoutTimer);
+                if (devHintTimer) clearTimeout(devHintTimer);
+                processToken(token);
+            }
         }, 500);
     }, [backend, selectedServer, auth, setAuth, toast, t, cleanupSSOPolling]);
     // === LM CUSTOMIZATION: SSOLogin END ===

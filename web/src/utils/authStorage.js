@@ -138,13 +138,80 @@ export function persistNucleusToken(server, apiToken) {
 
 // ─── SSO 相关方法 ─────────────────────────────────────────────────────────────
 
+// === LM CUSTOMIZATION: SSO cookie fallback START ===
+// 原因：market 站后端 SAML callback 注入的 <script> 块占位符未替换时（值为
+//   literal 字符串 "<JWT>" / "<refresh JWT>" / "<工号>"），前端从
+//   document.cookie['nucleus_token'] 自取真值兜底。已通过 Playwright 实测
+//   确认 cookie 非 HttpOnly 可读、且 sub 字段即工号。
+//   详见 docs/SSO侦察/plan-A-spec.md § 2.2.6 实测验证报告。
+// 合入英伟达新版时：本块可整体移除（NVIDIA 原版无 IOA SAML 流程）。
+const JWT_PATTERN = /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/;
+
+/**
+ * 校验是否为合法 JWT 格式（3 段 base64url 用 . 分隔，且以 "eyJ" 开头）。
+ * 用于过滤后端注入的 literal 占位符字符串。
+ * @param {string|null|undefined} token
+ * @returns {boolean}
+ */
+function isValidJWT(token) {
+  return typeof token === 'string' && token.length > 0 && JWT_PATTERN.test(token);
+}
+
+/**
+ * 从 document.cookie 读取指定 cookie 值（已 decodeURIComponent）。
+ * @param {string} name cookie 名称
+ * @returns {string|null}
+ */
+function readCookieToken(name) {
+  if (typeof document === 'undefined' || !document.cookie) return null;
+  const prefix = `${name}=`;
+  const found = document.cookie.split('; ').find((row) => row.startsWith(prefix));
+  if (!found) return null;
+  try {
+    return decodeURIComponent(found.slice(prefix.length));
+  } catch (e) {
+    return found.slice(prefix.length);
+  }
+}
+// === LM CUSTOMIZATION: SSO cookie fallback END ===
+
 /**
  * 读取 SSO Token（omni_access_token）。
  * SSO 登录成功后 Nucleus Auth 页面会将 JWT 写入 localStorage。
+ *
+ * === LM CUSTOMIZATION: SSO cookie fallback ===
+ * 升级：当 localStorage 值不是合法 JWT（典型为后端占位符未替换的
+ *      literal "<JWT>"），自动从 document.cookie['nucleus_token']
+ *      兜底取真值并回写 localStorage，保证后续 createApiToken 链路
+ *      拿到合法 JWT。
+ * 合入英伟达新版时：把 fallback 块整体删除即可，保留首行 return 的
+ *      原始行为。
+ *
  * @returns {string|null}
  */
 export function getSSOToken() {
-  return localStorage.getItem(AUTH_STORAGE_KEYS.ssoAccessToken) || null;
+  const lsToken = localStorage.getItem(AUTH_STORAGE_KEYS.ssoAccessToken);
+  if (isValidJWT(lsToken)) return lsToken;
+
+  // === LM CUSTOMIZATION: SSO cookie fallback START ===
+  // localStorage 为空 / 占位符 → 尝试从 cookie 取
+  const cookieAccess = readCookieToken('nucleus_token');
+  if (isValidJWT(cookieAccess)) {
+    // 回写 localStorage，与原链路保持兼容（persistSSOLogin / 轮询逻辑 / Tag 链都会再读它）
+    try {
+      localStorage.setItem(AUTH_STORAGE_KEYS.ssoAccessToken, cookieAccess);
+      const cookieRefresh = readCookieToken('nucleus_refresh');
+      if (isValidJWT(cookieRefresh)) {
+        localStorage.setItem(AUTH_STORAGE_KEYS.ssoRefreshToken, cookieRefresh);
+      }
+    } catch (e) {
+      // localStorage 可能被禁用（隐身模式 / 配额满），fallback 仍能返回 token
+    }
+    return cookieAccess;
+  }
+  // === LM CUSTOMIZATION: SSO cookie fallback END ===
+
+  return null;
 }
 
 /**
