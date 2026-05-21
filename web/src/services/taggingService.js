@@ -231,14 +231,20 @@ async function call(serverUrl, authToken, method, params, meta = {}) {
 
   // [TagFailureSurface] 入口诊断日志：非 production 完整 wsUrl；production 只 host+method
   // token 一律 head4 截断，绝不打印完整 token
+  // [P0 T0] 新增 jwtExp + jwtTtlSeconds，便于"长挂后翻车"场景一眼定位 token 是否过期
   const isProd = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production');
   if (!isProd) {
+    const jwtInfo = decodeJwtExp(authToken);
+    const jwtExp = jwtInfo?.exp ?? null; // 秒级 unix ts
+    const jwtTtlSeconds = jwtExp ? Math.round(jwtExp - Date.now() / 1000) : null;
     console.info('[TaggingService] dialing', {
       host,
       method,
       tokenSource,
       tokenLen: authToken ? authToken.length : 0,
       tokenHead4: tokenHead4(authToken),
+      jwtExp,           // null = 非 JWT（如 API Token）；正数 = 过期时间
+      jwtTtlSeconds,    // null = 非 JWT；负数 = 已过期 N 秒；正数 = 还剩 N 秒
     });
   }
 
@@ -324,6 +330,13 @@ async function call(serverUrl, authToken, method, params, meta = {}) {
 
     ws.onerror = (ev) => {
       // wss 握手失败 / 网络中断 → kind=network（浏览器层面通常拿不到具体 status code）
+      // [P0 T0] 结构化诊断日志：onerror 通常先于 onclose 触发，提前留痕
+      // eslint-disable-next-line no-console
+      console.warn('[TaggingService] wss onerror', {
+        host, method, tokenSource,
+        opened, stage: opened ? 'onerror' : 'onopen',
+        message: ev?.message || 'connection failed',
+      });
       fail(new TaggingError({
         kind: 'network',
         stage: opened ? 'onerror' : 'onopen',
@@ -339,6 +352,12 @@ async function call(serverUrl, authToken, method, params, meta = {}) {
       // 非正常关闭：根据 code 推断 kind
       // 1000=Normal, 1005=No Status；其余都视为异常
       if (ev.code === 1000 || ev.code === 1005) {
+        // [P0 T0] 结构化诊断日志：便于线上排查（替代之前只有 stack trace 的报错）
+        // eslint-disable-next-line no-console
+        console.warn('[TaggingService] closed before response', {
+          host, method, tokenSource, closeCode: ev.code, reason: ev.reason || '',
+          kind: 'unknown', stage: 'onclose',
+        });
         // 正常关闭但未收到响应：归 unknown
         fail(new TaggingError({
           kind: 'unknown',
@@ -357,6 +376,15 @@ async function call(serverUrl, authToken, method, params, meta = {}) {
       // 这里采用启发式：1008 → auth，其它 → network。
       let kind = 'network';
       if (ev.code === 1008) kind = 'auth';
+      // [P0 T0] 结构化诊断日志：含 closeCode + kind 启发式结果，方便对照速查表
+      // eslint-disable-next-line no-console
+      console.warn('[TaggingService] wss closed abnormally', {
+        host, method, tokenSource, closeCode: ev.code, reason: ev.reason || '',
+        kind, stage: 'onclose',
+        hint: kind === 'auth'
+          ? 'access_token 可能过期/无效，将由 useTagManager 触发重登录引导'
+          : '网络/TLS/DNS 异常，建议检查 Nucleus host 可达性',
+      });
       fail(new TaggingError({
         kind,
         stage: 'onclose',
@@ -759,7 +787,24 @@ export async function getTaggingTokenWithMeta(serverUrl, getHeaders, options = {
         };
       }
     } catch (e) {
-      console.warn('[TaggingService] token refresh 失败，fallback 到 API Token:', e.message);
+      // [P0 fix/lm-tag-wss-auth-expiry] refresh 失败 → 清掉 wss 三件套 + 触发统一重登录引导
+      //   1. 不动 API Token（HTTP 链路仍可用），仅清 wss 专用 token
+      //   2. dispatch 'auth-guard-open' reason='wss-refresh-failed'，useAuthGuard 幂等接管
+      //   3. 仍保留下方 fallback 到 headers token 的路径（让 UI 拿到 isExpired=true 的诊断信息）
+      // eslint-disable-next-line no-console
+      console.warn('[TaggingService] token refresh 失败，fallback 到 API Token:', e?.message);
+      try {
+        const [{ clearWssCredentialsOnly }, { requestReauth }] = await Promise.all([
+          import('../utils/authStorage'),
+          import('../utils/authReauthBus'),
+        ]);
+        const aliases = (storageKeyAliases || []).filter((a) => a && a !== serverUrl);
+        clearWssCredentialsOnly(serverUrl, aliases);
+        requestReauth('wss-refresh-failed', { serverUrl });
+      } catch (innerErr) {
+        // eslint-disable-next-line no-console
+        console.warn('[TaggingService] requestReauth dispatch 失败', innerErr?.message);
+      }
     }
   }
 

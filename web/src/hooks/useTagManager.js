@@ -29,6 +29,8 @@ import {
   isValidNucleusHost,
   TaggingError,
 } from '../services/taggingService';
+// [P0 fix/lm-tag-wss-auth-expiry] wss 鉴权失败时统一触发 auth-guard-open 重登录引导
+import { requestReauth } from '../utils/authReauthBus';
 import {
   scheduleReindex,
   cancelReindex,
@@ -470,12 +472,27 @@ export default function useTagManager({ serverUrl, assetPath, initialTags = [], 
     // [A1] localStorage 有 token 但已过期（refresh 也失败 → fallback 到 headers token），
     // 写操作大概率被 server 拒。提前 setLastError 让 UI 知道，但仍尝试一次（API Token 也可能有写权限）。
     if (meta.isExpired) {
-      // 不抛错，只把 isExpired 信息透传给 ws 失败时的诊断；这里仅打 warn
+      // [P0 fix/lm-tag-wss-auth-expiry] preflight short-circuit：
+      //   过期场景下不再让 wss 拨号 10s 后超时，直接抛 auth 错并触发重登录引导。
+      //   - addTag/removeTag 的 catch 仍会标 'failed' 状态 + setLastErrorDedup（UI 行为不变）
+      //   - requestReauth 派发 'auth-guard-open' reason='wss-token-expired'，useAuthGuard 幂等接管
       // eslint-disable-next-line no-console
-      console.warn('[TagManager] using fallback token, original access_token already expired', {
+      console.warn('[TagManager] preflight: tagging token expired, short-circuit + request reauth', {
         source: meta.source,
         jwtExp: meta.jwtExp,
         clockSkewSuspected: meta.clockSkewSuspected,
+        hostUsed: host,
+      });
+      requestReauth('wss-token-expired', { serverUrl: host });
+      throw new TaggingError({
+        kind: 'auth',
+        stage: 'preflight',
+        hostUsed: host,
+        method: 'modify_tags',
+        tokenSource: meta.source,
+        jwtExp: meta.jwtExp,
+        clockSkewSuspected: meta.clockSkewSuspected,
+        message: 'Tagging token expired (preflight short-circuit), please re-login Nucleus',
       });
     }
     tokenRef.current = meta.token;
@@ -574,6 +591,14 @@ export default function useTagManager({ serverUrl, assetPath, initialTags = [], 
             // auth 类错误顺手把写权限关掉，UI 收 input
             if (err instanceof TaggingError && err.kind === 'auth') {
               setHasWritePermission(false);
+              // [P0 fix/lm-tag-wss-auth-expiry] wss 鉴权失败 → 统一触发重登录引导
+              //   - 复用 useAuthGuard.hasShownRef 幂等：连续点 5 次 tag 仅弹 1 次 Modal
+              //   - preflight short-circuit 路径也会抛 kind='auth'，会被这里命中；
+              //     虽然 syncToServer 已经主动 requestReauth 过一次，但二次派发被 hasShownRef 兜底，
+              //     不会造成重复弹窗
+              if (err.stage !== 'preflight') {
+                requestReauth('wss-auth-fail', { serverUrl: hostRef.current });
+              }
             }
           }
         }
@@ -643,6 +668,11 @@ export default function useTagManager({ serverUrl, assetPath, initialTags = [], 
             });
             if (err instanceof TaggingError && err.kind === 'auth') {
               setHasWritePermission(false);
+              // [P0 fix/lm-tag-wss-auth-expiry] removeTag 鉴权失败同样触发重登录引导
+              // preflight 阶段 syncToServer 已主动派发，这里仅处理 wss 实际握手失败的情况
+              if (err.stage !== 'preflight') {
+                requestReauth('wss-auth-fail', { serverUrl: hostRef.current });
+              }
             }
           }
         }
