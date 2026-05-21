@@ -15,6 +15,69 @@ import FilterPopoverButton from './FilterPopoverButton';
 import MemoryChip from './MemoryChip';
 import { useFilterMemory } from '../../hooks/useFilterMemory';
 
+// === LM CUSTOMIZATION: TagsFilterScroll START ===
+// 原因：后端返回的 tag 表可能超过 30 个（v3 原设 slice(0,30) 会隐藏后面），
+// 为让面板不被撑爆且全部可见，将候选区改为固定 maxH 可滚动容器（需求 D-3）。
+// 合入英伟达新版时：保留本 LM CUSTOMIZATION 块 — v3 原版控制仅是 slice(0,30) 贴紧渲染，
+// 不在同一逻辑路径上，本块与它不冲突。
+const TAG_CANDIDATE_LIMIT = 200; // 原为 30；抹平到 200 以让"收纳可滚动"真正生效
+const TAG_SCROLL_MAX_HEIGHT = '160px';
+
+// 自定义细滚动条 + 品牌色协调（与 line 222 已选 chip rgba(255,210,48,0.x) 一脉相承）
+const tagsScrollSx = {
+  '&::-webkit-scrollbar': { width: '6px', height: '6px' },
+  '&::-webkit-scrollbar-track': { background: 'transparent' },
+  '&::-webkit-scrollbar-thumb': {
+    background: 'rgba(255, 210, 48, 0.35)',
+    borderRadius: '3px',
+  },
+  '&::-webkit-scrollbar-thumb:hover': {
+    background: 'rgba(255, 210, 48, 0.55)',
+  },
+  // Firefox
+  scrollbarWidth: 'thin',
+  scrollbarColor: 'rgba(255, 210, 48, 0.35) transparent',
+};
+
+/**
+ * 候选 Tag 单元 — React.memo 包裹避免 > 100 tag 时父重渲染连锁。
+ * 依赖仅 props 依赖项，默认 shallow compare 足够。
+ */
+const CandidateTag = memo(function CandidateTag({ tag, onClick }) {
+  const handleClick = useCallback(() => onClick(tag.value), [onClick, tag.value]);
+  return (
+    <Tag
+      size="md"
+      variant="subtle"
+      bg={tag.source === 'results' ? 'whiteAlpha.100' : 'whiteAlpha.50'}
+      color={tag.source === 'results' ? 'whiteAlpha.800' : 'whiteAlpha.500'}
+      border="1px solid transparent"
+      borderRadius="full"
+      cursor="pointer"
+      px={3}
+      py={1}
+      minH="28px"
+      _hover={{ bg: 'whiteAlpha.200', borderColor: 'whiteAlpha.300' }}
+      // 取消选中后位置回流时的平滑过渡（需求 D-3.6）
+      transition="all 200ms ease"
+      onClick={handleClick}
+      userSelect="none"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleClick();
+        }
+      }}
+    >
+      <TagLabel fontSize="13px">
+        {tag.label} {tag.count > 1 && `(${tag.count})`}
+      </TagLabel>
+    </Tag>
+  );
+});
+// === LM CUSTOMIZATION: TagsFilterScroll END ===
+
 /** Hash icon — 标签图标 */
 const HashIcon = () => (
   <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
@@ -111,7 +174,10 @@ const TagsFilter = memo(function TagsFilter({
         if (a.count !== b.count) return b.count - a.count;
         return a.label.localeCompare(b.label);
       })
-      .slice(0, 30);
+      // === LM CUSTOMIZATION: TagsFilterScroll START ===
+      // 原为 slice(0, 30)；提高上限后由滚动容器接手（需求 D-3.1）
+      .slice(0, TAG_CANDIDATE_LIMIT);
+      // === LM CUSTOMIZATION: TagsFilterScroll END ===
   }, [results, globalTags]);
 
   // 过滤可用标签（排除已激活 + 模糊搜索）
@@ -291,32 +357,34 @@ const TagsFilter = memo(function TagsFilter({
             <Text fontSize="xs" color="whiteAlpha.600" fontWeight="500">
               {t?.('tagsFromResults') || '点击标签可快速添加'}
             </Text>
-            <Wrap spacing={2}>
-              {filteredAvailableTags.map((tag, idx) => (
-                <WrapItem key={idx}>
-                  <Tag
-                    size="md"
-                    variant="subtle"
-                    bg={tag.source === 'results' ? 'whiteAlpha.100' : 'whiteAlpha.50'}
-                    color={tag.source === 'results' ? 'whiteAlpha.800' : 'whiteAlpha.500'}
-                    border="1px solid transparent"
-                    borderRadius="full"
-                    cursor="pointer"
-                    px={3}
-                    py={1}
-                    minH="28px"
-                    _hover={{ bg: 'whiteAlpha.200', borderColor: 'whiteAlpha.300' }}
-                    transition="all 0.15s ease"
-                    onClick={() => handleSelectTag(tag.value)}
-                    userSelect="none"
-                  >
-                    <TagLabel fontSize="13px">
-                      {tag.label} {tag.count > 1 && `(${tag.count})`}
-                    </TagLabel>
-                  </Tag>
-                </WrapItem>
-              ))}
-            </Wrap>
+            {/* === LM CUSTOMIZATION: TagsFilterScroll START === */}
+            {/* 候选区改为固定 maxH 可滚动容器（需求 D-3.1/3.2/3.7）。
+                关键修复（2026-05-15 用户反馈）：
+                  之前加的"上下 4px 渐隐遮罩"不仅没起到提示滚动作用，反而让用户误以为
+                  首末行 tag 被压暗（实际是滚动容器边缘把 tag 半行裁切了）。
+                  现已移除遮罩，并在滚动容器内加 py={2}（上下 8px 内边距），
+                  让首/末行 tag 完整显示，不再贴边裁切。
+                标签数量 ≤ ~10 时 maxH 使容器自适应高度（需求 D-3.3）。
+                合入上游新版时如发生冲突，保留本块、调取上游 Wrap 子项到本容器内即可。 */}
+            <Box
+              maxH={TAG_SCROLL_MAX_HEIGHT}
+              overflowY="auto"
+              overflowX="hidden"
+              pr={1} /* 为滚动条预留空间，避免覆盖倒数第一列 tag */
+              py={2} /* 上下 8px 内边距，避免首/末行 tag 被滚动容器边缘裁切 */
+              sx={tagsScrollSx}
+              role="listbox"
+              aria-label={t?.('tagsFromResults') || '可用标签列表'}
+            >
+              <Wrap spacing={2}>
+                {filteredAvailableTags.map((tag, idx) => (
+                  <WrapItem key={tag.value || idx}>
+                    <CandidateTag tag={tag} onClick={handleSelectTag} />
+                  </WrapItem>
+                ))}
+              </Wrap>
+            </Box>
+            {/* === LM CUSTOMIZATION: TagsFilterScroll END === */}
           </>
         )}
 

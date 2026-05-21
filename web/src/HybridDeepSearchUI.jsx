@@ -106,6 +106,13 @@ import buildSearchPayload from "./utils/buildSearchPayload";
 import { isNoisePath } from "./utils/pathFilters";
 import { getApiLimit } from "./utils/oversample";
 
+// === LM CUSTOMIZATION: NoSelectPolyfill START ===
+// 原因：需求 D-2（拖拽时禁止黄色文本选区）—— A 的 useDragSelect.js 已处理 userSelect / webkitUserSelect
+// 与所有拖拽退出场景，本 hook 仅补防御式 polyfill：Firefox MozUserSelect / IE Edge Legacy msUserSelect / cursor:crosshair。
+// 合入上游新版时：本 import 独立于 NVIDIA 原代码，冲突概率极低。
+import usePolyfillNoSelectPrefixes from "./hooks/usePolyfillNoSelectPrefixes";
+// === LM CUSTOMIZATION: NoSelectPolyfill END ===
+
 
 // === LM CUSTOMIZATION: Copy Deploy Fix START ===
 // 复制 URL 全链路诊断开关。
@@ -167,7 +174,19 @@ const MemoizedResults = React.memo(({
   // 空白处单击退出多选（由父级传入 clearSelection）
   onEmptyAreaClick,
   // === LM CUSTOMIZATION: Search/Tag decoupling v4 — 结果区大标题所需数据 ===
-  titleBarProps
+  titleBarProps,
+  // === LM CUSTOMIZATION: InfinitePagination START ===
+  // 原因：需求 D-1 双层无限滚动。本 props 透传给下游 VirtualizedHybridSearchResults。
+  // 合入上游新版时：MemoizedResults 是本仓定制包装器，props 追加与 NVIDIA 不交叉。
+  hasMore,
+  isLoadingMore,
+  loadMoreError,
+  isResultShortage,
+  onAutoLoadMore,
+  onTriggerBackendLoadMore,
+  onRetryLoadMore,
+  onDragStateChange,
+  // === LM CUSTOMIZATION: InfinitePagination END ===
 }) => {
   const filteredResults = useMemo(() => 
     showOnlyWithPreviews 
@@ -203,6 +222,14 @@ const MemoizedResults = React.memo(({
       onRetryFailed={onRetryFailed}
       onEmptyAreaClick={onEmptyAreaClick}
       titleBarProps={titleBarProps}
+      hasMore={hasMore}
+      isLoadingMore={isLoadingMore}
+      loadMoreError={loadMoreError}
+      isResultShortage={isResultShortage}
+      onAutoLoadMore={onAutoLoadMore}
+      onTriggerBackendLoadMore={onTriggerBackendLoadMore}
+      onRetryLoadMore={onRetryLoadMore}
+      onDragStateChange={onDragStateChange}
     />
   );
 }, (prevProps, nextProps) => {
@@ -484,6 +511,64 @@ const HybridDeepSearchUI = () => {
       isResultShortage: shortage,
     };
   }, [tagFilteredResults, showOnlyWithPreviews, userLimit]);
+
+  // === LM CUSTOMIZATION: InfinitePagination START ===
+  // 原因：需求 D-1 双层无限滚动 + AbortController。
+  // 架构说明见 .codebuddy/plan/group-d-quick-fixes/CODE-RECON.md §1.3：
+  //   —— NVIDIA /search_hybrid 不支持 offset，本仓已有"过采样 + 客户端切片"机制（见上方 visibleResults）。
+  //   —— 第 1 层：滚到底自动增 userLimit（客户端切片）→ 无网络请求
+  //   —— 第 2 层：客户端切片不够（isResultShortage=true）时显示按钮设置更大 limit 重发
+  // 合入上游新版时：本块独立在 visibleResults 后，不交叉 NVIDIA 原代码。
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(null);
+  const [isDraggingForPolyfill, setIsDraggingForPolyfill] = useState(false);
+  // 主搜索 AbortController ref（覆盖验收 TC-D5：新搜索发起时旧请求 abort）
+  const searchAbortRef = useRef(null);
+
+  // 第 1 层：滚到底自动增 userLimit（客户端切片、无网络请求）
+  const handleAutoLoadMore = useCallback(() => {
+    setUserLimit(prev => prev + 50);
+  }, []);
+
+  // 第 2 层：点击"加载更多"按钮→ 调高 searchParams.limit 触发后端二次搜索
+  // 后端返回后会走同步 setUserLimit 逻辑（在 line 831 付近），无需手动同步。
+  // 这里在调 setSearchParams 后调一次 setUserLimit 预设，让 visibleResults 提前多展示。
+  const handleTriggerBackendLoadMore = useCallback(() => {
+    setIsLoadingMore(true);
+    setLoadMoreError(null);
+    setSearchParams(prev => {
+      const cur = parseInt(prev.limit) || DEFAULT_SEARCH_PARAMS.limit;
+      return { ...prev, limit: cur + 50 };
+    });
+    setUserLimit(prev => prev + 50);
+    // 由于 setSearchParams 可能会触发上层 useEffect 重发搜索（如仓里现有逻辑），或需要手动调 handleSearch；
+    // 仓里上游 setSearchParams 不带自动重搜，需手动触发。调用方为 handleSearchRef.current。
+    // 使用 setTimeout 避免状态未同步到 ref 导致警告。
+    setTimeout(() => {
+      if (handleSearchRef.current) handleSearchRef.current();
+    }, 0);
+  }, []);
+
+  // 重试失败的加载更多
+  const handleRetryLoadMore = useCallback(() => {
+    setLoadMoreError(null);
+    handleTriggerBackendLoadMore();
+  }, [handleTriggerBackendLoadMore]);
+
+  // 接收从 VirtualizedHybridSearchResults 上抛的 isDragging，并馈送给 polyfill hook
+  const handleDragStateChange = useCallback((dragging) => {
+    setIsDraggingForPolyfill(dragging);
+  }, []);
+
+  // 调用 polyfill hook：补 Firefox/IE Legacy 前缀 + cursor:crosshair
+  usePolyfillNoSelectPrefixes(isDraggingForPolyfill);
+
+  // hasMore 判定：只要 isResultShortage=false 或底层还有数据就认为还能加载
+  // 简化处理：只要有当前结果且未达到软上限 (默认 1000、5 页”) 认为 hasMore。
+  // 后端返回的总计数（data.total）未入库进状态不能精准判断，用软上限打底免得无限加载。
+  const HARD_LIMIT_USER_LIMIT = 1000;
+  const hasMore = userLimit < HARD_LIMIT_USER_LIMIT && (visibleResults.length > 0 || isResultShortage);
+  // === LM CUSTOMIZATION: InfinitePagination END ===
 
   // pathTree 用 visibleResults 聚合，确保节点徽章数字 == 该路径下实际可见卡片数
   const { tree: pathTree } = usePathSuggestions(visibleResults, { liveTree });
@@ -2105,6 +2190,20 @@ const HybridDeepSearchUI = () => {
     setSimilarSearchAsset(null); // Clear similar search when doing regular search
     setLastSearchQuery(currentQuery); // Store the query being used for this search
     
+    // === LM CUSTOMIZATION: InfinitePagination START ===
+    // 原因：新搜索发起时 abort 旧请求（覆盖验收 TC-D5），同时重置第 1 层 userLimit、清理加载更多状态。
+    // 合入上游新版时：本块仅插在 handleSearch 顶部，与下游 fetch 逻辑不交叉。
+    if (searchAbortRef.current) {
+      try { searchAbortRef.current.abort(); } catch (_) { /* noop */ }
+    }
+    const _abortCtrl = new AbortController();
+    searchAbortRef.current = _abortCtrl;
+    // 第 1 层 userLimit 重置（需求 D-1.3：切搜索词重置 page=1）
+    setUserLimit(parseInt(currentSearchParams.limit) || DEFAULT_SEARCH_PARAMS.limit);
+    setIsLoadingMore(false);
+    setLoadMoreError(null);
+    // === LM CUSTOMIZATION: InfinitePagination END ===
+    
     // Clear active image requests to allow retries on new search
     const { clearActiveRequests } = await import('./utils/imageLoader');
     clearActiveRequests();
@@ -2270,6 +2369,10 @@ const HybridDeepSearchUI = () => {
         method: "POST",
         headers: getHeaders(),
         body: JSON.stringify(requestBody),
+        // === LM CUSTOMIZATION: InfinitePagination START ===
+        // signal: 让本次请求可被后续搜索 abort（需求 D、验收 TC-D5）。
+        signal: _abortCtrl.signal,
+        // === LM CUSTOMIZATION: InfinitePagination END ===
       });
 
       if (response.status === 401) {
@@ -2482,6 +2585,12 @@ const HybridDeepSearchUI = () => {
       }
 
     } catch (error) {
+      // === LM CUSTOMIZATION: InfinitePagination START ===
+      // AbortError 是我们主动 abort 旧请求造成的，不弹 toast / 不记录错误（需求 D、验收 TC-D5）。
+      if (error?.name === 'AbortError') {
+        return; // 静默退出，不走下方 toast
+      }
+      // === LM CUSTOMIZATION: InfinitePagination END ===
       console.error("Search error:", error);
       toast({
         title: t('searchFailed'),
@@ -2490,6 +2599,13 @@ const HybridDeepSearchUI = () => {
         duration: 5000,
       });
     } finally {
+      // === LM CUSTOMIZATION: InfinitePagination START ===
+      // 收尾清理：仅在当前请求仍是本调用发起者时才重置 isLoadingMore，
+      // 避免"后续搜索已接管但旧 finally 最后执行"导致 isLoadingMore 错误关闭。
+      if (searchAbortRef.current === _abortCtrl) {
+        setIsLoadingMore(false);
+      }
+      // === LM CUSTOMIZATION: InfinitePagination END ===
       setIsLoading(false);
     }
   }, [apiUrl, getHeaders, serializeToURL, handleSearchComplete, toast, t, showOnlyWithPreviews]);
@@ -3348,6 +3464,14 @@ const HybridDeepSearchUI = () => {
               onRetryFailed={handleRetryFailedFromCard}
               onEmptyAreaClick={clearSelection}
               titleBarProps={titleBarProps}
+              hasMore={hasMore}
+              isLoadingMore={isLoadingMore}
+              loadMoreError={loadMoreError}
+              isResultShortage={isResultShortage}
+              onAutoLoadMore={handleAutoLoadMore}
+              onTriggerBackendLoadMore={handleTriggerBackendLoadMore}
+              onRetryLoadMore={handleRetryLoadMore}
+              onDragStateChange={handleDragStateChange}
             />
           </GridItem>
         </Grid>

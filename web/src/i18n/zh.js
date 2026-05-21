@@ -649,6 +649,13 @@ const zh = {
   formatExcludeClearAllTip: "清空所有排除（允许所有扩展名）",
   formatExcludeRestoreTip: "恢复默认（排除 USD 文本/图片）",
   formatDefaultExcludeBannerShort: "ℹ 系统默认已排除 USD 文本与图片格式",
+
+  // === Group D — 无限滚动 i18n（追加在文件末尾，与其他 group 冲突概率低） ===
+  infiniteLoading: "加载中...",
+  infiniteNoMore: "已经到底了",
+  infiniteLoadMore: "加载更多",
+  infiniteError: "加载失败",
+  infiniteRetry: "重试",
 };
 
 export default zh;

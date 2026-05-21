@@ -119,6 +119,40 @@ code {
   color: #FFFFFF;
 }
 
+/* === LM CUSTOMIZATION: NoSelectInResults START ===
+   原因（需求 D-2 / Round 7 — 2026-05-15 用户反馈）：
+   - 项目自定义 ::selection 为半透明品牌金 (#FFD230, alpha 0.3)
+   - 多选模式下用户单击卡片文字会触发浏览器 caret 落点 + ::selection 应用
+   - 即便 selectstart 已 preventDefault（Range 长度为 0），文字节点仍会叠加一层
+     金色高亮，与卡片选中态深金棕底 #2a2b1e 复合后，用户感知为"神秘黄色文本选区"
+   策略：在结果卡片子树（[data-card-index]）内禁用 ::selection 视觉表现；
+     搜索框、详情 Modal、tag 输入框等在卡片树之外，不受影响
+   [Round 8 增强 — 2026-05-21]
+   - 用户反馈：Shift+click 跨卡片仍出现"整片大面积金色"
+   - 真因二：跨多卡片的 Range 视觉矩形会铺满 LCA 矩形，包括卡片之间的容器间隙
+     （VStack / Grid gap / Wrap padding），这些间隙节点不在 [data-card-index]
+     子树内，仍命中全局 ::selection rgba(255,210,48,0.3)
+   - 配合 Round 8 在 useDragSelect.js mousedown 阶段拦 Shift+click 清 Range（治本）
+   - 视觉防线：把 ::selection transparent 扩到结果根容器 [data-results-root]，
+     覆盖卡片之间的间隙节点，作为兜底（防御纵深）
+   合入英伟达上游：本规则全部在 LM CUSTOMIZATION 块内，可直接保留 */
+[data-card-index],
+[data-card-index] * {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+[data-card-index] ::selection,
+[data-card-index] *::selection,
+[data-results-root] ::selection,
+[data-results-root] *::selection,
+[data-results-root]::selection {
+  background: transparent !important;
+  color: inherit !important;
+}
+/* === LM CUSTOMIZATION: NoSelectInResults END === */
+
 /* Focus-visible for accessibility */
 *:focus-visible {
   outline: 2px solid #FFD230;

@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, { useMemo, useCallback, memo, useRef } from "react";
+import React, { useMemo, useCallback, useEffect, memo, useRef } from "react";
 import {
   Box,
   VStack,
@@ -39,6 +39,7 @@ import {
   GridItem,
   useDisclosure,
   CircularProgress,
+  Spinner,
 } from "@chakra-ui/react";
 import {
   ChevronDownIcon,
@@ -927,6 +928,22 @@ const VirtualizedHybridSearchResults = ({
   onRetryFailed,
   // 空白处单击（无拖拽）触发：通常用于退出多选；由父级传入 clearSelection
   onEmptyAreaClick,
+  // === LM CUSTOMIZATION: InfiniteScroll START ===
+  // 原因：实现需求 D-1 双层无限滚动 — IntersectionObserver 滚到底自动调
+  // onAutoLoadMore （增 userLimit 客户端切片、无网络请求）；当客户端耗尽
+  // 且 isResultShortage 为真时，显示 ghost 小按钮供用户点击触发后端二次搜索。
+  // 合入上游新版时：本块仅是 props 追加与参数透传，与 NVIDIA 原代码路径不交叉，
+  // 合并冲突概率低。若冲突保留本块、手工补入 NVIDIA 新增的其它 props 即可。
+  hasMore = false,                  // 是否还有更多可加载（客户端 OR 后端任一付答）
+  isLoadingMore = false,            // 后端二次搜索进行中
+  loadMoreError = null,             // 加载错误（字符串或 Error）
+  isResultShortage = false,         // 客户端 filtered 不够 userLimit（起后端二次搜索按钮）
+  onAutoLoadMore,                   // 第 1 层：增 userLimit、客户端切片，无网络请求
+  onTriggerBackendLoadMore,         // 第 2 层：触发更大 limit 的后端二次搜索
+  onRetryLoadMore,                  // 加载出错后的重试回调
+  // 向父级上抛内部 useDragSelect 的 isDragging，供父级 polyfill hook 使用
+  onDragStateChange,
+  // === LM CUSTOMIZATION: InfiniteScroll END ===
 }) => {
   const { t } = useTranslation();
 
@@ -958,6 +975,63 @@ const VirtualizedHybridSearchResults = ({
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
     onEmptyClick: handleEmptyClick,
   });
+
+  // === LM CUSTOMIZATION: InfiniteScroll START ===
+  // 原因：上抛 isDragging 到父级供 polyfill hook 消费（需求 D-2－补充浏览器前缀 + cursor）。
+  // 不重复计算 isDragging、不修改 A 的 useDragSelect，仅做单向出口。
+  // 合入上游时：本 useEffect 独立与 NVIDIA 原代码不交叉。
+  useEffect(() => {
+    if (typeof onDragStateChange === 'function') {
+      onDragStateChange(isDragging);
+    }
+  }, [isDragging, onDragStateChange]);
+
+  // 原因：sentinel + IntersectionObserver 实现滚到底自动加载下一页（需求 D-1.1/1.4）。
+  // root 选 scrollContainerRef.current（VirtualizedResults 暴露的滚动容器），rootMargin
+  // 600px 提前预加载；isLoadingMore guard 防重复触发；hasMore=false 后 disconnect。
+  const sentinelRef = useRef(null);
+  // 用 ref 持有最新 callback 与状态，避免 effect 重装导致 observer 重复创建
+  const onAutoLoadMoreRef = useRef(onAutoLoadMore);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const hasMoreRef = useRef(hasMore);
+  useEffect(() => { onAutoLoadMoreRef.current = onAutoLoadMore; }, [onAutoLoadMore]);
+  useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
+  useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = scrollContainerRef.current;
+    if (!sentinel) return undefined;
+    // 注：root=null 时 IntersectionObserver 退化为 viewport，仍可用；不阻断创建。
+    if (!hasMore) return undefined; // 到底了就不起 observer
+    if (typeof onAutoLoadMoreRef.current !== 'function') return undefined;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry || !entry.isIntersecting) return;
+        if (isLoadingMoreRef.current) return;     // 加载中，忽略
+        if (!hasMoreRef.current) return;          // 到底，忽略
+        try {
+          onAutoLoadMoreRef.current();
+        } catch (e) {
+          // 静默：制资人上报错误交由父级 loadMoreError 处理
+          // eslint-disable-next-line no-console
+          console.warn('[InfiniteScroll] auto load more failed:', e);
+        }
+      },
+      {
+        root: root || null,
+        // 提前 600px 预加载，避免用户看到 spinner 的空白帧
+        rootMargin: '0px 0px 600px 0px',
+        threshold: 0,
+      }
+    );
+    observer.observe(sentinel);
+
+    return () => observer.disconnect();
+  }, [hasMore]); // hasMore 改变时重装跟随状态变化
+  // === LM CUSTOMIZATION: InfiniteScroll END ===
 
   // Calculate score range for normalization
   const { maxScore, minScore } = useMemo(() => {
@@ -1041,7 +1115,36 @@ const VirtualizedHybridSearchResults = ({
   }
 
   return (
-    <VStack spacing={2} align="stretch" flex={1} minH={0} overflow="hidden">
+    <VStack
+      spacing={2}
+      align="stretch"
+      flex={1}
+      minH={0}
+      overflow="hidden"
+      // === LM CUSTOMIZATION: NoTextSelection START ===
+      // 原因（2026-05-15 用户反馈）：A 的 useDragSelect 仅在 mousedown→drag 路径上设 userSelect:none，
+      // 但浏览器原生 Range Selection（Shift+click 跨范围选中）不经过此路径——
+      // 用户先点一张卡片，再 Shift+click 另一张时，浏览器会把两点之间的所有可选文本刷成黄色选区。
+      // 解决方案：在结果区根容器永久禁用文本选区。
+      //   - 卡片标题 / 文件名 / 路径 / 大小 等"可读但不可框选"
+      //   - 用户复制需求由 [📋复制] 按钮承担（已存在 CopyIcon 按钮）
+      //   - Modal 内文本独立于本容器，不受影响
+      //   - 兼容 Firefox MozUserSelect / IE Legacy msUserSelect 前缀
+      // [Round 8 增强 — 2026-05-21] 跨卡片 Shift+click 残余金色防御
+      //   data-results-root 让 index.css 的 [data-results-root] ::selection { transparent }
+      //   覆盖整个结果区（含卡片之间的 VStack/Grid 间隙节点），消除"间隙金色"的视觉残留。
+      //   主修复在 useDragSelect.js 的 mousedown 阶段拦 Shift+click 清 Range（治本），
+      //   本属性是视觉兜底（防御纵深）。
+      // 合入上游新版时：保留本块；如上游 VStack 引入新 props，与本块 sx 合并即可。
+      data-results-root="true"
+      userSelect="none"
+      sx={{
+        WebkitUserSelect: 'none',
+        MozUserSelect: 'none',
+        msUserSelect: 'none',
+      }}
+      // === LM CUSTOMIZATION: NoTextSelection END ===
+    >
       {/* === v5: TitleBar + 结果计数已移入 FabToolbar 合并行，此处不再独立渲染 === */}
 
       {/* Virtualized Results with drag select */}
@@ -1082,6 +1185,61 @@ const VirtualizedHybridSearchResults = ({
           />
         )}
       </Box>
+      {/* === LM CUSTOMIZATION: InfiniteScroll START === */}
+      {/* sentinel + 状态条件 UI（需求 D-1）：
+          — 加载中 → Spinner + "加载中..."
+          — isResultShortage 且 hasMore → ghost 小按钮"加载更多"触发后端二次搜索
+          — 错误 → 红色提示 + 重试按钮
+          — !hasMore → "已经到底了"终态文案
+          sentinel 始终渲染在最外层 VStack 末尾（不受 isLoading / isEmpty 控制），
+          函数顶部的“isLoading return null / isEmpty return EmptySearchHint”已经在上游 early return。 */}
+      <Box ref={sentinelRef} h="1px" data-infinite-sentinel aria-hidden="true" />
+      <Box minH="32px" pt={2} pb={4} display="flex" alignItems="center" justifyContent="center">
+        {isLoadingMore && (
+          <HStack spacing={2} fontSize="xs" color="whiteAlpha.700">
+            <Spinner size="xs" color="#FFD230" thickness="2px" speed="0.6s" />
+            <Text>{t('infiniteLoading') || t('loading') || '加载中...'}</Text>
+          </HStack>
+        )}
+        {!isLoadingMore && loadMoreError && (
+          <HStack spacing={2} fontSize="xs">
+            <Text color="red.300">
+              {t('infiniteError') || '加载失败'}
+            </Text>
+            {typeof onRetryLoadMore === 'function' && (
+              <Button
+                size="xs"
+                variant="ghost"
+                color="#FFD230"
+                _hover={{ bg: 'whiteAlpha.100' }}
+                onClick={onRetryLoadMore}
+                aria-label={t('infiniteRetry') || '重试'}
+              >
+                {t('infiniteRetry') || '重试'}
+              </Button>
+            )}
+          </HStack>
+        )}
+        {!isLoadingMore && !loadMoreError && hasMore && isResultShortage
+          && typeof onTriggerBackendLoadMore === 'function' && (
+          <Button
+            size="xs"
+            variant="ghost"
+            color="whiteAlpha.700"
+            _hover={{ bg: 'whiteAlpha.100', color: '#FFD230' }}
+            onClick={onTriggerBackendLoadMore}
+            aria-label={t('infiniteLoadMore') || '加载更多'}
+          >
+            {t('infiniteLoadMore') || '加载更多'}
+          </Button>
+        )}
+        {!isLoadingMore && !loadMoreError && !hasMore && results.length > 0 && (
+          <Text fontSize="xs" color="whiteAlpha.500" letterSpacing="0.02em">
+            {t('infiniteNoMore') || '已经到底了'}
+          </Text>
+        )}
+      </Box>
+      {/* === LM CUSTOMIZATION: InfiniteScroll END === */}
     </VStack>
   );
 };
