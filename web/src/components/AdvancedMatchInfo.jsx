@@ -31,24 +31,23 @@ import {
   Collapse,
 } from '@chakra-ui/react';
 import { ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons';
-import { brandColors, fabColors, fabRadius, fabSpacing } from '../theme/fabTokens';
+import { brandColors, fabColors, fabPalette, fabRadius, fabSpacing } from '../theme/fabTokens';
 import { useTranslation } from '../i18n/LanguageContext';
 
-/** 把 search_type 映射到一个颜色 token（视觉区分不同检索路径） */
+/** 把 search_type 映射到一个颜色 token（视觉区分不同检索路径）*/
 function searchTypeToToneToken(searchType) {
   // 不用 Chakra colorScheme（依赖主题色板），直接用 fabPalette 的语义令牌
   switch (searchType) {
     case 'hybrid':         return brandColors.primary;          // 金色
     case 'vector':
     case 'text_to_vector':
-    case 'image_to_vector': return '#be3dff';                   // purple.200
-    case 'text':            return '#26bbff';                   // blue.200
-    case 'image_similarity': return '#fd6535';                  // orange.200
+    case 'image_to_vector': return fabPalette.purple[200];      // #be3dff
+    case 'text':            return fabPalette.blue[200];        // #26bbff
+    case 'image_similarity': return fabPalette.orange[200];     // #fd6535
     case 'filter_only':     return fabColors.textSecondary;
     default:                return fabColors.textSecondary;
   }
 }
-
 const AdvancedMatchInfo = memo(function AdvancedMatchInfo({ asset }) {
   const { t } = useTranslation();
   const [rawOpen, setRawOpen] = useState(false);
@@ -222,7 +221,7 @@ const AdvancedMatchInfo = memo(function AdvancedMatchInfo({ asset }) {
                       <Text fontSize="2xs" color={fabColors.textSecondary}>
                         {t('advanced.vectorSimilarity')}
                       </Text>
-                      <Text fontSize="2xs" color="#be3dff" fontWeight="600">
+                      <Text fontSize="2xs" color={fabPalette.purple[200]} fontWeight="600">
                         {(exp.vector_similarity * 100).toFixed(1)}%
                       </Text>
                     </HStack>

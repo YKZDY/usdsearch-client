@@ -35,7 +35,7 @@ import {
   useToast,
 } from '@chakra-ui/react';
 import { AddIcon, RepeatIcon, CheckIcon } from '@chakra-ui/icons';
-import { brandColors, fabColors, fabRadius, fabSpacing } from '../theme/fabTokens';
+import { brandColors, fabColors, fabPalette, fabRadius, fabSpacing } from '../theme/fabTokens';
 import useAssetTags from '../hooks/useAssetTags';
 import { useTranslation } from '../i18n/LanguageContext';
 import TagPill from './TagPill';
@@ -77,8 +77,8 @@ const SourceBadge = memo(function SourceBadge({ source, t }) {
   };
   const colors = {
     user: fabColors.textSecondary,
-    system: '#26bbff',
-    ai: '#be3dff',
+    system: fabPalette.blue[200],
+    ai: fabPalette.purple[200],
   };
   return (
     <Box

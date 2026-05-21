@@ -61,6 +61,12 @@ import { useDragSelect } from "./hooks/useDragSelect";
 import { useClickOrDoubleClick } from "./hooks/useClickOrDoubleClick";
 import TaggedBadge from "./components/TaggedBadge";
 import FailedBadge from "./components/FailedBadge";
+// === LM CUSTOMIZATION: CardTagBar START ===
+// 原因：Group B 需求 1+2 兑底接入。HybridSearchResults 是非虚拟化 fallback（结果数 ≤ 50 时使用），
+// 与 VirtualizedHybridSearchResults 保持一致体验。
+// 合入英伟达新版时：保留本 import。
+import CardTagBar from "./components/CardTagBar";
+// === LM CUSTOMIZATION: CardTagBar END ===
 
 const HighlightedText = ({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
   const truncateProps = {};
@@ -336,6 +342,9 @@ const HybridSearchResultGridItem = memo(({
   isMultiSelectMode = false,
   failedReason = null,
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
   
@@ -597,10 +606,31 @@ const HybridSearchResultGridItem = memo(({
               </HStack>
             )}
 
-            {/* Query Match Badges */}
+            {/* === LM CUSTOMIZATION: CardTagBar START === */}
+            {/* 原 QueryMatchBadges 被业务 tag 区取代；保留原代码以便将来开关。 */}
+            {/*
             {gridSize !== "S" && (
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
             )}
+            */}
+            {gridSize !== "S" ? (
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                maxVisible={gridSize === "L" ? 4 : 3}
+              />
+            ) : (
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                compact
+              />
+            )}
+            {/* === LM CUSTOMIZATION: CardTagBar END === */}
 
             {/* Metadata */}
             <VStack spacing={1} align={gridSize === "S" ? "end" : "stretch"} fontSize="2xs" color="gray.300" flex={1}>
@@ -920,14 +950,23 @@ const HybridSearchResultItem = memo(({
                 </HStack>
               </HStack>
 
-              {/* Query Match Badges */}
+              {/* === LM CUSTOMIZATION: CardTagBar START === */}
+              {/* 原 QueryMatchBadges + SmartHighlightedContent 被业务 tag 区取代。 */}
+              {/*
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
-
-              {/* Smart Highlighted Content */}
               <SmartHighlightedContent 
                 result={result} 
                 searchQuery={searchQuery}
               />
+              */}
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                maxVisible={5}
+              />
+              {/* === LM CUSTOMIZATION: CardTagBar END === */}
 
               {/* Metadata */}
               {result.source && (
@@ -1003,6 +1042,9 @@ const HybridSearchResults = ({
   // V2 U1: 批量失败持久化到卡片
   failedBatchItems = null, // Map<assetUrl, { reason, timestamp }>
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  serverUrl = "",
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
 
@@ -1102,6 +1144,9 @@ const HybridSearchResults = ({
                   isMultiSelectMode={isMultiSelectMode}
                   failedReason={failedEntry?.reason || null}
                   onRetryFailed={onRetryFailed}
+                  /* === LM CUSTOMIZATION: CardTagBar START === */
+                  serverUrl={serverUrl}
+                  /* === LM CUSTOMIZATION: CardTagBar END === */
                 />
               </GridItem>
               );
@@ -1133,6 +1178,9 @@ const HybridSearchResults = ({
                   isMultiSelectMode={isMultiSelectMode}
                   failedReason={failedEntry?.reason || null}
                   onRetryFailed={onRetryFailed}
+                  /* === LM CUSTOMIZATION: CardTagBar START === */
+                  serverUrl={serverUrl}
+                  /* === LM CUSTOMIZATION: CardTagBar END === */
                 />
               </Box>
               );
