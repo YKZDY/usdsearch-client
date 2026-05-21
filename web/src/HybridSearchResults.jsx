@@ -765,6 +765,9 @@ const HybridSearchResultItem = memo(({
   isMultiSelectMode = false,
   failedReason = null,
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
   const { isOpen, onToggle } = useDisclosure();
