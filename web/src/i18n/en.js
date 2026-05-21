@@ -619,6 +619,13 @@ const en = {
   formatExcludeClearAllTip: "Clear all excludes (allow all extensions)",
   formatExcludeRestoreTip: "Restore default (exclude USD text/image)",
   formatDefaultExcludeBannerShort: "ℹ System excludes USD text/image formats by default",
+
+  // === Group D — Infinite scroll i18n (追加在文件末尾，与其他 group 冲突概率低) ===
+  infiniteLoading: "Loading more...",
+  infiniteNoMore: "No more results",
+  infiniteLoadMore: "Load more",
+  infiniteError: "Failed to load more",
+  infiniteRetry: "Retry",
 };
 
 export default en;
