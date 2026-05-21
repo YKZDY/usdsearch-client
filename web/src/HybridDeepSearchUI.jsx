@@ -192,6 +192,12 @@ const MemoizedResults = React.memo(({
   onRetryLoadMore,
   onDragStateChange,
   // === LM CUSTOMIZATION: InfinitePagination END ===
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  // 原因：Group B 需求 — CardTagBar 需要 nucleus host 调 wss tagging。
+  // 透传 nucleusServerUrl（已经 resolveNucleusHost 解析过，是真实 host 如 'ov.qq.com'）到下游。
+  // 合入英伟达新版时：本 prop 追加与 NVIDIA 原代码不交叉，保留。
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const filteredResults = useMemo(() => 
     showOnlyWithPreviews 
@@ -235,6 +241,9 @@ const MemoizedResults = React.memo(({
       onTriggerBackendLoadMore={onTriggerBackendLoadMore}
       onRetryLoadMore={onRetryLoadMore}
       onDragStateChange={onDragStateChange}
+      /* === LM CUSTOMIZATION: CardTagBar START === */
+      serverUrl={serverUrl}
+      /* === LM CUSTOMIZATION: CardTagBar END === */
     />
   );
 }, (prevProps, nextProps) => {
@@ -3521,6 +3530,11 @@ const HybridDeepSearchUI = () => {
               onTriggerBackendLoadMore={handleTriggerBackendLoadMore}
               onRetryLoadMore={handleRetryLoadMore}
               onDragStateChange={handleDragStateChange}
+              // === LM CUSTOMIZATION: CardTagBar START ===
+              // CardTagBar 需要 nucleus host（已经过 resolveNucleusHost 解析）
+              // 合入英伟达新版时：本 prop 透传与 NVIDIA 不交叉，保留。
+              serverUrl={nucleusServerUrl}
+              // === LM CUSTOMIZATION: CardTagBar END ===
             />
           </GridItem>
         </Grid>
