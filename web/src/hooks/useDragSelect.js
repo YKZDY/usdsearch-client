@@ -467,7 +467,26 @@ export function useDragSelect({
   // 全局监听 mousedown/mousemove/mouseup/dragstart
   useEffect(() => {
     if (!enabled) return;
-    const onDown = (e) => handleMouseDown(e);
+    // === LM CUSTOMIZATION: NoSelectInResults START ===
+    // [Round 8 修复 — 2026-05-21] Shift+click 跨卡片产生大面积金色文本选区
+    // 真因：浏览器对 Shift+click "扩展已有 Selection" 走 Selection.extend() 路径，
+    //   该路径在 Chromium 实现里**不派发 selectstart 事件**（W3C 规范允许的实现差异），
+    //   因此 Round 6 的 document selectstart preventDefault 拦不到这条路径。
+    //   现象：用户先单击某张卡片文字（caret 落点），再 Shift+click 另一张卡片文字，
+    //   会产生跨 3+ 卡片的 Range；卡片之间的容器节点不在 [data-card-index] 子树内，
+    //   命中全局 ::selection { rgba(255,210,48,0.3) }，视觉上整片金色。
+    // 策略：在 mousedown 阶段（capture 早期），如果检测到 e.shiftKey && 目标在卡片树内，
+    //   主动 removeAllRanges()——浏览器没有起点可"扩展"，跨卡片 Range 创建不出来。
+    //   不调用 preventDefault（保留 click 事件正常派发），只清理 Selection 状态。
+    // 注：Ctrl/Meta+click 用户实测不出现该问题（可能因为 Chromium 对 Add to Selection
+    //   路径行为与 extend 不同），故仅处理 shiftKey，避免过度工程。
+    const onDown = (e) => {
+      if (e.shiftKey && e.target instanceof Element && e.target.closest('[data-card-index]')) {
+        try { window.getSelection()?.removeAllRanges(); } catch (_) { /* ignore */ }
+      }
+      handleMouseDown(e);
+    };
+    // === LM CUSTOMIZATION: NoSelectInResults END ===
     const onMove = (e) => handleMouseMove(e);
     const onUp = (e) => handleMouseUp(e);
     // 兜底阻断浏览器原生 dragstart：当我们处于 outerPending 或 isActive 时，
@@ -478,6 +497,32 @@ export function useDragSelect({
       if (st && (st.outerPending || st.isActive)) {
         e.preventDefault();
       }
+    };
+
+    // [Round 5 修复 — 2026-05-15] Shift+click 跨范围选中 / 卡片文字单击导致黄色文本选区
+    // 真因：浏览器原生 Range Selection 由 selectstart 事件触发，不经过 mousedown→drag 路径。
+    //   即使在结果容器内永久 user-select:none，CSS 规范规定它"只阻止起点在该元素内的选择"——
+    //   用户先点 toolbar（默认 user-select:text）、再 Shift+click 卡片，浏览器跨边界 Range
+    //   会把 toolbar→结果卡片之间所有 DOM 都标黄。
+    //   v1 仅在 containerRef 内拦截 selectstart：当 target 在 toolbar / sidebar / 卡片文字
+    //   等容器外节点上时，Range 仍会被创建并跨入容器内。
+    // [Round 6 修复 — 2026-05-15] 进一步扩大阻断范围
+    //   产品形态：本应用是资源浏览器，UX 上用户不需要选中卡片文字（要复制 URL 有专门按钮）。
+    //   策略改为：document 上无条件阻断 selectstart，仅放行输入控件白名单。
+    //   等同 Fab.com / Pinterest / Google Photos 的通用做法。
+    // 白名单：input / textarea / contenteditable / [data-allow-select] —— 保留输入选中能力。
+    const onSelectStart = (e) => {
+      const target = e.target;
+      if (!target || !(target instanceof Element)) return;
+      // 白名单：可编辑控件、显式标记可选区域不拦截
+      if (
+        target.closest(
+          'input, textarea, [contenteditable="true"], [contenteditable=""], [data-allow-select="true"]'
+        )
+      ) {
+        return;
+      }
+      e.preventDefault();
     };
 
     // [Round 4 修复 C] 异常路径兜底重置
@@ -519,6 +564,7 @@ export function useDragSelect({
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
     document.addEventListener('dragstart', onDragStart, true);
+    document.addEventListener('selectstart', onSelectStart, true); // Shift+click range select 阻断
     document.addEventListener('pointercancel', onPointerCancel, true);
     window.addEventListener('blur', onWindowBlur);
     document.addEventListener('mouseleave', onDocMouseLeave);
@@ -528,6 +574,7 @@ export function useDragSelect({
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.removeEventListener('dragstart', onDragStart, true);
+      document.removeEventListener('selectstart', onSelectStart, true);
       document.removeEventListener('pointercancel', onPointerCancel, true);
       window.removeEventListener('blur', onWindowBlur);
       document.removeEventListener('mouseleave', onDocMouseLeave);
@@ -535,7 +582,7 @@ export function useDragSelect({
       if (autoScrollRef.current) cancelAnimationFrame(autoScrollRef.current);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
-  }, [enabled, handleMouseDown, handleMouseMove, handleMouseUp]);
+  }, [enabled, containerRef, handleMouseDown, handleMouseMove, handleMouseUp]);
 
   return {
     isDragging,
