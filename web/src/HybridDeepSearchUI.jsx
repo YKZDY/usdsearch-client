@@ -78,6 +78,11 @@ import AssetDetailsModal from "./AssetDetailsModal";
 import AssetDetailsDrawer from "./components/AssetDetailsDrawer";
 import { useDrawerOrSelect } from "./hooks/useDrawerOrSelect";
 // === LM CUSTOMIZATION: SelectionInteraction END ===
+// === LM CUSTOMIZATION: AdvancedPanel START ===
+// 原因：Group B 需求 4 — 抽屉“高级面板”内容插槽填充。
+// 合入英伟达新版时：保留本 import；AdvancedMatchInfo 是 LM 新建组件，与 NVIDIA 不交叉。
+import AdvancedMatchInfo from "./components/AdvancedMatchInfo";
+// === LM CUSTOMIZATION: AdvancedPanel END ===
 import AssetImage from "./components/AssetImage";
 // === LM CUSTOMIZATION: Fab Toolbar START ===
 import FabToolbar from "./components/FabToolbar";
@@ -3562,7 +3567,11 @@ const HybridDeepSearchUI = () => {
           apiUrl={apiUrl}
           serverUrl={nucleusServerUrl}
           copyToClipboard={copyToClipboard}
-          // tagsAreaContent / advancedPanelContent / actionButtons 留给 B 组任务 6+ 注入。
+          // === LM CUSTOMIZATION: AdvancedPanel START ===
+          // Group B 任务 7：高级面板填充原 HYBRID/匹配字段信息
+          advancedPanelContent={selectedItem ? <AdvancedMatchInfo asset={selectedItem} /> : null}
+          // === LM CUSTOMIZATION: AdvancedPanel END ===
+          // tagsAreaContent / actionButtons 留给 B 组后续任务注入。
         />
       ) : (
         selectedItem && (
