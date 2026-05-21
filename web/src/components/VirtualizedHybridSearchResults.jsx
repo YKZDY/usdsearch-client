@@ -357,7 +357,16 @@ const VirtualizedResultGridItem = memo(({
 
   return (
     <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>
+    {/* === LM CUSTOMIZATION: SelectionInteraction START === */}
+    {/* v3.2 修复：补 data-card-index 属性。
+        useDrawerCloseGuard 的 KEEP_OPEN 名单 + useDragSelect 的命中查询都依赖这个属性。
+        缺失会导致：
+          1) 双击打开抽屉后，第二次 mouseup 落在卡片上但因无 data-card-index 被 guard 判为
+             "落在真空白" → 立即触发 onClose → 抽屉秒关（用户反馈 "双击会先弹一下又收回去"）。
+          2) 拖拽框选无法识别卡片 → 框选体验异常。
+        合入英伟达新版时：data-card-index 是无害扩展属性，可保留。 */}
     <Card 
+      data-card-index={index}
       bg={isSelected ? "#2a2b1e" : "rgba(255, 255, 255, 0.05)"} 
       borderColor={isSelected ? "#FFD230" : defaultBorderColor} 
       borderWidth="1px"
@@ -379,6 +388,7 @@ const VirtualizedResultGridItem = memo(({
       overflow="hidden"
       position="relative"
     >
+    {/* === LM CUSTOMIZATION: SelectionInteraction END === */}
       {/* V2 Q1-A: 命中角标（已去除：与 checkbox 打勾视觉冲突） */}
       {/* {isTagHit && <TaggedBadge size={gridSize === 'S' ? 'sm' : 'md'} />} */}
       {/* V2 U1: 失败角标 */}
@@ -1035,7 +1045,12 @@ const VirtualizedHybridSearchResults = ({
       {/* === v5: TitleBar + 结果计数已移入 FabToolbar 合并行，此处不再独立渲染 === */}
 
       {/* Virtualized Results with drag select */}
-      <Box position="relative" flex={1} minH={0}>
+      {/* === LM CUSTOMIZATION: DragSelect START === */}
+      {/* v3 TC-A7 性能优化：拖拽期间 data-dragging="true"，配合下方 <Global> CSS
+          全局禁用所有卡片 transition / animation / box-shadow 过渡，避免每帧重排。
+          松手后立即恢复，0 视觉副作用。 */}
+      <Box position="relative" flex={1} minH={0} data-dragging={isDragging ? 'true' : undefined}>
+      {/* === LM CUSTOMIZATION: DragSelect END === */}
         <VirtualizedResults
           items={results}
           renderItem={viewMode === "grid" ? renderGridItem : renderListItem}

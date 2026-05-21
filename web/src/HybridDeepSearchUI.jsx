@@ -86,6 +86,8 @@ import FabToolbar from "./components/FabToolbar";
 import SelectionModeBar from "./components/SelectionModeBar";
 // === LM CUSTOMIZATION: 全局空白点击退出多选（无涟漪反馈，依赖 Bar 自身淡出动画） ===
 import useExitMultiSelectOnEmptyClick from "./hooks/useExitMultiSelectOnEmptyClick";
+// === LM CUSTOMIZATION: SelectionDrawer === v3 抽屉关闭白名单守卫（修 TC-A4/A6）
+import useDrawerCloseGuard from "./hooks/useDrawerCloseGuard";
 // === V2: 批量打标签工作流 ===
 import BatchTagModal from "./components/BatchTagModal";
 import UndoToast from "./components/UndoToast";
@@ -530,6 +532,8 @@ const HybridDeepSearchUI = () => {
   });
   // === LM CUSTOMIZATION: SelectionInteraction END ===
 
+  // === LM CUSTOMIZATION: SelectionDrawer === v3 useDrawerCloseGuard 接入移到 useDisclosure 之后（避免 TDZ）
+
   // Deselect all but KEEP multi-select mode（"取消全选"按钮走这里）
   // 用户清空选中后仍可继续单击/框选卡片，bar 不会消失
   const deselectAllKeepMode = useCallback(() => {
@@ -931,6 +935,19 @@ const HybridDeepSearchUI = () => {
   // Disclosures
   const { isOpen: isDetailsOpen, onClose: onDetailsClose, onOpen: onDetailsOpen } = useDisclosure();
   const { isOpen: __, onClose: ___onWelcomeClose, onOpen: onWelcomeOpen } = useDisclosure();
+
+  // === LM CUSTOMIZATION: SelectionDrawer START ===
+  // v3 TC-A4/A6 修复：Drawer 打开时的关闭白名单守卫。
+  // - Chakra <Drawer closeOnOverlayClick={false}> 已禁用遮罩点击关闭（在 AssetDetailsDrawer 内）
+  // - 这里再补一个全局监听：仅当用户点击带 [data-true-empty-area="true"] 标记的真空白
+  //   元素时才触发 onDetailsClose。其他位置（卡片/复选框/工具栏/搜索框）一律不关。
+  // - 关闭白名单总览：×按钮 / Esc / server-changed / 真空白点击（共 4 条）
+  // 合入英伟达新版时：保留本块；旗标关闭即等价于原版（NVIDIA 原版不会调用本 hook）。
+  useDrawerCloseGuard({
+    enabled: isDetailsOpen,
+    onClose: onDetailsClose,
+  });
+  // === LM CUSTOMIZATION: SelectionDrawer END ===
 
   // 注：toast 已在本组件靠前位置定义（Copy Deploy Fix 块），此处不再重复声明。
 
@@ -3175,7 +3192,12 @@ const HybridDeepSearchUI = () => {
           </GridItem>
 
           {/* Right Content - Results */}
-          <GridItem overflow="hidden" display="flex" flexDirection="column" h="100%">
+          {/* === LM CUSTOMIZATION: SelectionDrawer === v3 TC-A4 修复：
+               结果区 GridItem 整体打 data-true-empty-area="true"。
+               配合 useDrawerCloseGuard：用户点这个 GridItem 内的"真空白"区域（即卡片以外、
+               工具栏以外、SelectionModeBar 以外的页面背景）才会关闭抽屉；
+               点卡片本身/复选框/工具栏均被 KEEP_OPEN_SELECTOR 短路，不会关抽屉。 */}
+          <GridItem overflow="hidden" display="flex" flexDirection="column" h="100%" data-true-empty-area="true">
             {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar 同层 crossfade 互斥显示 === */}
             {/* 关键：两者渲染在同一 relative 容器内，双层 absolute + opacity 切换；
                  容器高度由 FabToolbar 撑起（SelectionModeBar 设为 absolute 脱离流，

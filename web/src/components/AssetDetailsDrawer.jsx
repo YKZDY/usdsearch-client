@@ -44,7 +44,6 @@ import {
   ChevronRightIcon,
   ChevronLeftIcon,
   CopyIcon,
-  ExternalLinkIcon,
 } from '@chakra-ui/icons';
 import { useTranslation } from '../i18n/LanguageContext';
 import { fabColors, fabRadius, fabSpacing, brandColors } from '../theme/fabTokens';
@@ -271,22 +270,15 @@ const AssetDetailsDrawer = ({
     }
     try {
       navigator.clipboard?.writeText(text);
-      toast?.({ title: t('detailsDrawerCopyPath'), status: 'success', duration: 1500 });
+      // v3 TC-A8：使用专门的 success 文案（不是“复制路径”按钮文案本身）
+      toast?.({ title: t('detailsDrawerCopyPathSuccess'), status: 'success', duration: 1500 });
     } catch (_) { /* ignore */ }
   }, [displayAsset, copyToClipboard, toast, t]);
 
-  /** 在 Omniverse 打开 */
-  const handleOpenInOmniverse = useCallback(() => {
-    const url = displayAsset?.source?.url || displayAsset?.source?.base_key || '';
-    if (!url) return;
-    const omniUrl = url.startsWith('omniverse://') ? url : `omniverse://${url.replace(/^https?:\/\//, '')}`;
-    try {
-      window.open(omniUrl, '_self');
-    } catch (_) { /* ignore */ }
-  }, [displayAsset]);
 
   // === LM CUSTOMIZATION: SelectionDrawer START ===
   // TC-A8 元数据预算（用 displayAsset 取值，配合 useMemo 减少重算）
+  // v3.1：用户反馈来源/评分信息量低且不友好，删除这两个字段。
   const meta = useMemo(() => {
     const a = displayAsset;
     const sizeText = a?.source?.size != null ? formatFileSize(a.source.size) : null;
@@ -313,11 +305,24 @@ const AssetDetailsDrawer = ({
         trapFocus={false}
         autoFocus={false}
         // === LM CUSTOMIZATION: SelectionDrawer START ===
+        // v3 TC-A4/A6 修复：禁用默认遮罩点击关闭（即便遮罩透明，DrawerOverlay 仍会拦截
+        // 卡片/复选框/工具栏的 click 事件，导致用户点任何位置都自动关抽屉）。
+        // 关闭路径改由：×按钮 / Esc / server-changed / useDrawerCloseGuard（真空白）四条白名单。
+        closeOnOverlayClick={false}
+        closeOnEsc
         motionPreset="slideInRight"
         preserveScrollBarGap
         // === LM CUSTOMIZATION: SelectionDrawer END ===
       >
+        {/* === LM CUSTOMIZATION: SelectionDrawer START === */}
+        {/* v3.5 决策：放弃"抽屉打开期间外部可交互"目标（A 方案）。
+            历经多轮调试无法稳定实现：DrawerOverlay 的事件透传与 Chakra 内部焦点/动画管理
+            存在难以根除的副作用。回归保守策略 — overlay 透明但保留事件接收，
+            配合 closeOnOverlayClick={false} 使外部点击"无副作用"（不假死、也不误关）。
+            真正的"点空白关抽屉"由 useDrawerCloseGuard 接管。
+            合入英伟达新版时：保留本块；属性与原版兼容。 */}
         <DrawerOverlay bg="transparent" />
+        {/* === LM CUSTOMIZATION: SelectionDrawer END === */}
         <DrawerContent
           maxW={DRAWER_WIDTH_COLLAPSED}
           bg={fabColors.bgElevatedLow}
@@ -357,14 +362,23 @@ const AssetDetailsDrawer = ({
       placement="right"
       onClose={onClose}
       blockScrollOnMount={false}
-      trapFocus
+      trapFocus={false}
       autoFocus={false}
       // === LM CUSTOMIZATION: SelectionDrawer START ===
+      // v3 TC-A4/A6 修复：禁用默认遮罩点击关闭（即便遮罩透明，DrawerOverlay 仍会拦截
+      // 卡片/复选框/工具栏的 click 事件，导致用户点任何位置都自动关抽屉）。
+      // 关闭路径改由：×按钮 / Esc / server-changed / useDrawerCloseGuard（真空白）四条白名单。
+      // trapFocus 也关闭：避免抽屉打开时焦点被困在 Drawer 内，影响多选/搜索框操作。
+      closeOnOverlayClick={false}
+      closeOnEsc
       motionPreset="slideInRight"
       preserveScrollBarGap
       // === LM CUSTOMIZATION: SelectionDrawer END ===
     >
+      {/* === LM CUSTOMIZATION: SelectionDrawer START === */}
+      {/* v3.5 决策：放弃 A 方案，详见 collapsed 分支同位置注释。 */}
       <DrawerOverlay bg="transparent" />
+      {/* === LM CUSTOMIZATION: SelectionDrawer END === */}
       <DrawerContent
         maxW={responsiveWidth}
         bg={fabColors.bgElevatedLow}
@@ -431,32 +445,40 @@ const AssetDetailsDrawer = ({
         >
           {displayAsset ? (
             <VStack align="stretch" spacing={fabSpacing['4']}>
-              {/* 区块 1：预览图（圆角 + 阴影 + 棋盘背景兜底） */}
+              {/* 区块 1：预览图 — v3.3 简化为 fab.com 风格"撑满预览"
+                  根因：用户反馈"图小"+"上下有黑色虚拟背景"——之前的 contain + 模糊背景方案
+                  让窄竖图两侧露出大量空白；棋盘格本身是资产 PNG 自带（卡片缩略图也是棋盘格），
+                  无法用 CSS 去除。改为：
+                  - 撤销模糊背景层（避免再露出深色边带）
+                  - 前景图 objectFit="cover" 撑满预览容器，与卡片视觉一致
+                  - 16:9 固定比例，避免窄图压扁 */}
               <Box
                 data-section="preview"
-                bg="blackAlpha.500"
+                position="relative"
                 borderRadius={fabRadius['3']}
                 overflow="hidden"
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
-                minH="220px"
-                maxH="300px"
-                boxShadow="0 4px 16px rgba(0,0,0,0.3)"
+                aspectRatio="16/9"
+                boxShadow="0 4px 16px rgba(0,0,0,0.4)"
                 border="1px solid"
                 borderColor={fabColors.borderFaint}
+                bg="rgb(40, 40, 44)"
               >
+                {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+                {/* v3.3：直接用 cover 撑满预览容器，与 VirtualizedHybridSearchResults 行 429 一致。
+                    资产 PNG 自带的棋盘格作为质感纹理保留（与卡片视觉统一）。 */}
                 <AssetImage
                   result={displayAsset}
                   getHeaders={getHeaders}
                   apiUrl={apiUrl}
                   width="100%"
-                  height="280px"
+                  height="100%"
                   borderRadius="0"
+                  objectFit="cover"
                 />
+                {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
               </Box>
-
-              {/* 区块 2：标题 = 资产文件名（不再显示完整 url 占两行）+ 路径副信息 */}
+              {/* 区块 2：标题 = 资产文件名（不再显示完整 url 占两行）+ 路径副信息。
+                  v3 TC-A8：路径行右侧紧贴一个复制路径 IconButton（hover 金色）。 */}
               <Box data-section="title">
                 <Heading
                   size="md"
@@ -469,20 +491,45 @@ const AssetDetailsDrawer = ({
                   {meta.nameText}
                 </Heading>
                 {meta.pathText && (
-                  <Text
-                    fontSize="xs"
-                    color={fabColors.textSecondary}
-                    noOfLines={1}
-                    title={meta.pathText}
-                    mt={1}
-                    fontFamily="mono"
-                  >
-                    {meta.pathText}
-                  </Text>
+                  // === LM CUSTOMIZATION: detail-modal-revamp START ===
+                  <HStack mt={1} spacing={1} align="center">
+                    <Text
+                      fontSize="xs"
+                      color={fabColors.textSecondary}
+                      noOfLines={1}
+                      title={meta.pathText}
+                      fontFamily="mono"
+                      flex="1"
+                      minW={0}
+                    >
+                      {meta.pathText}
+                    </Text>
+                    <Tooltip
+                      label={t('detailsDrawerCopyPathTooltip')}
+                      placement="top"
+                      hasArrow
+                      openDelay={400}
+                    >
+                      <IconButton
+                        aria-label={t('detailsDrawerCopyPath')}
+                        icon={<CopyIcon />}
+                        size="xs"
+                        variant="ghost"
+                        color={fabColors.textSecondary}
+                        _hover={{ color: brandColors.primary, bg: 'rgba(255,210,48,0.08)' }}
+                        _active={{ transform: 'scale(0.95)' }}
+                        onClick={handleCopyPath}
+                        flexShrink={0}
+                      />
+                    </Tooltip>
+                  </HStack>
+                  // === LM CUSTOMIZATION: detail-modal-revamp END ===
                 )}
               </Box>
 
-              {/* 区块 3：核心元数据（卡片化容器） */}
+              {/* 区块 3：核心元数据（卡片化容器）— v3 TC-A8 字段顺序对齐原 Modal：
+                  Source / Path 走上面标题区 / Score / Size / Format / Modified / Created / Tags / Advanced
+                  缺失字段不渲染，避免响亮占空间的“—”占位。 */}
               <Box
                 data-section="metadata"
                 bg={fabColors.bgElevatedHigh}
@@ -492,27 +539,32 @@ const AssetDetailsDrawer = ({
                 overflow="hidden"
               >
                 <VStack align="stretch" spacing={0}>
-                  <MetaRow
-                    label={t('detailsDrawerMetaSize')}
-                    value={meta.sizeText || t('detailsDrawerMetaUnknown')}
-                  />
-                  <MetaRow
-                    label={t('detailsDrawerMetaFormat')}
-                    value={meta.formatText || t('detailsDrawerMetaUnknown')}
-                  />
-                  {/* TC-A8 新增：创建时间字段 */}
-                  <MetaRow
-                    label={t('detailsDrawerMetaCreated')}
-                    value={meta.createdText || t('detailsDrawerMetaUnknown')}
-                  />
-                  <MetaRow
-                    label={t('detailsDrawerMetaModified')}
-                    value={meta.modifiedText || t('detailsDrawerMetaUnknown')}
-                  />
-                  <MetaRow
-                    label={t('detailsDrawerMetaCreator')}
-                    value={meta.creatorText || t('detailsDrawerMetaUnknown')}
-                  />
+                  {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+                  {/* v3.1：删除 Source/Score 两个字段（用户反馈信息量低），保留 Size/Format/Modified/Created/Creator */}
+                  {meta.sizeText ? (
+                    <MetaRow label={t('detailsDrawerMetaSize')} value={meta.sizeText} />
+                  ) : null}
+                  {meta.formatText ? (
+                    <MetaRow label={t('detailsDrawerMetaFormat')} value={meta.formatText} />
+                  ) : null}
+                  {meta.modifiedText ? (
+                    <MetaRow label={t('detailsDrawerMetaModified')} value={meta.modifiedText} />
+                  ) : null}
+                  {meta.createdText ? (
+                    <MetaRow label={t('detailsDrawerMetaCreated')} value={meta.createdText} />
+                  ) : null}
+                  {meta.creatorText ? (
+                    <MetaRow label={t('detailsDrawerMetaCreator')} value={meta.creatorText} />
+                  ) : null}
+                  {/* 全部字段都为空时 fallback：仅显示一行 "Unknown" 提示 */}
+                  {!meta.sizeText && !meta.formatText && !meta.modifiedText &&
+                   !meta.createdText && !meta.creatorText && (
+                    <MetaRow
+                      label={t('detailsDrawerMetaSize')}
+                      value={t('detailsDrawerMetaUnknown')}
+                    />
+                  )}
+                  {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
                 </VStack>
               </Box>
 
@@ -525,28 +577,45 @@ const AssetDetailsDrawer = ({
                 )}
               </Box>
 
-              {/* 区块 5：高级折叠面板 */}
+              {/* 区块 5：高级折叠面板—v3 TC-A8：展开时左侧出现金色 4px 竖线强调 */}
               <Box data-section="advanced">
                 <Accordion allowToggle defaultIndex={[]}>
                   <AccordionItem border="0">
-                    <AccordionButton
-                      px={fabSpacing['3']}
-                      py={fabSpacing['2']}
-                      _hover={{ bg: fabColors.bgElevatedHigh }}
-                      borderRadius={fabRadius['1']}
-                    >
-                      <Box flex="1" textAlign="left" fontSize="sm" color={fabColors.textSecondary}>
-                        {t('detailsDrawerAdvancedTitle')}
-                      </Box>
-                      <AccordionIcon />
-                    </AccordionButton>
-                    <AccordionPanel px={0} pt={fabSpacing['2']}>
-                      {advancedPanelContent ?? (
-                        <Text fontSize="xs" color={fabColors.textSecondary} fontStyle="italic">
-                          {t('detailsDrawerAdvancedSlot')}
-                        </Text>
-                      )}
-                    </AccordionPanel>
+                    {({ isExpanded }) => (
+                      <>
+                        <AccordionButton
+                          px={fabSpacing['3']}
+                          py={fabSpacing['2']}
+                          _hover={{ bg: fabColors.bgElevatedHigh }}
+                          borderRadius={fabRadius['1']}
+                          // === LM CUSTOMIZATION: detail-modal-revamp START ===
+                          borderLeft="4px solid"
+                          borderLeftColor={isExpanded ? brandColors.primary : 'transparent'}
+                          transition="border-left-color 180ms ease, background 120ms ease"
+                          // === LM CUSTOMIZATION: detail-modal-revamp END ===
+                        >
+                          <Box flex="1" textAlign="left" fontSize="sm" color={fabColors.textSecondary}>
+                            {t('detailsDrawerAdvancedTitle')}
+                          </Box>
+                          <AccordionIcon />
+                        </AccordionButton>
+                        <AccordionPanel
+                          px={0}
+                          pt={fabSpacing['2']}
+                          // === LM CUSTOMIZATION: detail-modal-revamp START ===
+                          borderLeft="4px solid"
+                          borderLeftColor={isExpanded ? brandColors.primary : 'transparent'}
+                          transition="border-left-color 180ms ease"
+                          // === LM CUSTOMIZATION: detail-modal-revamp END ===
+                        >
+                          {advancedPanelContent ?? (
+                            <Text fontSize="xs" color={fabColors.textSecondary} fontStyle="italic" px={fabSpacing['3']}>
+                              {t('detailsDrawerAdvancedSlot')}
+                            </Text>
+                          )}
+                        </AccordionPanel>
+                      </>
+                    )}
                   </AccordionItem>
                 </Accordion>
               </Box>
@@ -563,10 +632,32 @@ const AssetDetailsDrawer = ({
               aria-label={t('detailsDrawerEmptyHint')}
             >
             {/* === LM CUSTOMIZATION: SelectionDrawer END === */}
-              <Skeleton height="220px" borderRadius={fabRadius['3']} />
-              <Skeleton height="24px" />
-              <Skeleton height="16px" width="60%" />
-              <Skeleton height="80px" />
+              <Skeleton
+                height="220px"
+                borderRadius={fabRadius['3']}
+                startColor={fabColors.bgElevatedHigh}
+                endColor={fabColors.bgElevatedLow}
+                speed={1.0}
+              />
+              <Skeleton
+                height="24px"
+                startColor={fabColors.bgElevatedHigh}
+                endColor={fabColors.bgElevatedLow}
+                speed={1.0}
+              />
+              <Skeleton
+                height="16px"
+                width="60%"
+                startColor={fabColors.bgElevatedHigh}
+                endColor={fabColors.bgElevatedLow}
+                speed={1.0}
+              />
+              <Skeleton
+                height="80px"
+                startColor={fabColors.bgElevatedHigh}
+                endColor={fabColors.bgElevatedLow}
+                speed={1.0}
+              />
               <Text fontSize="xs" color={fabColors.textSecondary} textAlign="center" mt={2}>
                 {t('detailsDrawerEmptyHint')}
               </Text>
@@ -588,15 +679,7 @@ const AssetDetailsDrawer = ({
           >
             {actionButtons ?? (
               <>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  leftIcon={<CopyIcon />}
-                  onClick={handleCopyPath}
-                  aria-label={t('detailsDrawerCopyPath')}
-                >
-                  {t('detailsDrawerCopyPath')}
-                </Button>
+                {/* v3.5：底部仅保留"复制路径"按钮（删除"在 Omniverse 打开"），升级为黄色主按钮高亮 */}
                 <Button
                   size="sm"
                   bg={brandColors.primary}
@@ -604,12 +687,12 @@ const AssetDetailsDrawer = ({
                   _hover={{ bg: brandColors.primary, opacity: 0.85, transform: 'translateY(-1px)' }}
                   _active={{ transform: 'translateY(0)' }}
                   transition="all 120ms ease"
-                  leftIcon={<ExternalLinkIcon />}
-                  onClick={handleOpenInOmniverse}
-                  aria-label={t('detailsDrawerOpenInOmniverse')}
+                  leftIcon={<CopyIcon />}
+                  onClick={handleCopyPath}
+                  aria-label={t('detailsDrawerCopyPath')}
                   fontWeight="600"
                 >
-                  {t('detailsDrawerOpenInOmniverse')}
+                  {t('detailsDrawerCopyPath')}
                 </Button>
               </>
             )}
