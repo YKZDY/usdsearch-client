@@ -82,6 +82,11 @@ import AssetImage from "./components/AssetImage";
 // === LM CUSTOMIZATION: Fab Toolbar START ===
 import FabToolbar from "./components/FabToolbar";
 // === LM CUSTOMIZATION: Fab Toolbar END ===
+// === LM CUSTOMIZATION: Search Settings Popover START ===
+// 原因：C 组任务 3 — 顶栏齿轮按钮触发的搜索设置面板（搜索方法 / 每页结果数 / 去重 / Tag 权重 / 高级混合配置）
+// 合入英伟达新版时：保留这一行 import 和下方对应 JSX 区块即可
+import SearchSettingsPopover from "./components/SearchSettingsPopover";
+// === LM CUSTOMIZATION: Search Settings Popover END ===
 // === LM CUSTOMIZATION: Selection Mode Bar ===
 import SelectionModeBar from "./components/SelectionModeBar";
 // === LM CUSTOMIZATION: 全局空白点击退出多选（无涟漪反馈，依赖 Bar 自身淡出动画） ===
@@ -1074,6 +1079,20 @@ const HybridDeepSearchUI = () => {
 
   // URL serialization functions (memoized to stabilize handleFindSimilar reference)
   const serializedDefaultHybridConfig = useMemo(() => JSON.stringify(DEFAULT_HYBRID_CONFIG), []);
+
+  // === LM CUSTOMIZATION: SearchSettingsCustomBadge START ===
+  // 原因：C 组任务 4.6 — 顶栏齿轮按钮需要"Custom"小圆点提示用户当前有非默认配置；
+  //       但 hybridConfig state 在 HybridDeepSearchUI 内部，顶栏触发器在 index.js 里，
+  //       两者跨组件树。用 CustomEvent 单向广播是最小侵入解法。
+  // 合入英伟达新版时：保留本 useEffect。
+  useEffect(() => {
+    const isCustom = serializedHybridConfig !== serializedDefaultHybridConfig;
+    window.dispatchEvent(
+      new CustomEvent('hybrid-config-customized', { detail: { isCustom } }),
+    );
+  }, [serializedHybridConfig, serializedDefaultHybridConfig]);
+  // === LM CUSTOMIZATION: SearchSettingsCustomBadge END ===
+
   const serializeToURL = useCallback((backendOverride = null) => {
     const params = new URLSearchParams();
     
@@ -1197,8 +1216,23 @@ const HybridDeepSearchUI = () => {
     const scores = urlParams.get('scores');
     if (scores === 'true') setShowScores(true);
     
+    // === LM CUSTOMIZATION: HideListView START ===
+    // 原因：List 视图入口被隐藏后，旧分享链接 ?view=list 或 localStorage 残留 viewMode=list
+    //   仍可能塞回 'list'，导致用户期望"看到 List"但 UI 找不到入口去切回 Grid。
+    //   这里在 URL 反序列化时对 'list' 做静默降级到 'grid'。同时清掉 localStorage 中
+    //   任何残留的 viewMode='list'（防御式：当前代码没主动写过该 key，但用户/浏览器扩展可能已塞过）。
+    // 合入英伟达新版时：如英伟达正式弃用 List 视图，则可以删除本块；否则保留。
     const view = urlParams.get('view');
-    if (view) setViewMode(view);
+    if (view) {
+      setViewMode(view === 'list' ? 'grid' : view);
+    }
+    try {
+      const lsView = window.localStorage?.getItem('viewMode');
+      if (lsView === 'list') {
+        window.localStorage.setItem('viewMode', 'grid');
+      }
+    } catch (_) { /* localStorage 不可用时静默忽略 */ }
+    // === LM CUSTOMIZATION: HideListView END ===
     
     const gridSizeParam = urlParams.get('gridSize');
     if (gridSizeParam) setGridSize(gridSizeParam);
@@ -3437,6 +3471,21 @@ const HybridDeepSearchUI = () => {
               </Box>
             </Box>
             {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar crossfade END === */}
+            {/* === LM CUSTOMIZATION: Search Settings Popover START ===
+                 原因：C 组任务 3 — 从顶栏齿轮按钮触发的搜索设置面板。
+                 本身不占布局空间（fixed 定位 + isOpen 受控）；
+                 监听 CustomEvent('open-search-settings') 开启，与 FabToolbar 的视图设置 Popover 互斥。
+                 合入英伟达新版时：本区块整体保留。 */}
+            <SearchSettingsPopover
+              hybridConfig={hybridConfig}
+              onHybridConfigChange={setHybridConfig}
+              searchParams={searchParams}
+              setSearchParams={setSearchParams}
+              onTriggerSearch={triggerSearchFromToolbar}
+              defaultHybridConfig={DEFAULT_HYBRID_CONFIG}
+              defaultSearchParams={DEFAULT_SEARCH_PARAMS}
+            />
+            {/* === LM CUSTOMIZATION: Search Settings Popover END === */}
             <MemoizedResults
               results={visibleResults}
               showOnlyWithPreviews={false}
