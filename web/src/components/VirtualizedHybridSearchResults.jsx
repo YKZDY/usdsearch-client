@@ -61,6 +61,11 @@ import { useDragSelect } from "../hooks/useDragSelect";
 import { useClickOrDoubleClick } from "../hooks/useClickOrDoubleClick";
 import TaggedBadge from "./TaggedBadge";
 import FailedBadge from "./FailedBadge";
+// === LM CUSTOMIZATION: CardTagBar START ===
+// 原因：Group B 需求 1+2 — 卡片底部以业务 tag 区取代原 匹配字段标签。
+// 合入英伟达新版时：保留本 import；CardTagBar 是 LM 新建组件，与 NVIDIA 原代码路径不交叉。
+import CardTagBar from "./CardTagBar";
+// === LM CUSTOMIZATION: CardTagBar END ===
 
 // Memoized components for better performance
 const HighlightedText = memo(({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
@@ -296,6 +301,11 @@ const VirtualizedResultGridItem = memo(({
   isMultiSelectMode = false,
   failedReason = null,
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  // serverUrl 供 CardTagBar 调 useGlobalTags / useTagManager 使用。
+  // 合入英伟达新版时：保留本 prop。
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
   const baseKey = result.source?.base_key || result.source?.url || result.id;
@@ -537,9 +547,33 @@ const VirtualizedResultGridItem = memo(({
               </HStack>
             )}
 
+            {/* === LM CUSTOMIZATION: CardTagBar START === */}
+            {/* 原 QueryMatchBadges（HYBRID/匹配字段标签）被业务 tag 区取代。
+                保留原代码注释，以便将来回滚或接“管理者高级模式”开关。
+                合入英伟达新版时：本块是 LM 业务代码，保留。 */}
+            {/*
             {gridSize !== "S" && (
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
             )}
+            */}
+            {gridSize !== "S" ? (
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                maxVisible={gridSize === "L" ? 4 : 3}
+              />
+            ) : (
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                compact
+              />
+            )}
+            {/* === LM CUSTOMIZATION: CardTagBar END === */}
 
             <VStack spacing={1} align={gridSize === "S" ? "end" : "stretch"} fontSize="2xs" color="gray.300" flex={1}>
               {result.source?.size && (
@@ -653,6 +687,9 @@ const VirtualizedResultListItem = memo(({
   isMultiSelectMode = false,
   failedReason = null,
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
   const { isOpen, onToggle } = useDisclosure();
@@ -856,8 +893,21 @@ const VirtualizedResultListItem = memo(({
                 </HStack>
               </HStack>
 
+              {/* === LM CUSTOMIZATION: CardTagBar START === */}
+              {/* 原 QueryMatchBadges + SmartHighlightedContent（HYBRID/匹配字段标签）
+                  被业务 tag 区取代，原代码注释保留。 */}
+              {/*
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
               <SmartHighlightedContent result={result} searchQuery={searchQuery} />
+              */}
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                maxVisible={5}
+              />
+              {/* === LM CUSTOMIZATION: CardTagBar END === */}
 
               {result.source && (
                 <VStack spacing={1} align="stretch" fontSize="sm" color="gray.300">
@@ -944,6 +994,10 @@ const VirtualizedHybridSearchResults = ({
   // 向父级上抛内部 useDragSelect 的 isDragging，供父级 polyfill hook 使用
   onDragStateChange,
   // === LM CUSTOMIZATION: InfiniteScroll END ===
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  // serverUrl 从父级 HybridDeepSearchUI 透传，由下游透传到 GridItem/ListItem 给 CardTagBar 使用。
+  serverUrl = "",
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
 
@@ -1064,9 +1118,12 @@ const VirtualizedHybridSearchResults = ({
       isMultiSelectMode={isMultiSelectMode}
       failedReason={failedEntry?.reason || null}
       onRetryFailed={onRetryFailed}
+      /* === LM CUSTOMIZATION: CardTagBar START === */
+      serverUrl={serverUrl}
+      /* === LM CUSTOMIZATION: CardTagBar END === */
     />
     );
-  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, gridSize, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed]);
+  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, gridSize, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed, serverUrl]);
 
   // List item renderer
   const renderListItem = useCallback((result, index) => {
@@ -1090,9 +1147,12 @@ const VirtualizedHybridSearchResults = ({
       isMultiSelectMode={isMultiSelectMode}
       failedReason={failedEntry?.reason || null}
       onRetryFailed={onRetryFailed}
+      /* === LM CUSTOMIZATION: CardTagBar START === */
+      serverUrl={serverUrl}
+      /* === LM CUSTOMIZATION: CardTagBar END === */
     />
     );
-  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, maxScore, minScore, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed]);
+  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, maxScore, minScore, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed, serverUrl]);
 
   const handleCopyAllUrls = useCallback(() => {
     const allUrls = results.map((result) => 
