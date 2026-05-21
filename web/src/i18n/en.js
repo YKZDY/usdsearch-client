@@ -214,6 +214,9 @@ const en = {
   resetToDefault: "Reset to default",
   settingsResetTitle: "Settings reset",
   settingsResetDesc: "All search settings restored to default",
+  settingsResetUndoHint: "Click Undo within 5s to revert",
+  settingsResetUndoneTitle: "Reset undone",
+  settingsResetUndoneDesc: "Previous search settings restored",
   searchSettingsCustomized: "Search settings (customized)",
   // Tag matching weight slider
   tagWeightLabel: "Tag matching weight",

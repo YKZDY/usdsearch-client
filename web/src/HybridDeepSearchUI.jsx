@@ -82,6 +82,7 @@ import FabToolbar from "./components/FabToolbar";
 import SearchSettingsPopover from "./components/SearchSettingsPopover";
 // === LM CUSTOMIZATION: Search Settings Popover END ===
 // === LM CUSTOMIZATION: Selection Mode Bar ===
+import SelectionModeBar from "./components/SelectionModeBar";
 // === LM CUSTOMIZATION: 全局空白点击退出多选（无涟漪反馈，依赖 Bar 自身淡出动画） ===
 import useExitMultiSelectOnEmptyClick from "./hooks/useExitMultiSelectOnEmptyClick";
 // === V2: 批量打标签工作流 ===

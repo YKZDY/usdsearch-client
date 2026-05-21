@@ -214,6 +214,9 @@ const zh = {
   resetToDefault: "重置为默认",
   settingsResetTitle: "设置已重置",
   settingsResetDesc: "所有搜索设置已恢复为默认值",
+  settingsResetUndoHint: "5 秒内点击撤销可还原",
+  settingsResetUndoneTitle: "已撤销重置",
+  settingsResetUndoneDesc: "已还原到重置前的搜索设置",
   searchSettingsCustomized: "搜索设置（已自定义）",
   // Tag 匹配权重滑动条
   tagWeightLabel: "Tag 匹配权重",

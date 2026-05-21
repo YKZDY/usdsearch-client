@@ -31,7 +31,7 @@ import {
   Text,
   IconButton,
   Switch,
-  Divider,
+  // Divider,  // 4.6b 清理后不再使用；NVIDIA 合入时以此注释作为对照点
   // RadioGroup,  // 随"搜索方法"被搬到 SearchSettingsPopover；保留位置便于 NVIDIA 合入对照
   // Radio,
   useDisclosure,
@@ -41,7 +41,7 @@ import {
   SettingsIcon,
   ChevronDownIcon,
   ViewIcon,
-  HamburgerIcon,
+  // HamburgerIcon,  // List 视图按钮被 HideListView 注释后未使用；恢复 List 视图时重新启用
   AddIcon,
   MinusIcon,
 } from '@chakra-ui/icons';
@@ -181,8 +181,16 @@ function FabToolbar({
     window.addEventListener('close-view-settings', handleClose);
     return () => window.removeEventListener('close-view-settings', handleClose);
   }, [viewSettings]);
+  // 4.8 UX 修复：与 SearchSettingsPopover 一致改为 toggle 语义。
+  //   原写法只调 onOpen()，导致"打开后再点齿轮无反应"（已开 → onOpen 是 noop，
+  //   且本身 onClick 覆盖了 PopoverTrigger 的默认 toggle 行为）。
+  //   现在：未开则开 + 派发互斥事件；已开则关（不派事件，避免误关搜索设置）。
   const handleOpenViewSettings = useCallback(() => {
-    // 互斥：通知搜索设置 Popover 关闭
+    if (viewSettings.isOpen) {
+      viewSettings.onClose();
+      return;
+    }
+    // 互斥：通知搜索设置 Popover 关闭（仅在 "即将打开" 时）
     window.dispatchEvent(new CustomEvent('close-search-settings'));
     viewSettings.onOpen();
   }, [viewSettings]);

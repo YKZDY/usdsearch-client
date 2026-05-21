@@ -120,43 +120,71 @@ export default function TagWeightSlider({ hybridConfig, onCommit, isDisabled = f
 
   const showResetButton = localSlider !== 50 || isCustom;
 
-  // SliderMark 的样式（5 档刻度文字）
+  // === LM CUSTOMIZATION: TagWeightSlider UX polish START ===
+  // 5 档刻度全文字映射（短词 + i18n key）—— 替换原版的 `·` 占位，提升可扫读性
+  const ANCHOR_SHORT_LABELS = {
+    0:   { key: 'tagWeightOff',     fallback: 'Off' },
+    25:  { key: 'tagWeightLoose',   fallback: 'Loose' },
+    50:  { key: 'tagWeightDefault', fallback: 'Default' },
+    75:  { key: 'tagWeightTagFav',  fallback: 'Tag-fav' },
+    100: { key: 'tagWeightStrict',  fallback: 'Strict' },
+  };
+
+  // SliderMark 的基础样式（不带"是否当前档"的高亮态）
   const markBaseSx = {
-    mt: '8px',
-    fontSize: '10px',
+    mt: '10px',
+    fontSize: '9px',
     color: 'whiteAlpha.500',
     transform: 'translateX(-50%)',
     pointerEvents: 'none',
     whiteSpace: 'nowrap',
+    transition: 'color 160ms ease, font-weight 160ms ease',
   };
+  const markActiveSx = {
+    ...markBaseSx,
+    fontSize: '10px',
+    color: '#FFD230',
+    fontWeight: 700,
+  };
+
+  // 当前档位徽章文案（"默认 · 50" / "Custom"）
+  const badgeText = isCustom
+    ? tt('tagWeightCustom', 'Custom')
+    : `${currentLabel}${currentLabel ? ' · ' : ''}${localSlider}`;
+  // === LM CUSTOMIZATION: TagWeightSlider UX polish END ===
 
   return (
     <FormControl isDisabled={isDisabled}>
-      {/* 标题行：Label + Custom Badge + 重置按钮 */}
-      <HStack justify="space-between" align="center" mb={2}>
-        <HStack spacing={2}>
-          <FormLabel fontSize="sm" mb={0} fontWeight="medium">
+      {/* === LM CUSTOMIZATION: TagWeightSlider UX polish START ===
+           顶部标题行：标题 + 当前档位徽章 + 重置按钮
+           — 徽章替代了原本的"Custom"独立 Badge（Custom 时改为黄色填充强提示） */}
+      <HStack justify="space-between" align="center" mb={3}>
+        <HStack spacing={2} minW={0}>
+          <FormLabel fontSize="sm" mb={0} fontWeight="medium" whiteSpace="nowrap">
             {tt('tagWeightLabel', 'Tag matching weight')}
           </FormLabel>
-          {isCustom && (
-            <Tooltip
-              label={tt('tagWeightCustomTip', 'Edit details in advanced hybrid config')}
-              placement="top"
-              hasArrow
+          <Tooltip
+            label={
+              isCustom
+                ? tt('tagWeightCustomTip', 'Edit details in advanced hybrid config')
+                : tt('tagWeightAnchorTip', 'Snap-to-anchor preset')
+            }
+            placement="top"
+            hasArrow
+          >
+            <Badge
+              colorScheme="yellow"
+              variant={isCustom ? 'solid' : 'subtle'}
+              fontSize="10px"
+              px={2}
+              py={0.5}
+              borderRadius="full"
+              cursor="help"
+              flexShrink={0}
             >
-              <Badge
-                colorScheme="yellow"
-                variant="subtle"
-                fontSize="10px"
-                px={2}
-                py={0.5}
-                borderRadius="full"
-                cursor="help"
-              >
-                {tt('tagWeightCustom', 'Custom')}
-              </Badge>
-            </Tooltip>
-          )}
+              {badgeText}
+            </Badge>
+          </Tooltip>
         </HStack>
         {showResetButton && (
           <Tooltip label={tt('resetToDefault', 'Reset to default')} placement="top" hasArrow>
@@ -172,8 +200,9 @@ export default function TagWeightSlider({ hybridConfig, onCommit, isDisabled = f
         )}
       </HStack>
 
-      {/* Slider 主体 + 5 档刻度 */}
-      <Box px={3} pb={6}>
+      {/* Slider 主体 + 5 档刻度（全文字，当前档金色加粗）
+           轨道用灰→金渐变作为底色，强化"权重越右越严格"的视觉语义 */}
+      <Box px={3} pb={7} pt={1}>
         <Slider
           aria-label={tt('tagWeightLabel', 'Tag matching weight')}
           aria-valuetext={`${localSlider} — ${currentLabel}`}
@@ -187,29 +216,49 @@ export default function TagWeightSlider({ hybridConfig, onCommit, isDisabled = f
           isDisabled={isDisabled}
           focusThumbOnChange={false}
         >
-          {/* 5 档刻度（位置 0/25/50/75/100） */}
-          {TAG_SLIDER_ANCHORS.map((anchor) => (
-            <SliderMark key={anchor.slider} value={anchor.slider} sx={markBaseSx}>
-              {/* 仅在两端和中位显示文字标签，25/75 显示小点避免拥挤 */}
-              {anchor.slider === 0 && tt('tagWeightOff', 'Off')}
-              {anchor.slider === 50 && tt('tagWeightDefault', 'Default')}
-              {anchor.slider === 100 && tt('tagWeightStrict', 'Strict')}
-              {(anchor.slider === 25 || anchor.slider === 75) && '·'}
-            </SliderMark>
-          ))}
-          <SliderTrack bg="whiteAlpha.200">
-            <SliderFilledTrack />
+          {/* 5 档刻度（位置 0/25/50/75/100，全部显示文字） */}
+          {TAG_SLIDER_ANCHORS.map((anchor) => {
+            const meta = ANCHOR_SHORT_LABELS[anchor.slider];
+            const isActive = !isCustom && anchor.slider === localSlider;
+            return (
+              <SliderMark
+                key={anchor.slider}
+                value={anchor.slider}
+                sx={isActive ? markActiveSx : markBaseSx}
+              >
+                {tt(meta.key, meta.fallback)}
+              </SliderMark>
+            );
+          })}
+          <SliderTrack
+            h="6px"
+            borderRadius="full"
+            bgGradient="linear(to-r, rgba(255,255,255,0.10) 0%, rgba(255,210,48,0.35) 100%)"
+          >
+            <SliderFilledTrack bg="#FFD230" />
           </SliderTrack>
-          <SliderThumb boxSize={4} />
+          <SliderThumb
+            boxSize={4}
+            bg="#FFD230"
+            border="2px solid rgba(20,20,22,0.9)"
+            _focusVisible={{ boxShadow: '0 0 0 3px rgba(255,210,48,0.45)' }}
+            _hover={{ transform: 'scale(1.08)' }}
+            transition="transform 120ms ease, box-shadow 120ms ease"
+          />
         </Slider>
       </Box>
 
-      {/* 当前档位描述（一行小字，给用户语义反馈） */}
-      <VStack align="stretch" spacing={1} mt={1}>
-        <Text fontSize="xs" color="whiteAlpha.700" minH="1em">
-          {description}
-        </Text>
-      </VStack>
+      {/* 当前档位描述（固定 18px 高度避免空内容时的高度抖动） */}
+      <Text
+        fontSize="xs"
+        color={isCustom ? 'orange.300' : 'whiteAlpha.700'}
+        minH="18px"
+        lineHeight="18px"
+        px={1}
+      >
+        {description}
+      </Text>
+      {/* === LM CUSTOMIZATION: TagWeightSlider UX polish END === */}
     </FormControl>
   );
 }
