@@ -127,9 +127,12 @@ const SelectionModeBar = React.memo(({
           {showHints && (
             <HStack spacing={2} color="gray.400" fontSize="xs">
               <Text opacity={0.75}>·</Text>
-              <Text>{t?.('hintClickToggle') || '单击切换选中'}</Text>
-              <Text opacity={0.5}>·</Text>
-              <Text>{t?.('hintDblClickDetails') || '双击查看详情'}</Text>
+              {/* === LM CUSTOMIZATION: SelectionInteraction START === */}
+              {/* 原因：方案 B 已把"单击本体=切换选中"改为"单击本体=打开 Drawer"，
+                   原"双击查看详情"提示与新交互冲突，改为更明确的区间/复选框说明。
+                   合入英伟达新版时：保留本块。 */}
+              <Text>{t?.('hintCheckboxToggle') || '点复选框 · Ctrl+点击 · Shift+点击区间'}</Text>
+              {/* === LM CUSTOMIZATION: SelectionInteraction END === */}
               <Text opacity={0.5}>·</Text>
               <HStack spacing={1}>
                 <Kbd

@@ -344,9 +344,15 @@ const HybridSearchResultGridItem = memo(({
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // v3 TC-A9 修复：原 v2 改 List 视图（下方）时漏改 Grid 视图的 cardTooltip。
+  // 方案 B 单击本体 = 打开 Drawer，原"单击选中·双击查看详情"提示已不准确，
+  // SINGLE_CLICK_DRAWER=true 时一律不显示 tooltip（避免 hover 干扰）。
+  // 合入英伟达新版时：保留本块；旗标关闭时退回原 NEW_CARD_INTERACTION 提示。
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? (isMultiSelectMode ? t('clickOrDoubleClickHint') : t('clickOrDoubleClickHint'))
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
     ? "rgba(255, 210, 48, 0.15)"
@@ -743,9 +749,14 @@ const HybridSearchResultItem = memo(({
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // Tooltip text based on mode
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示已不准确
+  // 合入英伟达新版时：保留
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? t('clickOrDoubleClickHint')
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
     ? "rgba(255, 210, 48, 0.15)"

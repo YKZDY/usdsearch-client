@@ -72,6 +72,12 @@ import SearchFilters from "./SearchFilters";
 import HybridSearchResults from "./HybridSearchResults";
 import VirtualizedHybridSearchResults from "./components/VirtualizedHybridSearchResults";
 import AssetDetailsModal from "./AssetDetailsModal";
+// === LM CUSTOMIZATION: SelectionInteraction START ===
+// Group A 任务 5：右侧抽屉 + 方案 B 单击交互（FEATURE_FLAGS.SINGLE_CLICK_DRAWER 控制；
+// 旗标关闭时回退 AssetDetailsModal 路径，原版 NVIDIA 行为完整保留）。
+import AssetDetailsDrawer from "./components/AssetDetailsDrawer";
+import { useDrawerOrSelect } from "./hooks/useDrawerOrSelect";
+// === LM CUSTOMIZATION: SelectionInteraction END ===
 import AssetImage from "./components/AssetImage";
 // === LM CUSTOMIZATION: Fab Toolbar START ===
 import FabToolbar from "./components/FabToolbar";
@@ -80,6 +86,8 @@ import FabToolbar from "./components/FabToolbar";
 import SelectionModeBar from "./components/SelectionModeBar";
 // === LM CUSTOMIZATION: 全局空白点击退出多选（无涟漪反馈，依赖 Bar 自身淡出动画） ===
 import useExitMultiSelectOnEmptyClick from "./hooks/useExitMultiSelectOnEmptyClick";
+// === LM CUSTOMIZATION: SelectionDrawer === v3 抽屉关闭白名单守卫（修 TC-A4/A6）
+import useDrawerCloseGuard from "./hooks/useDrawerCloseGuard";
 // === V2: 批量打标签工作流 ===
 import BatchTagModal from "./components/BatchTagModal";
 import UndoToast from "./components/UndoToast";
@@ -514,10 +522,17 @@ const HybridDeepSearchUI = () => {
   // 在多选模式 ON 时，document 级监听 mousedown/mouseup，识别"短按 + 无位移 + 非交互元素"
   // 即可退出多选；覆盖顶部搜索栏空白、左侧产品类型树空白、结果区 titleBar 空白等所有结果容器外区域。
   // 反馈方式：依靠 SelectionModeBar 自身的淡出动画 + Badge 脉冲，无额外涟漪噪音。
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // [Group A 任务 6 修复] Drawer 打开时的空白点击应让 Drawer 自己处理（关 Drawer），
+  // 不应顺带退出多选模式。通过 shouldSkip 把 isDetailsOpen 状态注入。
   useExitMultiSelectOnEmptyClick({
     enabled: isMultiSelectMode,
     onExit: clearSelection,
+    shouldSkip: () => isDetailsOpen, // Drawer 打开时跳过退出多选
   });
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
+
+  // === LM CUSTOMIZATION: SelectionDrawer === v3 useDrawerCloseGuard 接入移到 useDisclosure 之后（避免 TDZ）
 
   // Deselect all but KEEP multi-select mode（"取消全选"按钮走这里）
   // 用户清空选中后仍可继续单击/框选卡片，bar 不会消失
@@ -527,19 +542,12 @@ const HybridDeepSearchUI = () => {
     lastClickedIndexRef.current = null;
   }, []);
 
-  // === NEW CARD INTERACTION: Esc 键全局退出多选模式（提升键盘可达性） ===
-  useEffect(() => {
-    if (!isMultiSelectMode) return undefined;
-    const onKeyDown = (e) => {
-      if (e.key !== 'Escape') return;
-      // 让 Modal/弹窗优先消费 Esc，仅当没有打开的对话框时才清除选中
-      const hasOpenDialog = document.querySelector('[role="dialog"][aria-modal="true"]');
-      if (hasOpenDialog) return;
-      clearSelection();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isMultiSelectMode, clearSelection]);
+  // === LM CUSTOMIZATION: SelectionDrawer START ===
+  // 原因：原 NEW CARD INTERACTION 的 ESC 监听器（多选退出）已统一迁移到
+  //       useKeyboardShortcuts hook（带 isEditableTarget 守卫 + isAnyDialog 让位），
+  //       此处保留空块，避免双重监听导致 Drawer 打开时按一次 ESC 既关抽屉又清选中。
+  // 合入英伟达新版时：原版 V2 没有此监听，可直接删除整个标记块。
+  // === LM CUSTOMIZATION: SelectionDrawer END ===
 
   // Toggle item selection（V2 支持 event + index：Shift+Click 区间选择）
   const resultsForSelectionRef = useRef([]);
@@ -927,6 +935,19 @@ const HybridDeepSearchUI = () => {
   // Disclosures
   const { isOpen: isDetailsOpen, onClose: onDetailsClose, onOpen: onDetailsOpen } = useDisclosure();
   const { isOpen: __, onClose: ___onWelcomeClose, onOpen: onWelcomeOpen } = useDisclosure();
+
+  // === LM CUSTOMIZATION: SelectionDrawer START ===
+  // v3 TC-A4/A6 修复：Drawer 打开时的关闭白名单守卫。
+  // - Chakra <Drawer closeOnOverlayClick={false}> 已禁用遮罩点击关闭（在 AssetDetailsDrawer 内）
+  // - 这里再补一个全局监听：仅当用户点击带 [data-true-empty-area="true"] 标记的真空白
+  //   元素时才触发 onDetailsClose。其他位置（卡片/复选框/工具栏/搜索框）一律不关。
+  // - 关闭白名单总览：×按钮 / Esc / server-changed / 真空白点击（共 4 条）
+  // 合入英伟达新版时：保留本块；旗标关闭即等价于原版（NVIDIA 原版不会调用本 hook）。
+  useDrawerCloseGuard({
+    enabled: isDetailsOpen,
+    onClose: onDetailsClose,
+  });
+  // === LM CUSTOMIZATION: SelectionDrawer END ===
 
   // 注：toast 已在本组件靠前位置定义（Copy Deploy Fix 块），此处不再重复声明。
 
@@ -2492,6 +2513,36 @@ const HybridDeepSearchUI = () => {
     onDetailsOpen();
   }, [onDetailsOpen]);
 
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // Group A 任务 5：方案 B 单击交互接入。
+  // 通过 FEATURE_FLAGS.SINGLE_CLICK_DRAWER 双轨：
+  //   - 关闭：保持原版 handleToggleSelection 路径不动，双击打开 Modal（NVIDIA 默认）
+  //   - 开启：单击本体 → 打开抽屉；点复选框/Shift/Ctrl → 走真值表（见 SELECTION-SPEC.md）
+  // hook 内部识别复选框命中通过 [data-role="card-checkbox"]（CardSelectCheckbox 已加）。
+  //
+  // 合入英伟达新版时：保留本块即可；旗标关闭即等价于原版逻辑。
+  const drawerSelect = useDrawerOrSelect({
+    results: visibleResults,
+    getId: (item) => item?.id || item?.source?.base_key || item?.source?.url,
+    selectedIds: selectedItems,
+    setSelectedIds: setSelectedItems,
+    onOpenDrawer: handleItemClick,           // 复用同一入口：set selectedItem + onDetailsOpen
+    onOpenLegacyModal: handleItemClick,       // 旗标关闭时双击退化也走同一函数
+    enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
+  });
+
+  // 包装：onSelectionChange 在新交互下完全由 hook 接管，
+  // 在旧交互下退回原 handleToggleSelection。
+  const handleSelectionInteractionV2 = useCallback((item, event /* , index */) => {
+    if (FEATURE_FLAGS.SINGLE_CLICK_DRAWER) {
+      drawerSelect.handleClick(event, item);
+    } else {
+      handleToggleSelection(item, event /* , index */);
+    }
+  }, [drawerSelect, handleToggleSelection]);
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
+
   // Feedback popup handlers (only if feature is enabled)
   const handleFeedbackLater = useCallback(() => {
     if (!FEATURE_FLAGS.ENABLE_FEEDBACK_MODAL) return;
@@ -3141,7 +3192,12 @@ const HybridDeepSearchUI = () => {
           </GridItem>
 
           {/* Right Content - Results */}
-          <GridItem overflow="hidden" display="flex" flexDirection="column" h="100%">
+          {/* === LM CUSTOMIZATION: SelectionDrawer === v3 TC-A4 修复：
+               结果区 GridItem 整体打 data-true-empty-area="true"。
+               配合 useDrawerCloseGuard：用户点这个 GridItem 内的"真空白"区域（即卡片以外、
+               工具栏以外、SelectionModeBar 以外的页面背景）才会关闭抽屉；
+               点卡片本身/复选框/工具栏均被 KEEP_OPEN_SELECTOR 短路，不会关抽屉。 */}
+          <GridItem overflow="hidden" display="flex" flexDirection="column" h="100%" data-true-empty-area="true">
             {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar 同层 crossfade 互斥显示 === */}
             {/* 关键：两者渲染在同一 relative 容器内，双层 absolute + opacity 切换；
                  容器高度由 FabToolbar 撑起（SelectionModeBar 设为 absolute 脱离流，
@@ -3279,7 +3335,12 @@ const HybridDeepSearchUI = () => {
               getHeaders={getHeaders}
               apiUrl={apiUrl}
               selectedItems={selectedItems}
-              onSelectionChange={handleToggleSelection}
+              onSelectionChange={
+                // === LM CUSTOMIZATION: SelectionInteraction START ===
+                // 旗标开启 → 走方案 B 真值表 hook；关闭 → 原 handleToggleSelection
+                handleSelectionInteractionV2
+                // === LM CUSTOMIZATION: SelectionInteraction END ===
+              }
               onBatchSelection={setBatchSelection}
               onCopySelectedUrls={copySelectedUrls}
               isMultiSelectMode={isMultiSelectMode}
@@ -3294,22 +3355,47 @@ const HybridDeepSearchUI = () => {
       </VStack>
 
       {/* Asset Details Modal */}
-      {selectedItem && (
-        <AssetDetailsModal
+      {/* === LM CUSTOMIZATION: SelectionInteraction START === */}
+      {/* Group A 任务 5：旗标双轨渲染。
+            - SINGLE_CLICK_DRAWER=true（默认）：右侧详情抽屉 AssetDetailsDrawer（任务 4 骨架）。
+            - SINGLE_CLICK_DRAWER=false：完整退回 NVIDIA 原版 AssetDetailsModal。
+          抽屉与 Modal 共用同一 (selectedItem, isDetailsOpen, onDetailsClose)，
+          便于一键回滚（仅修改 config.jsx 的旗标）。
+          任务 8 性能调优：Drawer 路径常驻挂载（asset 切换复用同一实例，避免每次开关 unmount/remount），
+            Modal 路径保留 selectedItem 守卫（原版行为不变）。
+          合入英伟达新版时：保留本块；旗标关闭即等价于原版。 */}
+      {FEATURE_FLAGS.SINGLE_CLICK_DRAWER ? (
+        <AssetDetailsDrawer
+          /* TC-A4 修复：isOpen 不再依赖 !!selectedItem，让切换卡片时
+             Drawer 持续保持打开（asset 内部用 displayAsset 缓存避免空态闪现）。 */
           isOpen={isDetailsOpen}
+          asset={selectedItem}
           onClose={onDetailsClose}
-          selectedItem={selectedItem}
-          copyToClipboard={copyToClipboard}
-          showScores={showScores}
-          plugins={plugins}
           getHeaders={getHeaders}
           apiUrl={apiUrl}
           serverUrl={nucleusServerUrl}
-          triggerReindexAllPlugins={triggerReindexAllPlugins}
-          triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
-          onTagsChanged={handleTagsChanged}
+          copyToClipboard={copyToClipboard}
+          // tagsAreaContent / advancedPanelContent / actionButtons 留给 B 组任务 6+ 注入。
         />
+      ) : (
+        selectedItem && (
+          <AssetDetailsModal
+            isOpen={isDetailsOpen}
+            onClose={onDetailsClose}
+            selectedItem={selectedItem}
+            copyToClipboard={copyToClipboard}
+            showScores={showScores}
+            plugins={plugins}
+            getHeaders={getHeaders}
+            apiUrl={apiUrl}
+            serverUrl={nucleusServerUrl}
+            triggerReindexAllPlugins={triggerReindexAllPlugins}
+            triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
+            onTagsChanged={handleTagsChanged}
+          />
+        )
       )}
+      {/* === LM CUSTOMIZATION: SelectionInteraction END === */}
 
       {/* V2: 批量打标签弹框 */}
       <BatchTagModal

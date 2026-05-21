@@ -262,6 +262,11 @@ const zh = {
   selectAll: "全选",
   clickToViewDetails: "点击查看详情",
   clickOrDoubleClickHint: "单击选中 · 双击查看详情",
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示会误导
+  // 合入英伟达新版时：保留
+  hintCheckboxToggle: "点复选框 · Ctrl+点击 · Shift+点击区间",
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
   // === V2: 批量打标签 ===
   batchTag: "批量打标签",
   batchTagDialogTitle: "给 {count} 个资产添加标签",
@@ -366,6 +371,35 @@ const zh = {
   hideAdvancedPanels: "隐藏高级面板",
   adminMode: "管理员模式",
   // === LM CUSTOMIZATION: detail-modal-revamp END ===
+  // === LM CUSTOMIZATION: details-drawer-i18n START ===
+  // Group A 任务 4：详情抽屉骨架专用 i18n keys
+  // 合入英伟达新版时：保留本块（NVIDIA 原版无详情抽屉）
+  detailsDrawerTitle: "资产详情",
+  detailsDrawerClose: "关闭详情",
+  detailsDrawerCollapse: "折叠详情",
+  detailsDrawerExpand: "展开详情",
+  detailsDrawerPreviewPlaceholder: "[预览 — 任务 5 填充]",
+  detailsDrawerMetadataPlaceholder: "[元数据 — 任务 5 填充]",
+  detailsDrawerTagsSlot: "[标签插槽 — B 组]",
+  detailsDrawerAdvancedSlot: "[高级面板插槽 — B 组]",
+  // 任务 5：5 区块布局 + 操作按钮文案
+  detailsDrawerMetaSize: "大小",
+  detailsDrawerMetaFormat: "格式",
+  detailsDrawerMetaCreated: "创建时间",
+  detailsDrawerMetaModified: "修改时间",
+  detailsDrawerMetaCreator: "创建者",
+  detailsDrawerMetaUnknown: "未知",
+    detailsDrawerCopyPath: "复制路径",
+    detailsDrawerCopyPathSuccess: "路径已复制",
+    detailsDrawerCopyPathTooltip: "复制此路径",
+    detailsDrawerSource: "来源",
+    detailsDrawerScore: "评分",
+    detailsDrawerPath: "路径",
+    detailsDrawerOpenInOmniverse: "在 Omniverse 打开",
+  detailsDrawerDownload: "下载",
+  detailsDrawerEmptyHint: "请在结果列表中选择一个资产",
+  detailsDrawerAdvancedTitle: "高级",
+  // === LM CUSTOMIZATION: details-drawer-i18n END ===
   details: "详情",
   property: "属性",
   etag: "ETag",

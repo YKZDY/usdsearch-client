@@ -32,13 +32,18 @@ import { useEffect, useRef } from 'react';
  * @param {Function} opts.onExit          - 退出回调（通常为 clearSelection）
  * @param {number}  [opts.dragThreshold=8]  - 位移超此 px 视为拖拽
  * @param {number}  [opts.timeThreshold=500] - 按下时长超此 ms 视为长按
+ * @param {Function} [opts.shouldSkip]    - 自定义跳过判定：返回 true 时不触发退出（如 Drawer 打开时）
  */
 export function useExitMultiSelectOnEmptyClick({
   enabled,
   onExit,
   dragThreshold = 8,
   timeThreshold = 500,
+  shouldSkip,
 }) {
+  // shouldSkip 用 ref 持有，避免 effect 因引用变化反复挂载/卸载
+  const shouldSkipRef = useRef(shouldSkip);
+  shouldSkipRef.current = shouldSkip;
   // 用 ref 保最新 onExit，避免 effect 因 onExit 引用变化反复挂载/卸载
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
@@ -112,6 +117,15 @@ export function useExitMultiSelectOnEmptyClick({
       if (Math.hypot(dx, dy) > dragThreshold) return;
       // 终点也需是空白
       if (isInteractive(e.target)) return;
+
+      // [LM Group A 任务 6 修复] 自定义跳过：Drawer 打开等场景下不触发退出多选
+      if (typeof shouldSkipRef.current === 'function') {
+        try {
+          if (shouldSkipRef.current() === true) return;
+        } catch {
+          /* ignore */
+        }
+      }
 
       // 触发退出（无视觉反馈，依靠 SelectionModeBar 自身的淡出动画即可）
       try {

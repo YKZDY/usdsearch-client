@@ -139,3 +139,18 @@ option {
 }
 
 /* ===== Login prompt animations are handled by framer-motion in index.js ===== */
+
+/* === LM CUSTOMIZATION: DragSelect START ===
+   v3 TC-A7 性能优化：拖拽框选期间禁用所有卡片的 transition / animation。
+   原因：默认 Chakra Card hover 有 transition: 0.15s ease，当拖拽矩形扫过 N 张卡片时，
+        每张都触发 hover-in/out 过渡，每帧 reflow + repaint 导致 fps 跌至 ~25。
+   策略：useDragSelect 在拖拽中给外层容器加 data-dragging="true"，本规则用全局
+        :where() 高优先级选择器把所有 [data-card-index] 子树的 transition 干掉。
+   合入英伟达新版时：保留本块；上游不会影响（依赖我们自定义的 data-dragging 属性）。 */
+[data-dragging="true"] [data-card-index],
+[data-dragging="true"] [data-card-index] * {
+  transition: none !important;
+  animation: none !important;
+}
+/* === LM CUSTOMIZATION: DragSelect END === */
+

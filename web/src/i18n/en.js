@@ -263,6 +263,11 @@ const en = {
   clickToViewDetails: "Click to view details",
   clickToSelect: "Click to select/deselect",
   clickOrDoubleClickHint: "Click to select · Double-click for details",
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示会误导
+  // 合入英伟达新版时：保留
+  hintCheckboxToggle: "Checkbox · Ctrl+click · Shift+click range",
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
   // === V2: Batch tagging ===
   batchTag: "Batch tag",
   batchTagDialogTitle: "Tag {count} assets",
@@ -366,6 +371,35 @@ const en = {
   hideAdvancedPanels: "Hide advanced panels",
   adminMode: "Admin mode",
   // === LM CUSTOMIZATION: detail-modal-revamp END ===
+  // === LM CUSTOMIZATION: details-drawer-i18n START ===
+  // Group A 任务 4：详情抽屉骨架专用 i18n keys
+  // 合入英伟达新版时：保留本块（NVIDIA 原版无详情抽屉）
+  detailsDrawerTitle: "Asset Details",
+  detailsDrawerClose: "Close details",
+  detailsDrawerCollapse: "Collapse details",
+  detailsDrawerExpand: "Expand details",
+  detailsDrawerPreviewPlaceholder: "[Preview — task 5]",
+  detailsDrawerMetadataPlaceholder: "[Metadata — task 5]",
+  detailsDrawerTagsSlot: "[Tags slot — Group B]",
+  detailsDrawerAdvancedSlot: "[Advanced panel slot — Group B]",
+  // Task 5: 5-section layout + action button copy
+  detailsDrawerMetaSize: "Size",
+  detailsDrawerMetaFormat: "Format",
+  detailsDrawerMetaCreated: "Created",
+  detailsDrawerMetaModified: "Modified",
+  detailsDrawerMetaCreator: "Creator",
+  detailsDrawerMetaUnknown: "Unknown",
+    detailsDrawerCopyPath: "Copy path",
+    detailsDrawerCopyPathSuccess: "Path copied",
+    detailsDrawerCopyPathTooltip: "Copy this path",
+    detailsDrawerSource: "Source",
+    detailsDrawerScore: "Score",
+    detailsDrawerPath: "Path",
+    detailsDrawerOpenInOmniverse: "Open in Omniverse",
+  detailsDrawerDownload: "Download",
+  detailsDrawerEmptyHint: "Select an asset from the results",
+  detailsDrawerAdvancedTitle: "Advanced",
+  // === LM CUSTOMIZATION: details-drawer-i18n END ===
   details: "Details",
   property: "Property",
   etag: "ETag",
