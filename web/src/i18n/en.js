@@ -687,6 +687,52 @@ const en = {
   infiniteLoadMore: "Load more",
   infiniteError: "Failed to load more",
   infiniteRetry: "Retry",
+
+  // === LM CUSTOMIZATION: Group B i18n START ===
+  // 原因：Group B 卡片 tag 区 + 详情高级面板新增的所有文案
+  // 合入英伟达新版时：保留整段（key 走 tagBar./tagEditor./advanced. 前缀，不与 NVIDIA 冲突）
+  // CardTagBar / TagEditPopover
+  "tagBar.openEditor": "Edit tags",
+  "tagBar.addButtonAriaLabel": "Add tag",
+  "tagBar.searchOrCreate": "Search or create tag…",
+  "tagBar.inputAriaLabel": "Tag name",
+  "tagBar.errorEmpty": "Tag name cannot be empty",
+  "tagBar.errorTooLong": "Tag name max 50 chars",
+  "tagBar.errorInvalidChars": "Tag name cannot contain / \\ or newlines",
+  "tagBar.createNew": "Create new",
+  "tagBar.candidatesAriaLabel": "Tag candidates",
+  "tagBar.loading": "Loading tags…",
+  "tagBar.noMatch": "No matching tag",
+  "tagBar.empty": "No tags yet",
+  "tagBar.removeAriaLabel": "Remove {tag}",
+  "tagBar.addAriaLabel": "Add {tag}",
+  "tagBar.moreHidden": "more (refine search)",
+  "tagBar.moreCount": "+{n} more",
+  "tagBar.hint": "Click to toggle · Enter to create · Esc to close",
+  "tagBar.noLogin": "Sign in to manage tags",
+  "tagBar.noWritePermission": "No write permission",
+  // AssetTagEditor (drawer 内完整编辑器)
+  "tagEditor.title": "Tags",
+  "tagEditor.placeholder": "Add a tag and press Enter (or paste comma-separated)…",
+  "tagEditor.batchAddedToast": "Added {n} tags",
+  "tagEditor.empty": "No tags. Click input to add.",
+  "tagEditor.sourceUser": "User",
+  "tagEditor.sourceSystem": "System",
+  "tagEditor.sourceAi": "AI",
+  "tagEditor.failedRetry": "Sync failed, click to retry",
+  "tagEditor.removeAriaLabel": "Remove tag {tag}",
+  // AdvancedMatchInfo (drawer 高级面板)
+  "advanced.title": "Advanced match info",
+  "advanced.matchedFields": "Matched fields",
+  "advanced.matchedTerms": "Matched terms",
+  "advanced.score": "Score",
+  "advanced.rrfScore": "RRF score",
+  "advanced.vectorSimilarity": "Vector similarity",
+  "advanced.embeddingModel": "Embedding model",
+  "advanced.rawMetadata": "Raw metadata (JSON)",
+  "advanced.empty": "No advanced match info available",
+  "advanced.toggleRaw": "Toggle raw metadata",
+  // === LM CUSTOMIZATION: Group B i18n END ===
 };
 
 export default en;

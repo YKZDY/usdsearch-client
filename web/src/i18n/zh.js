@@ -683,6 +683,52 @@ const zh = {
   infiniteLoadMore: "加载更多",
   infiniteError: "加载失败",
   infiniteRetry: "重试",
+
+  // === LM CUSTOMIZATION: Group B i18n START ===
+  // 原因：Group B 卡片 tag 区 + 详情高级面板新增的所有文案
+  // 合入英伟达新版时：保留整段（key 走 tagBar./tagEditor./advanced. 前缀，不与 NVIDIA 冲突）
+  // CardTagBar / TagEditPopover
+  "tagBar.openEditor": "编辑标签",
+  "tagBar.addButtonAriaLabel": "添加标签",
+  "tagBar.searchOrCreate": "搜索或创建标签…",
+  "tagBar.inputAriaLabel": "标签名",
+  "tagBar.errorEmpty": "标签名不能为空",
+  "tagBar.errorTooLong": "标签名最长 50 字符",
+  "tagBar.errorInvalidChars": "标签名不能含 / \\ 或换行符",
+  "tagBar.createNew": "创建新标签",
+  "tagBar.candidatesAriaLabel": "标签候选",
+  "tagBar.loading": "加载标签…",
+  "tagBar.noMatch": "无匹配标签",
+  "tagBar.empty": "还没有标签",
+  "tagBar.removeAriaLabel": "移除 {tag}",
+  "tagBar.addAriaLabel": "添加 {tag}",
+  "tagBar.moreHidden": "个（请细化搜索）",
+  "tagBar.moreCount": "还有 {n} 个",
+  "tagBar.hint": "点击切换 · Enter 创建 · Esc 关闭",
+  "tagBar.noLogin": "登录后可管理标签",
+  "tagBar.noWritePermission": "无写入权限",
+  // AssetTagEditor（抽屉内完整编辑器）
+  "tagEditor.title": "标签",
+  "tagEditor.placeholder": "输入后按 Enter 添加（或粘贴逗号分隔批量添加）…",
+  "tagEditor.batchAddedToast": "已添加 {n} 个标签",
+  "tagEditor.empty": "暂无标签，点击输入框添加。",
+  "tagEditor.sourceUser": "用户",
+  "tagEditor.sourceSystem": "系统",
+  "tagEditor.sourceAi": "AI",
+  "tagEditor.failedRetry": "同步失败，点击重试",
+  "tagEditor.removeAriaLabel": "移除标签 {tag}",
+  // AdvancedMatchInfo（抽屉高级面板）
+  "advanced.title": "高级匹配信息",
+  "advanced.matchedFields": "匹配字段",
+  "advanced.matchedTerms": "匹配词",
+  "advanced.score": "得分",
+  "advanced.rrfScore": "RRF 分数",
+  "advanced.vectorSimilarity": "向量相似度",
+  "advanced.embeddingModel": "Embedding 模型",
+  "advanced.rawMetadata": "原始元数据（JSON）",
+  "advanced.empty": "无高级匹配信息",
+  "advanced.toggleRaw": "切换原始元数据",
+  // === LM CUSTOMIZATION: Group B i18n END ===
 };
 
 export default zh;
