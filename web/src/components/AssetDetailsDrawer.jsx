@@ -331,6 +331,14 @@ const AssetDetailsDrawer = ({
           borderLeft="1px solid"
           borderColor={fabColors.borderSubdued}
           boxShadow="-4px 0 24px rgba(0,0,0,0.3)"
+          // === LM CUSTOMIZATION: SelectionDrawer START ===
+          // v3.8 修复"关闭后立刻点卡片无反应"：
+          //   Chakra <Drawer> 退出动画期间（~200ms），DrawerContent 仍在 DOM
+          //   中且 pointer-events:auto，用户的立即点击被退出中的 DrawerContent 吞掉。
+          //   条件化 pointerEvents 让退出动画期间 click 透透到下层卡片。
+          //   合入英伟达新版时：保留；isOpen 是原生 prop，无依赖 LM 逻辑。
+          pointerEvents={isOpen ? 'auto' : 'none'}
+          // === LM CUSTOMIZATION: SelectionDrawer END ===
         >
           {/* TC-A5：折叠态把展开按钮放上方居中，关闭按钮放下方，避免重叠 */}
           <VStack pt={fabSpacing['3']} spacing={fabSpacing['2']}>
@@ -388,6 +396,10 @@ const AssetDetailsDrawer = ({
         borderColor={fabColors.borderSubdued}
         boxShadow="-8px 0 32px rgba(0,0,0,0.45)"
         position="relative"
+        // === LM CUSTOMIZATION: SelectionDrawer START ===
+        // v3.8 同上：退出动画期间让 click 透过 DrawerContent，即“立刻重开抽屉”不被吞。
+        pointerEvents={isOpen ? 'auto' : 'none'}
+        // === LM CUSTOMIZATION: SelectionDrawer END ===
       >
         {/* === LM CUSTOMIZATION: SelectionDrawer START === */}
         {/* TC-A5：左边缘 resize 拖拽手柄。默认 4px 透明，hover 显形为品牌色。 */}
