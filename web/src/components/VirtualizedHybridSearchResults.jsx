@@ -1229,21 +1229,41 @@ const VirtualizedHybridSearchResults = ({
           scrollContainerRef={scrollContainerRef}
           style={{ userSelect: isDragging ? 'none' : 'auto' }}
         />
-        {/* Drag selection rectangle overlay */}
-        {isDragging && selectionRect && (
-          <Box
-            position="fixed"
-            left={`${selectionRect.x}px`}
-            top={`${selectionRect.y}px`}
-            width={`${selectionRect.width}px`}
-            height={`${selectionRect.height}px`}
-            bg="rgba(255, 210, 48, 0.08)"
-            border="1px solid rgba(255, 210, 48, 0.4)"
-            borderRadius="4px"
-            pointerEvents="none"
-            zIndex={9999}
-          />
-        )}
+        {/* === LM CUSTOMIZATION: DragSelectMarquee START === */}
+        {/* Drag selection rectangle overlay
+            v2 修复"出现/消失不丝滑"：
+              - 旧版：条件渲染 {isDragging && <Box/>}，mousedown 瞬间挂载、mouseup 瞬间卸载，
+                视觉上是"硬切"。
+              - 新版：始终挂载，用 opacity + transform + transition 平滑过渡。
+                mount 时 opacity 0 → 1（80ms fade-in，无方向位移避免抖动）
+                unmount 时 opacity 1 → 0 + 微弱 scale(0.98)（120ms fade-out，给"收起"反馈）
+              - 当 selectionRect=null（mouseup 后短暂状态）时保留位置，避免 0 尺寸闪烁。
+              - 加 boxShadow 增强焦点感，但保持 pointerEvents:none 不挡其他交互。
+            合入英伟达新版时：保留本块；marquee 是 LM 新增功能。 */}
+        <Box
+          position="fixed"
+          left={`${selectionRect?.x ?? 0}px`}
+          top={`${selectionRect?.y ?? 0}px`}
+          width={`${selectionRect?.width ?? 0}px`}
+          height={`${selectionRect?.height ?? 0}px`}
+          bg="rgba(255, 210, 48, 0.08)"
+          border="1px solid rgba(255, 210, 48, 0.4)"
+          borderRadius="4px"
+          boxShadow={isDragging ? "0 0 0 1px rgba(255, 210, 48, 0.15), 0 4px 16px rgba(255, 210, 48, 0.06)" : "none"}
+          opacity={isDragging && selectionRect ? 1 : 0}
+          transform={isDragging && selectionRect ? 'scale(1)' : 'scale(0.98)'}
+          transformOrigin="center"
+          transition={
+            isDragging && selectionRect
+              ? "opacity 0.08s cubic-bezier(0.0, 0, 0.2, 1), transform 0.08s cubic-bezier(0.0, 0, 0.2, 1)"
+              : "opacity 0.12s cubic-bezier(0.4, 0, 1, 1), transform 0.12s cubic-bezier(0.4, 0, 1, 1)"
+          }
+          willChange="opacity, transform"
+          pointerEvents="none"
+          zIndex={9999}
+          aria-hidden="true"
+        />
+        {/* === LM CUSTOMIZATION: DragSelectMarquee END === */}
       </Box>
       {/* === LM CUSTOMIZATION: InfiniteScroll START === */}
       {/* sentinel + 状态条件 UI（需求 D-1）：

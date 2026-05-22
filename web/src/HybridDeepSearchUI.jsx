@@ -3380,11 +3380,17 @@ const HybridDeepSearchUI = () => {
                  SelectionModeBar 内部垂直居中对齐，视觉上仍是一整条 bar。 */}
             <Box position="relative" mb="8px">
               {/* Layer 1: FabToolbar —— 撑起容器高度，多选时透明但不脱流
-                   退出层：160ms（比进入层稍慢），让新内容先到位，旧内容随后淡出 */}
+                   v2 修复"切换不丝滑"：缩短退出至 120ms 让 FabToolbar 更快让位，
+                   delay 0ms（立刻开始），避免与 SelectionModeBar 进入层重叠超过 60ms；
+                   transform translateZ 提升合成层但不做位移，纯 opacity 切换。 */}
               <Box
                 opacity={isMultiSelectMode ? 0 : 1}
                 pointerEvents={isMultiSelectMode ? 'none' : 'auto'}
-                transition="opacity 0.16s cubic-bezier(0.4, 0, 0.2, 1)"
+                transition={
+                  isMultiSelectMode
+                    ? "opacity 0.12s cubic-bezier(0.4, 0, 1, 1)"  // 退出：稍快、ease-in
+                    : "opacity 0.18s cubic-bezier(0.0, 0, 0.2, 1) 0.04s"  // 进入：稍慢、ease-out + 40ms delay 等 SelectionBar 退出
+                }
                 willChange="opacity"
                 transform="translateZ(0)"
                 aria-hidden={isMultiSelectMode}
@@ -3456,9 +3462,11 @@ const HybridDeepSearchUI = () => {
                 />
               </Box>
               {/* Layer 2: SelectionModeBar —— 绝对定位覆盖在 FabToolbar 上方，
-                   高度由内部撑开，top:0/bottom:0 让其垂直居中于容器
-                   进入层：120ms + 更陡曲线，让用户尽快看到"已选中 X 个"结果
-                   退出时：opacity + 轻微 Y(-2px) 位移，给眼睛一个"消散感"，更高级 */}
+                   v2 修复"切换不丝滑"：
+                     - 进入：50ms delay 让 FabToolbar 先消失大半，避免双 bar 叠影
+                     - 进入 transform 从 translate3d(0,-6px,0)（更明显的"飞入"方向感）
+                     - 进入 ease-out 曲线 + 200ms duration（既快又有质感）
+                     - 退出：100ms 快速淡出 + 向上 -4px 收回，给"消散感" */}
               <Box
                 position="absolute"
                 top={0}
@@ -3466,9 +3474,13 @@ const HybridDeepSearchUI = () => {
                 right={0}
                 bottom={0}
                 opacity={isMultiSelectMode ? 1 : 0}
-                transform={isMultiSelectMode ? 'translate3d(0,0,0)' : 'translate3d(0,-2px,0)'}
+                transform={isMultiSelectMode ? 'translate3d(0,0,0)' : 'translate3d(0,-6px,0)'}
                 pointerEvents={isMultiSelectMode ? 'auto' : 'none'}
-                transition="opacity 0.18s cubic-bezier(0.2, 0, 0.2, 1), transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)"
+                transition={
+                  isMultiSelectMode
+                    ? "opacity 0.20s cubic-bezier(0.0, 0, 0.2, 1) 0.05s, transform 0.24s cubic-bezier(0.22, 1, 0.36, 1) 0.05s"
+                    : "opacity 0.10s cubic-bezier(0.4, 0, 1, 1), transform 0.14s cubic-bezier(0.4, 0, 1, 1)"
+                }
                 willChange="opacity, transform"
                 display="flex"
                 alignItems="center"

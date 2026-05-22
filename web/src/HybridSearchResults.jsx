@@ -1191,22 +1191,38 @@ const HybridSearchResults = ({
           </VStack>
         )}
       </Box>
-      {/* Drag selection rectangle overlay */}
-      {isDragging && selectionRect && (
-        <Box
-          position="fixed"
-          left={`${selectionRect.x}px`}
-          top={`${selectionRect.y}px`}
-          width={`${selectionRect.width}px`}
-          height={`${selectionRect.height}px`}
-          bg="rgba(255, 210, 48, 0.10)"
-          border="1.5px solid rgba(255, 210, 48, 0.6)"
-          borderRadius="4px"
-          pointerEvents="none"
-          zIndex={9999}
-          boxShadow="0 0 0 1px rgba(0,0,0,0.2)"
-        />
-      )}
+      {/* === LM CUSTOMIZATION: DragSelectMarquee START === */}
+      {/* Drag selection rectangle overlay
+          v2 修复"出现/消失不丝滑"：始终挂载 + opacity/transform 切换 + GPU willChange，
+          与 VirtualizedHybridSearchResults 同步行为，避免双路径视觉不一致。 */}
+      <Box
+        position="fixed"
+        left={`${selectionRect?.x ?? 0}px`}
+        top={`${selectionRect?.y ?? 0}px`}
+        width={`${selectionRect?.width ?? 0}px`}
+        height={`${selectionRect?.height ?? 0}px`}
+        bg="rgba(255, 210, 48, 0.10)"
+        border="1.5px solid rgba(255, 210, 48, 0.6)"
+        borderRadius="4px"
+        boxShadow={
+          isDragging
+            ? "0 0 0 1px rgba(0,0,0,0.2), 0 4px 16px rgba(255, 210, 48, 0.06)"
+            : "0 0 0 1px rgba(0,0,0,0.2)"
+        }
+        opacity={isDragging && selectionRect ? 1 : 0}
+        transform={isDragging && selectionRect ? 'scale(1)' : 'scale(0.98)'}
+        transformOrigin="center"
+        transition={
+          isDragging && selectionRect
+            ? "opacity 0.08s cubic-bezier(0.0, 0, 0.2, 1), transform 0.08s cubic-bezier(0.0, 0, 0.2, 1)"
+            : "opacity 0.12s cubic-bezier(0.4, 0, 1, 1), transform 0.12s cubic-bezier(0.4, 0, 1, 1)"
+        }
+        willChange="opacity, transform"
+        pointerEvents="none"
+        zIndex={9999}
+        aria-hidden="true"
+      />
+      {/* === LM CUSTOMIZATION: DragSelectMarquee END === */}
     </VStack>
   );
 };
