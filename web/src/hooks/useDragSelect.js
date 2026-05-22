@@ -122,12 +122,21 @@ export function useDragSelect({
   const getItemIdRef = useRef(getItemId);
   const onChangeRef = useRef(onSelectionChange);
   const onEmptyClickRef = useRef(onEmptyClick);
+  // [PERF v4 — 2026-05-22 trace 驱动] 镜像 baseSelection 到 ref
+  // 背景：Playwright + cancelAnimationFrame stack trace 证实，拖拽期间 useEffect 被销毁重建 5+ 次，
+  //   导致 cleanup 中 cancelAnimationFrame(autoScrollRef.current) 反复中断 autoScroll loop。
+  //   原因：handleMouseDown deps 含 baseSelection，拖拽 emit 新选中集 → 父级 setSelectedItems →
+  //   baseSelection 引用变 → handleMouseDown 重建 → 主 useEffect deps 变 → effect 销毁重建。
+  //   结果 autoScroll loop 仅跑三四帧就被 cancel，拖到边缘区【有效但极慢】。
+  // 修复：镜像 baseSelection 到 ref，handleMouseDown 仅读 ref 不依赖 deps，使主 useEffect 稳定。
+  const baseSelectionRef = useRef(baseSelection);
 
   // 同步最新 props 到 ref，避免 listener 闭包过期
   useEffect(() => { itemsRef.current = items; }, [items]);
   useEffect(() => { getItemIdRef.current = getItemId; }, [getItemId]);
   useEffect(() => { onChangeRef.current = onSelectionChange; }, [onSelectionChange]);
   useEffect(() => { onEmptyClickRef.current = onEmptyClick; }, [onEmptyClick]);
+  useEffect(() => { baseSelectionRef.current = baseSelection; }, [baseSelection]);
 
   // 判断 target 是否落在卡片内部
   const isInsideCard = useCallback((target) => {
@@ -370,7 +379,7 @@ export function useDragSelect({
     if (isContainerInnerSkip(e.target)) return;
 
     const insideCard = isInsideCard(e.target);
-    const baseSet = new Set(baseSelection || []);
+    const baseSet = new Set(baseSelectionRef.current || []);
     let paintMode = 'add';
     if (insideCard) {
       const startCard = findCardFromEl(e.target);
@@ -396,7 +405,7 @@ export function useDragSelect({
     if (!insideCard) {
       e.preventDefault();
     }
-  }, [enabled, isInsideCard, containerRef, baseSelection, findCardFromEl, resetEmitted]);
+  }, [enabled, isInsideCard, containerRef, findCardFromEl, resetEmitted]);
 
   const handleMouseMove = useCallback((e) => {
     const st = stateRef.current;
