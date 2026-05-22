@@ -780,6 +780,22 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                         {t('ssoLoginButton') || 'Log in with SSO'}
                     </Button>
 
+                    {/* === LM CUSTOMIZATION: SSOLoginHint START === */}
+                    {/* 原因：SSO 在浏览器已登录 IOA 时弹窗一闪而过，新用户视觉上易困惑；
+                              加一行小字说明这是预期行为。
+                       合入英伟达新版时：本块可整体移除（NVIDIA 原版无 IOA SSO 流程）。 */}
+                    <Text
+                        fontSize="11px"
+                        color={LA.textMuted}
+                        textAlign="center"
+                        lineHeight="1.5"
+                        px={2}
+                        mt={-1}
+                    >
+                        {t('ssoLoginHint') || '首次登录会跳转 IOA 授权；已登录的浏览器将自动通过'}
+                    </Text>
+                    {/* === LM CUSTOMIZATION: SSOLoginHint END === */}
+
                     {/* === LM CUSTOMIZATION: DeviceFlowFallback START === */}
                     {/* 原因：SSO 弹窗依赖与登录页同主域；本地开发 (localhost) 跨域 localStorage
                               隔离导致 SSO 不可用。给本地开发提供 Device Flow 兜底入口，

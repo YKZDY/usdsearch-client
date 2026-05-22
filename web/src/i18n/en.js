@@ -639,6 +639,7 @@ const en = {
 
   // === LM CUSTOMIZATION: SSO Bridge — postMessage cross-origin SSO START ===
   ssoLoginButton: "Log in with Lightart SSO",
+  ssoLoginHint: "First time will redirect to IOA; already-signed-in browsers pass through automatically",
   ssoDevEnvHintTitle: "Local development hint",
   ssoDevEnvHintDesc: "Full SSO requires same-origin cookies. localhost cannot read market-domain cookies due to same-origin policy, so the popup will not auto-close. Deploy to staging to verify the full flow.",
   ssoLoggingIn: "Logging in…",

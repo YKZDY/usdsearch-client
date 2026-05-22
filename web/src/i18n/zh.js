@@ -635,6 +635,7 @@ const zh = {
 
   // === LM CUSTOMIZATION: SSO Bridge — postMessage 跨域登录 START ===
   ssoLoginButton: "使用离岸太湖 SSO 登录",
+  ssoLoginHint: "首次登录会跳转 IOA 授权；已登录的浏览器将自动通过",
   ssoDevEnvHintTitle: "本地开发环境提示",
   ssoDevEnvHintDesc: "完整 SSO 闭环依赖同域 cookie，localhost 跨域读不到 market 域 cookie，弹窗不会自动关闭。请部署到 staging 验证完整流程。",
   ssoLoggingIn: "登录中…",
