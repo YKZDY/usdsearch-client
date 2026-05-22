@@ -43,6 +43,7 @@ if (USE_MOCK) {
     '/process',
     '/search/stats',
     '/omni/discovery',  // Nucleus discovery（token refresh 需要）
+    '/omni/auth',       // SSO 登录弹窗（Nucleus Auth 页面 + API）
   ];
 
   module.exports = function (app) {

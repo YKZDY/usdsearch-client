@@ -32,6 +32,7 @@ import {
   getStoredAuth,
   isUserCleared,
   clearExpiredCredentials,
+  getSSOToken,
 } from '../utils/authStorage';
 
 // 自定义事件名
@@ -48,11 +49,21 @@ const RETRY_DELAY_MS = 3000;
 const VERIFY_TIMEOUT_MS = 10 * 1000;
 
 /**
- * 构造 /info/plugins 请求 headers（与 src/index.js:712-734 的 getHeaders 保持一致）。
+ * 构造 /info/plugins 请求 headers。
+ * 优先使用 Bearer token（SSO JWT），回退到 Basic Auth / API Key。
  */
 function buildAuthHeaders(server, auth) {
   const headers = { 'Content-Type': 'application/json' };
   if (server) headers['x-usdsearch-storage-backend'] = server;
+
+  // 优先级 1: SSO JWT Bearer token
+  const ssoToken = getSSOToken();
+  if (ssoToken) {
+    headers['Authorization'] = `Bearer ${ssoToken}`;
+    return headers;
+  }
+
+  // 优先级 2: Basic Auth（含 Device Flow 生成的 $omni-api-token）
   if (auth.username && auth.username.trim() !== '') {
     headers['Authorization'] = `Basic ${btoa(`${auth.username}:${auth.password || ''}`)}`;
   } else if (auth.apiKey) {

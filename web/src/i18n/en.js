@@ -22,6 +22,9 @@ const en = {
   pleaseWaitApiToken: "Please wait while we create a permanent API token",
   authSuccessful: "Authentication successful!",
   createdApiToken: "Created permanent API token for {username}.",
+  createdJwtToken: "Logged in as {username} (using temporary JWT for local dev).",
+  ssoLocalDevFallbackTitle: "Local development mode",
+  ssoLocalDevFallbackDesc: "Discovery service unreachable; falling back to JWT as temporary credential (valid ~8-24h)",
   failedCreateApiToken: "Failed to create API token",
   unknownApiTokenError: "Unknown error occurred while creating API token",
   authFailed: "Authentication failed",
@@ -35,6 +38,20 @@ const en = {
   codeExpiresIn: "Code expires in {minutes} minutes",
   tryAgain: "Try Again",
   cancel: "Cancel",
+  // === LM CUSTOMIZATION: DeviceFlowFallback i18n START ===
+  deviceFlowTitle: "Sign in with device code",
+  deviceFlowStep1: "1. Open the following URL in your browser:",
+  deviceFlowStep2: "2. Enter the device code below:",
+  deviceFlowStep3: "3. After signing in, this dialog will close automatically.",
+  waitingForLogin: "Waiting for authorization...",
+  useDeviceFlowFallback: "Use device code (local dev)",
+  close: "Close",
+  copy: "Copy",
+  copied: "Copied",
+  copyCode: "Copy device code",
+  authSuccess: "Signed in",
+  ssoLoginSuccessDesc: "Permanent API token created.",
+  // === LM CUSTOMIZATION: DeviceFlowFallback i18n END ===
 
   // === index.js - HeaderIcons ===
   selectServer: "Select Server",
@@ -619,6 +636,36 @@ const en = {
   formatExcludeClearAllTip: "Clear all excludes (allow all extensions)",
   formatExcludeRestoreTip: "Restore default (exclude USD text/image)",
   formatDefaultExcludeBannerShort: "ℹ System excludes USD text/image formats by default",
+
+  // === LM CUSTOMIZATION: SSO Bridge — postMessage cross-origin SSO START ===
+  ssoLoginButton: "Log in with Lightart SSO",
+  ssoLoginHint: "First time will redirect to IOA; already-signed-in browsers pass through automatically",
+  ssoDevEnvHintTitle: "Local development hint",
+  ssoDevEnvHintDesc: "Full SSO requires same-origin cookies. localhost cannot read market-domain cookies due to same-origin policy, so the popup will not auto-close. Deploy to staging to verify the full flow.",
+  ssoLoggingIn: "Logging in…",
+  ssoOpeningPopup: "Opening login popup…",
+  ssoBridgeWaiting: "Waiting for login to complete…",
+  ssoBridgeSuccess: "Login successful, returning to app…",
+  ssoBridgeChannelPostMessage: "via postMessage channel",
+  ssoBridgeChannelLocalStorage: "via localStorage channel",
+  ssoTimeout: "Login timed out, please try again",
+  ssoTimeoutLong: "Login is taking too long. Please close the popup and try again.",
+  ssoUntrustedOrigin: "Ignored a message from an untrusted origin",
+  ssoTokenInvalid: "Received invalid token format",
+  ssoPopupBlocked: "Login popup was blocked by the browser. Please allow popups and retry.",
+  ssoPopupClosed: "Login popup was closed before completion",
+  ssoWaitingAuth: "Waiting for SSO authentication…",
+  orDivider: "OR",
+  ssoLoginFailed: "Login failed: {message}",
+  ssoBridgeDebugTitle: "SSO Bridge — Debug",
+  ssoBridgeDebugWaiting: "Detecting token…",
+  ssoBridgeDebugSent: "Token sent back to main app",
+  ssoBridgeDebugTimeout: "Token detection timed out",
+  ssoBridgeDebugNoOpener: "Direct visit detected — bridge stays idle",
+  ssoBridgeCopyToken: "Copy token",
+  ssoBridgeCopyTokenSuccess: "Token copied to clipboard",
+  ssoBridgeCopyTokenEmpty: "No token to copy yet",
+  // === LM CUSTOMIZATION: SSO Bridge END ===
 };
 
 export default en;

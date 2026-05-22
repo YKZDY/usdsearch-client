@@ -81,3 +81,9 @@ web/build-*.zip
 deepsearch-ui-build*.zip
 build-*.zip
 
+.codebuddy
+
+# === LM CUSTOMIZATION: 并行开发 worktree 目录 ===
+# 4 个并行窗口的隔离工作区（参考 .codebuddy/plan/WORKTREE-SETUP.md）
+# 不应被提交到 NVIDIA 上游
+.worktrees/

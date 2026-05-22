@@ -22,6 +22,9 @@ const zh = {
   pleaseWaitApiToken: "请稍候，正在创建永久 API 令牌",
   authSuccessful: "认证成功！",
   createdApiToken: "已为 {username} 创建永久 API 令牌。",
+  createdJwtToken: "已为 {username} 登录（本地开发使用临时 JWT 凭证）。",
+  ssoLocalDevFallbackTitle: "本地开发模式",
+  ssoLocalDevFallbackDesc: "Discovery 服务不可达，已使用 JWT 作为临时凭证（约 8-24 小时有效）",
   failedCreateApiToken: "创建 API 令牌失败",
   unknownApiTokenError: "创建 API 令牌时发生未知错误",
   authFailed: "认证失败",
@@ -35,6 +38,20 @@ const zh = {
   codeExpiresIn: "代码将在 {minutes} 分钟后过期",
   tryAgain: "重试",
   cancel: "取消",
+  // === LM CUSTOMIZATION: DeviceFlowFallback i18n START ===
+  deviceFlowTitle: "Nucleus 设备码登录",
+  deviceFlowStep1: "1. 在浏览器中打开下方链接：",
+  deviceFlowStep2: "2. 输入以下设备码：",
+  deviceFlowStep3: "3. 在浏览器中完成登录后，本窗口会自动关闭。",
+  waitingForLogin: "等待用户授权...",
+  useDeviceFlowFallback: "使用设备码登录（本地开发）",
+  close: "关闭",
+  copy: "复制",
+  copied: "已复制",
+  copyCode: "复制设备码",
+  authSuccess: "登录成功",
+  ssoLoginSuccessDesc: "已创建永久 API Token",
+  // === LM CUSTOMIZATION: DeviceFlowFallback i18n END ===
 
   // === index.js - HeaderIcons ===
   selectServer: "选择服务器",
@@ -615,6 +632,36 @@ const zh = {
   formatExcludeClearAllTip: "清空所有排除（允许所有扩展名）",
   formatExcludeRestoreTip: "恢复默认（排除 USD 文本/图片）",
   formatDefaultExcludeBannerShort: "ℹ 系统默认已排除 USD 文本与图片格式",
+
+  // === LM CUSTOMIZATION: SSO Bridge — postMessage 跨域登录 START ===
+  ssoLoginButton: "使用离岸太湖 SSO 登录",
+  ssoLoginHint: "首次登录会跳转 IOA 授权；已登录的浏览器将自动通过",
+  ssoDevEnvHintTitle: "本地开发环境提示",
+  ssoDevEnvHintDesc: "完整 SSO 闭环依赖同域 cookie，localhost 跨域读不到 market 域 cookie，弹窗不会自动关闭。请部署到 staging 验证完整流程。",
+  ssoLoggingIn: "登录中…",
+  ssoOpeningPopup: "正在打开登录弹窗…",
+  ssoBridgeWaiting: "等待完成登录…",
+  ssoBridgeSuccess: "登录成功，正在返回主页…",
+  ssoBridgeChannelPostMessage: "通过 postMessage 通道",
+  ssoBridgeChannelLocalStorage: "通过 localStorage 通道",
+  ssoTimeout: "登录超时，请重试",
+  ssoTimeoutLong: "登录耗时过长，请关闭弹窗后重试",
+  ssoUntrustedOrigin: "已忽略来自不受信任来源的消息",
+  ssoTokenInvalid: "收到的 Token 格式无效",
+  ssoPopupBlocked: "登录弹窗被浏览器拦截，请允许弹窗后重试",
+  ssoPopupClosed: "登录弹窗在完成前被关闭",
+  ssoWaitingAuth: "等待 SSO 认证完成…",
+  orDivider: "或",
+  ssoLoginFailed: "登录失败：{message}",
+  ssoBridgeDebugTitle: "SSO 中转 — 调试模式",
+  ssoBridgeDebugWaiting: "正在检测 Token…",
+  ssoBridgeDebugSent: "Token 已发送给主页",
+  ssoBridgeDebugTimeout: "Token 检测已超时",
+  ssoBridgeDebugNoOpener: "检测到直接访问 — 中转脚本保持静默",
+  ssoBridgeCopyToken: "复制 Token",
+  ssoBridgeCopyTokenSuccess: "Token 已复制到剪贴板",
+  ssoBridgeCopyTokenEmpty: "暂无可复制的 Token",
+  // === LM CUSTOMIZATION: SSO Bridge END ===
 };
 
 export default zh;

@@ -1308,6 +1308,22 @@ const HybridDeepSearchUI = () => {
       headers["x-usdsearch-storage-backend"] = selectedBackend;
     }
 
+    // 优先级 1: SSO JWT Bearer token
+    const ssoToken = localStorage.getItem('omni_access_token');
+    if (ssoToken && ssoToken.trim() !== '') {
+      // 验证 JWT 未过期（60s 缓冲）
+      try {
+        const payload = JSON.parse(atob(ssoToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        if (payload.exp && 1000 * payload.exp > Date.now() + 60000) {
+          headers["Authorization"] = `Bearer ${ssoToken}`;
+          return headers;
+        }
+      } catch (e) {
+        // JWT 解析失败，回退到其他方式
+      }
+    }
+
+    // 优先级 2: 传统认证方式
     // Get auth credentials via shared helper
     const serverAuth = readAuthCredentials(selectedBackend);
 
@@ -1321,7 +1337,7 @@ const HybridDeepSearchUI = () => {
       const basicAuth = btoa("$omni-api-token:" + serverAuth.nucleus_api_token);
       headers["Authorization"] = "Basic " + basicAuth;
     }
-    
+
     return headers;
   }, [selectedBackend, readAuthCredentials]);
 
