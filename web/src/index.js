@@ -444,9 +444,19 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                     duration: 3000,
                 });
 
+                // === LM CUSTOMIZATION: SSO API Token unique-name START ===
+                // 原因：旧版 tokenName 精度仅到秒（USD-Search-SSO-2026-05-22_15-13-02），
+                //      同一秒内重复点击 / 同一名字曾经创建过 → Nucleus 返回 status=EXISTS
+                //      → 旧逻辑 throw 红色 toast "创建 API 令牌失败：EXISTS" 让用户以为登录挂了。
+                // 修复：加入毫秒 + 4 位随机后缀，碰撞概率近 0；同时下面 catch 块对 EXISTS 做容错。
+                // 合入英伟达新版时：本块独立可移除（NVIDIA 原版 device-flow 也用类似带时间戳的 name，但精度足够）。
                 const now = new Date();
-                const timestamp = `${now.toISOString().split('T')[0]}_${now.getHours().toString().padStart(2, '0')}-${now.getMinutes().toString().padStart(2, '0')}-${now.getSeconds().toString().padStart(2, '0')}`;
-                const tokenName = `USD-Search-SSO-${timestamp}`;
+                const datePart = now.toISOString().split('T')[0];
+                const timePart = `${now.getHours().toString().padStart(2, '0')}-${now.getMinutes().toString().padStart(2, '0')}-${now.getSeconds().toString().padStart(2, '0')}`;
+                const msPart = now.getMilliseconds().toString().padStart(3, '0');
+                const randPart = Math.random().toString(36).slice(2, 6); // 4 位 a-z0-9
+                const tokenName = `USD-Search-SSO-${datePart}_${timePart}-${msPart}-${randPart}`;
+                // === LM CUSTOMIZATION: SSO API Token unique-name END ===
 
                 // === LM CUSTOMIZATION: SSO API Token host 解析 + 本地降级 START ===
                 // 原因 1：createApiToken 内部走 normalizeServerUrl（仅剥 omniverse:// 前缀，
@@ -477,24 +487,43 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                     );
                     effectiveApiToken = apiTokenResult.api_token;
                 } catch (apiTokenError) {
-                    // 仅在本地开发场景下降级；生产环境（部署域名）失败仍报错以暴露真实问题
+                    // === LM CUSTOMIZATION: SSO API Token EXISTS-tolerant START ===
+                    // 原因：Nucleus 永久 API token 同 user + 同 name 已存在时返回 status=EXISTS（在
+                    //      nucleus.jsx createApiToken 内被包成 Error: "Failed to create API token: EXISTS"）。
+                    //      这种情况其实**登录已成功**（access JWT 已拿到），只是补办永久 token 失败；
+                    //      旧版会弹红色 toast 让用户误判为登录失败。
+                    // 修复：识别 EXISTS 错误，降级使用 JWT 作为本会话临时凭证（约 30min 有效），
+                    //      旧的永久 token 仍在 localStorage 里供后续业务调用使用，体验无感知。
+                    // 合入英伟达新版时：可保留此 EXISTS 兼容（NVIDIA 自己也可能改这个语义）。
+                    const errMsg = apiTokenError?.message || '';
+                    const isExistsError = /\bEXISTS\b/i.test(errMsg);
                     const isLocalDev = typeof window !== 'undefined' && (
                         window.location.hostname === 'localhost' ||
                         window.location.hostname === '127.0.0.1'
                     );
-                    if (!isLocalDev) {
+
+                    if (isExistsError) {
+                        // 良性错误：永久 token 已存在 → 用 JWT 顶替本会话凭证
+                        console.warn('[SSO] API token name already exists, falling back to JWT for this session:', errMsg);
+                        effectiveApiToken = token;
+                        isFallbackToken = true;
+                        // 不弹红色错误 toast；下面统一的 "authSuccessful" toast 会用 createdJwtToken 文案告知用户
+                    } else if (isLocalDev) {
+                        // 本地开发：Discovery 不可达等其他错误 → JWT 兜底（与原逻辑一致）
+                        console.warn('[SSO] createApiToken failed in local dev, falling back to JWT:', errMsg);
+                        effectiveApiToken = token;
+                        isFallbackToken = true;
+                        toast({
+                            title: t('ssoLocalDevFallbackTitle') || '本地开发模式',
+                            description: t('ssoLocalDevFallbackDesc') || 'Discovery 服务不可达，已使用 JWT 作为临时凭证（约 8-24 小时有效）',
+                            status: 'warning',
+                            duration: 8000,
+                        });
+                    } else {
+                        // 生产环境的真错误：保留原行为，向上抛让外层 catch 弹错误 toast
                         throw apiTokenError;
                     }
-                    // 本地开发：用 JWT 顶替永久 token，给用户明确提示
-                    console.warn('[SSO] createApiToken failed in local dev, falling back to JWT:', apiTokenError.message);
-                    effectiveApiToken = token;
-                    isFallbackToken = true;
-                    toast({
-                        title: t('ssoLocalDevFallbackTitle') || '本地开发模式',
-                        description: t('ssoLocalDevFallbackDesc') || 'Discovery 服务不可达，已使用 JWT 作为临时凭证（约 8-24 小时有效）',
-                        status: 'warning',
-                        duration: 8000,
-                    });
+                    // === LM CUSTOMIZATION: SSO API Token EXISTS-tolerant END ===
                 }
 
                 // 持久化所有 token
