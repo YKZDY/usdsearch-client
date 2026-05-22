@@ -110,6 +110,8 @@ export function useDragSelect({
     startedInsideCard: false,
     baseSet: new Set(),
     paintedIds: new Set(),
+    // [PERF v4] rect 模式最近一次选区矩形（视口坐标），供 autoScroll loop 每帧重算选中集
+    lastRectVp: null,
     // paint 模式的子模式：根据起点卡片是否已在 baseSet 中决定
     //   起点已选中 → 'remove'（拖过即取消，类似橡皮擦）
     //   起点未选中 → 'add'   （拖过即加入，类似画笔）
@@ -122,6 +124,10 @@ export function useDragSelect({
   const getItemIdRef = useRef(getItemId);
   const onChangeRef = useRef(onSelectionChange);
   const onEmptyClickRef = useRef(onEmptyClick);
+  // [PERF v4] tickAutoScroll 在 computeSelectedByRect/emitIfChanged 声明之前使用，
+  // 通过 ref 间接访问避免 TDZ（const useCallback 联合严格检查会报 “使用前未初始化”）。
+  const computeSelectedByRectRef = useRef(null);
+  const emitIfChangedRef = useRef(null);
   // [PERF v4 — 2026-05-22 trace 驱动] 镜像 baseSelection 到 ref
   // 背景：Playwright + cancelAnimationFrame stack trace 证实，拖拽期间 useEffect 被销毁重建 5+ 次，
   //   导致 cleanup 中 cancelAnimationFrame(autoScrollRef.current) 反复中断 autoScroll loop。
@@ -196,6 +202,17 @@ export function useDragSelect({
           return;
         }
         containerRef.current.scrollTop += speed;
+        // [PERF v4 — 2026-05-22] autoScroll 期间同步扩展选区
+        // 场景：鼠标静止在 edge 区不动，容器下滚后新滚出的卡片会进入选区矩形。
+        // 之前 loop 只改 scrollTop、不重算选中集，造成"滚是滚了 但卡没被选"的倒退体验。
+        // 在 stateRef.lastRectVp 里存上一次 mousemove 计算的选区矩形（视口坐标，不变），
+        // 每帧调 computeSelectedByRect 重算后 emit。不会重复触发（emitIfChanged 有 Set 等值短路）。
+        // 通过 ref 间接调用避免 const TDZ。
+        const lastRect = stateRef.current.lastRectVp;
+        if (lastRect && computeSelectedByRectRef.current && emitIfChangedRef.current) {
+          const next = computeSelectedByRectRef.current(lastRect);
+          emitIfChangedRef.current(next);
+        }
         autoScrollRef.current = requestAnimationFrame(loop);
       };
       autoScrollRef.current = requestAnimationFrame(loop);
@@ -251,6 +268,8 @@ export function useDragSelect({
     lastEmittedRef.current = next;
     onChangeRef.current?.(next);
   }, []);
+
+  // [PERF v4] \u540c\u6b65 computeSelectedByRect / emitIfChanged \u5230 ref\uff0c\u4f9b autoScroll loop \u8c03\u7528\n  // \u539f\u56e0\uff1atickAutoScroll \u5728\u8fd9\u4e24\u8005\u4e4b\u524d\u58f0\u660e\uff0c\u76f4\u63a5\u5728 useCallback deps \u4e2d\u5f15\u7528\u4f1a\u89e6\u53d1 TDZ\u3002\n  const computeSelectedByRectRefSync = computeSelectedByRect;\n  const emitIfChangedRefSync = emitIfChanged;\n  computeSelectedByRectRef.current = computeSelectedByRectRefSync;\n  emitIfChangedRef.current = emitIfChangedRefSync;
 
   // [PERF v2] 拖拽起点重置 lastEmitted，使下一次 mousedown 不被旧值短路
   // 必须在 handleMouseDown 之前声明（const TDZ：handleMouseDown 的 useCallback
@@ -483,6 +502,8 @@ export function useDragSelect({
       const w = Math.abs(dx);
       const h = Math.abs(dy);
       const rectVp = { left: x, top: y, right: x + w, bottom: y + h };
+      // [PERF v4] 存最后选区矩形，供 autoScroll loop 每帧重算选中集。
+      st.lastRectVp = rectVp;
 
       setSelectionRect({ x, y, width: w, height: h });
       tickAutoScroll(e.clientY);
