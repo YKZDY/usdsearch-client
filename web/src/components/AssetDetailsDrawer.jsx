@@ -45,11 +45,35 @@ import {
   ChevronLeftIcon,
   ChevronDownIcon,
   CopyIcon,
+  ExternalLinkIcon,
+  RepeatIcon,
 } from '@chakra-ui/icons';
 import { useTranslation } from '../i18n/LanguageContext';
 import { fabColors, fabRadius, fabSpacing, brandColors, fabTypo } from '../theme/fabTokens';
 import AssetImage from './AssetImage';
 import { formatFileSize, formatDate } from '../utils/formatUtils';
+
+// === LM CUSTOMIZATION: detail-modal-revamp START ===
+// 需求 6.4：时间戳根据当前语言格式化（中文：2026年5月22日 / 英文：May 22, 2026）
+// 不动 NVIDIA 原版 utils/formatUtils.js 的 formatDate，在 Drawer 内部包一层。
+function formatDateByLang(dateString, language) {
+  if (!dateString) return null;
+  try {
+    const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) return null;
+    const locale = language === 'zh' ? 'zh-CN' : 'en-US';
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: language === 'zh' ? 'long' : 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d);
+  } catch (_) {
+    return formatDate(dateString); // 退化到原版 toLocaleString
+  }
+}
+// === LM CUSTOMIZATION: detail-modal-revamp END ===
 
 const COLLAPSED_KEY = 'detailsDrawerCollapsed';
 const WIDTH_KEY = 'detailsDrawerWidth';
@@ -168,7 +192,7 @@ const AssetDetailsDrawer = ({
   serverUrl, // eslint-disable-line no-unused-vars
   copyToClipboard,
 }) => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [collapsed, setCollapsed] = useState(readCollapsedState);
   const [drawerWidth, setDrawerWidth] = useState(readDrawerWidth);
   const triggerElementRef = useRef(null);
@@ -276,23 +300,57 @@ const AssetDetailsDrawer = ({
     } catch (_) { /* ignore */ }
   }, [displayAsset, copyToClipboard, toast, t]);
 
+  // === LM CUSTOMIZATION: detail-modal-revamp START ===
+  // 需求 7：Action Bar 重构—在 Omniverse 打开 + 刷新元数据。
+  // “刷新元数据”通过派发 window 事件交由 DrawerAdvancedPanelContainer 响应，
+  // 避免 Drawer 与高级面板容器互相耦合。
+  const omniverseUrl = useMemo(() => {
+    const a = displayAsset;
+    return a?.source?.omniverse_url || a?.source?.nucleus_url || null;
+  }, [displayAsset]);
+
+  const [refreshSpinning, setRefreshSpinning] = useState(false);
+  const handleRefreshMetadata = useCallback(() => {
+    setRefreshSpinning(true);
+    try {
+      window.dispatchEvent(
+        new CustomEvent('details-drawer-refresh-metadata', {
+          detail: { asset: displayAsset },
+        })
+      );
+      toast?.({ title: t('detailsDrawerRefreshAll'), status: 'info', duration: 1200 });
+    } catch (_) { /* ignore */ }
+    // 动画反馈：800ms 后释放 loading 态（hook 内部会接手真实加载态，但 Drawer 拿不到，
+    // 用一个合理的动画时间表示“请求已发出”即可）
+    setTimeout(() => setRefreshSpinning(false), 800);
+  }, [displayAsset, toast, t]);
+
+  const handleOpenInOmniverse = useCallback(() => {
+    if (!omniverseUrl) return;
+    try {
+      window.open(omniverseUrl, '_blank', 'noopener,noreferrer');
+    } catch (_) { /* ignore */ }
+  }, [omniverseUrl]);
+  // === LM CUSTOMIZATION: detail-modal-revamp END ===
+
 
   // === LM CUSTOMIZATION: SelectionDrawer START ===
   // TC-A8 元数据预算（用 displayAsset 取值，配合 useMemo 减少重算）
   // v3.1：用户反馈来源/评分信息量低且不友好，删除这两个字段。
+  // detail-modal-revamp：时间戳改走 formatDateByLang，随语言切换
   const meta = useMemo(() => {
     const a = displayAsset;
     const sizeText = a?.source?.size != null ? formatFileSize(a.source.size) : null;
     const formatText = inferFormat(a);
     const modifiedRaw = a?.source?.modified_timestamp;
     const createdRaw = a?.source?.created_timestamp;
-    const modifiedText = modifiedRaw ? formatDate(modifiedRaw) : null;
-    const createdText = createdRaw ? formatDate(createdRaw) : null;
+    const modifiedText = modifiedRaw ? (formatDateByLang(modifiedRaw, language) || formatDate(modifiedRaw)) : null;
+    const createdText = createdRaw ? (formatDateByLang(createdRaw, language) || formatDate(createdRaw)) : null;
     const creatorText = a?.source?.created_by || null;
     const pathText = a?.source?.url || a?.url || a?.source?.base_key || '';
     const nameText = inferAssetName(a);
     return { sizeText, formatText, modifiedText, createdText, creatorText, pathText, nameText };
-  }, [displayAsset]);
+  }, [displayAsset, language]);
   // === LM CUSTOMIZATION: SelectionDrawer END ===
 
   // 折叠态：极窄竖条 + 上方一对独立按钮（避免重叠）
@@ -716,6 +774,37 @@ const AssetDetailsDrawer = ({
                 >
                   {t('detailsDrawerCopyPath')}
                 </Button>
+                {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
+                {/* 次按钮：仅当资产含 omniverse_url / nucleus_url 时显示 */}
+                {omniverseUrl && (
+                  <Tooltip label={omniverseUrl} placement="top" hasArrow openDelay={500}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      borderColor={brandColors.primary}
+                      color={brandColors.primary}
+                      _hover={{ bg: 'rgba(255,210,48,0.08)' }}
+                      leftIcon={<ExternalLinkIcon />}
+                      onClick={handleOpenInOmniverse}
+                      aria-label={t('detailsDrawerOpenInOmniverse')}
+                    >
+                      {t('detailsDrawerOpenInOmniverse')}
+                    </Button>
+                  </Tooltip>
+                )}
+                {/* 图标按钮：刷新高级面板数据（依赖/反向依赖/USD 属性） */}
+                <Tooltip label={t('detailsDrawerRefreshAll')} placement="top" hasArrow openDelay={400}>
+                  <IconButton
+                    aria-label={t('detailsDrawerRefreshAll')}
+                    icon={<RepeatIcon />}
+                    size="sm"
+                    variant="ghost"
+                    color={fabColors.iconPrimary}
+                    isLoading={refreshSpinning}
+                    onClick={handleRefreshMetadata}
+                  />
+                </Tooltip>
+                {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
               </>
             )}
           </HStack>

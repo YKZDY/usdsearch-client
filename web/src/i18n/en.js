@@ -426,6 +426,12 @@ const en = {
   detailsDrawerDownload: "Download",
   detailsDrawerEmptyHint: "Select an asset from the results",
   detailsDrawerAdvancedTitle: "Advanced",
+  // detail-modal-revamp (Drawer advanced panels)
+  detailsDrawerLoadFailed: "Load failed",
+  detailsDrawerRetry: "Retry",
+  detailsDrawerRefreshAll: "Refresh metadata",
+  detailsDrawerNoIndexPermission: "Admin permission required",
+  detailsDrawerNoAsset: "Select an asset first",
   // === LM CUSTOMIZATION: details-drawer-i18n END ===
   details: "Details",
   property: "Property",

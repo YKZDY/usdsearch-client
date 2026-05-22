@@ -422,10 +422,16 @@ const zh = {
     detailsDrawerSource: "来源",
     detailsDrawerScore: "评分",
     detailsDrawerPath: "路径",
-    detailsDrawerOpenInOmniverse: "在 Omniverse 打开",
+  detailsDrawerOpenInOmniverse: "在 Omniverse 打开",
   detailsDrawerDownload: "下载",
   detailsDrawerEmptyHint: "请在结果列表中选择一个资产",
   detailsDrawerAdvancedTitle: "高级",
+  // detail-modal-revamp（资产详情 Drawer 高级面板增强）
+  detailsDrawerLoadFailed: "加载失败",
+  detailsDrawerRetry: "重试",
+  detailsDrawerRefreshAll: "刷新元数据",
+  detailsDrawerNoIndexPermission: "需要管理员权限",
+  detailsDrawerNoAsset: "请先选择资产",
   // === LM CUSTOMIZATION: details-drawer-i18n END ===
   details: "详情",
   property: "属性",

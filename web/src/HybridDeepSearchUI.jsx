@@ -83,6 +83,12 @@ import { useDrawerOrSelect } from "./hooks/useDrawerOrSelect";
 // 合入英伟达新版时：保留本 import；AdvancedMatchInfo 是 LM 新建组件，与 NVIDIA 不交叉。
 import AdvancedMatchInfo from "./components/AdvancedMatchInfo";
 // === LM CUSTOMIZATION: AdvancedPanel END ===
+// === LM CUSTOMIZATION: detail-modal-revamp START ===
+// 原因：补齐 Drawer 高级面板（依赖图 / USD 属性 / 索引管理 / AI / VLM / 解释），
+// 与 Modal 行为一致；DrawerAdvancedPanelContainer 是 LM 新建组件，与 NVIDIA 不交叉。
+// 合入英伟达新版时：保留本 import。
+import DrawerAdvancedPanelContainer from "./components/drawer-panels/DrawerAdvancedPanelContainer";
+// === LM CUSTOMIZATION: detail-modal-revamp END ===
 // === LM CUSTOMIZATION: AssetTagEditor START ===
 // 原因：Group B 需求 5 — 抽屉内完整 tag 编辑器插槽填充。
 // 合入英伟达新版时：保留本 import。
@@ -3574,7 +3580,19 @@ const HybridDeepSearchUI = () => {
           copyToClipboard={copyToClipboard}
           // === LM CUSTOMIZATION: AdvancedPanel START ===
           // Group B 任务 7：高级面板填充原 HYBRID/匹配字段信息
-          advancedPanelContent={selectedItem ? <AdvancedMatchInfo asset={selectedItem} /> : null}
+          // detail-modal-revamp：扩充为完整高级面板组合（依赖 / 反向依赖 / USD / 索引管理 / 条件性面板 / Hybrid 匹配信息）
+          advancedPanelContent={
+            selectedItem ? (
+              <DrawerAdvancedPanelContainer
+                asset={selectedItem}
+                plugins={plugins}
+                getHeaders={getHeaders}
+                triggerReindexAllPlugins={triggerReindexAllPlugins}
+                triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
+                isAuthorized={true}
+              />
+            ) : null
+          }
           // === LM CUSTOMIZATION: AdvancedPanel END ===
           // === LM CUSTOMIZATION: AssetTagEditor START ===
           // Group B 任务 8：抽屉内完整 tag 编辑器
