@@ -655,6 +655,8 @@ const en = {
   ssoTokenInvalid: "Received invalid token format",
   ssoPopupBlocked: "Login popup was blocked by the browser. Please allow popups and retry.",
   ssoPopupClosed: "Login popup was closed before completion",
+  ssoPopupPlaceholderTitle: "Redirecting to IOA login…",
+  ssoPopupPlaceholderBody: "Please wait while we redirect you to the IOA single sign-on page. If nothing happens, close this window and try again.",
   ssoWaitingAuth: "Waiting for SSO authentication…",
   orDivider: "OR",
   ssoLoginFailed: "Login failed: {message}",

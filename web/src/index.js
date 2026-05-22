@@ -405,19 +405,63 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
     //   2) 500ms 轮询 localStorage.omni_access_token
     //   3) 拿到 → close + createApiToken 换凭证（本地降级 JWT）
     //   4) 用户手关弹窗 → 静默退出 loading
-    const handleSSOLogin = useCallback(async () => {
+    const handleSSOLogin = useCallback(() => {
+        // === LM CUSTOMIZATION: SSO popup blocker workaround START ===
+        // 原因：光哥反馈 Edge InPrivate / 严格隐私模式下 SSO 弹窗被拦截。
+        //      根因：旧版 useCallback(async () => { setState... window.open() })
+        //      把 window.open 推迟到了用户手势上下文之外（async 函数 + 前置 setState
+        //      让浏览器无法将 window.open 关联到原始点击事件）。
+        // 修复：经典反 popup-blocker 模式 ——
+        //      ① 移除 async（保持同步函数）
+        //      ② window.open('') 同步在第 1 行（仍在用户手势栈内）
+        //      ③ 占位 HTML 给用户即时反馈（避免白板）
+        //      ④ 异步阶段才做 setState / location.href 跳转
+        // 合入英伟达新版时：本块整体可移除（NVIDIA 原版无 IOA SSO 弹窗）。
+        const ssoLoginUrl = AUTH_CONFIG.SSO_LOGIN_URL || '/omni/auth/login';
+        // ① 同步打开空窗（用户手势栈第 1 行 → 通过严格 popup blocker）
+        const ssoWindow = window.open('', 'sso_login', 'width=500,height=600,resizable=yes,scrollbars=yes');
+
+        // ② 真被拦截（安装了激进拦截器/扩展）→ 提示用户
+        if (!ssoWindow) {
+            setSsoError(t('ssoPopupBlocked') || t('popupBlocked') || '弹窗被浏览器拦截，请允许弹窗后重试');
+            return;
+        }
+        ssoWindowRef.current = ssoWindow;
+
+        // ③ 立刻写入占位内容（避免空白窗口惊吓用户）
+        try {
+            const placeholderTitle = t('ssoPopupPlaceholderTitle') || '正在跳转 IOA 登录…';
+            const placeholderBody = t('ssoPopupPlaceholderBody') || '请稍候，正在跳转到 IOA 单点登录页面。如果长时间无响应，请关闭本窗口后重试。';
+            ssoWindow.document.write(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>${placeholderTitle}</title>
+<style>
+  body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f1115;color:#e6e6e6;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .box{text-align:center;padding:32px 24px;max-width:360px}
+  .spin{width:40px;height:40px;margin:0 auto 20px;border:3px solid #2a2e36;border-top-color:#FFD230;border-radius:50%;animation:r 1s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}
+  h1{margin:0 0 12px;font-size:16px;font-weight:600}
+  p{margin:0;font-size:13px;line-height:1.6;color:#8b909a}
+</style>
+</head>
+<body><div class="box"><div class="spin"></div><h1>${placeholderTitle}</h1><p>${placeholderBody}</p></div></body>
+</html>`);
+            ssoWindow.document.close();
+        } catch (e) { /* document.write 失败不影响主流程 */ }
+
+        // ④ 进入异步阶段：setState、跳转真实 SSO URL
         setSsoError(null);
         setSsoLoading(true);
 
-        const ssoLoginUrl = AUTH_CONFIG.SSO_LOGIN_URL || '/omni/auth/login';
-        const ssoWindow = window.open(ssoLoginUrl, 'sso_login', 'width=500,height=600');
-        ssoWindowRef.current = ssoWindow;
-
-        if (!ssoWindow) {
-            setSsoError(t('ssoPopupBlocked') || t('popupBlocked') || '弹窗被浏览器拦截，请允许弹窗后重试');
-            setSsoLoading(false);
-            return;
+        try {
+            ssoWindow.location.href = ssoLoginUrl;
+        } catch (e) {
+            // 极端情况下跳转失败（如 ssoWindow 被立刻关闭），静默降级
+            console.warn('[SSO] failed to navigate popup to SSO URL:', e);
         }
+        // === LM CUSTOMIZATION: SSO popup blocker workaround END ===
 
         // 一次性锁：避免轮询拿到 token 后正在 await createApiToken 期间下一轮 tick 重复触发
         let fired = false;

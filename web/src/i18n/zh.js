@@ -651,6 +651,8 @@ const zh = {
   ssoTokenInvalid: "收到的 Token 格式无效",
   ssoPopupBlocked: "登录弹窗被浏览器拦截，请允许弹窗后重试",
   ssoPopupClosed: "登录弹窗在完成前被关闭",
+  ssoPopupPlaceholderTitle: "正在跳转 IOA 登录…",
+  ssoPopupPlaceholderBody: "请稍候，正在跳转到 IOA 单点登录页面。如果长时间无响应，请关闭本窗口后重试。",
   ssoWaitingAuth: "等待 SSO 认证完成…",
   orDivider: "或",
   ssoLoginFailed: "登录失败：{message}",
