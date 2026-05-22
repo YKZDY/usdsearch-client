@@ -243,6 +243,14 @@ export function useDragSelect({
     onChangeRef.current?.(next);
   }, []);
 
+  // [PERF v2] 拖拽起点重置 lastEmitted，使下一次 mousedown 不被旧值短路
+  // 必须在 handleMouseDown 之前声明（const TDZ：handleMouseDown 的 useCallback
+  // 在 capture 函数体里引用 resetEmitted，模块求值阶段 TDZ 检查不会真正访问，
+  // 但热更新 / 严格模式下 React 的 deps 数组校验会触发 ReferenceError）。
+  const resetEmitted = useCallback(() => {
+    lastEmittedRef.current = null;
+  }, []);
+
   // 把 paintedIds 应用到 baseSet：根据 paintMode 决定是 ∪ 还是 \
   const applyPaint = useCallback(() => {
     const st = stateRef.current;
@@ -332,11 +340,6 @@ export function useDragSelect({
       e.preventDefault();
     }
   }, [enabled, isInsideCard, containerRef, baseSelection, findCardFromEl, resetEmitted]);
-
-  // 拖拽起点重置 lastEmitted，使下一次 mousedown 不被旧值短路
-  const resetEmitted = useCallback(() => {
-    lastEmittedRef.current = null;
-  }, []);
 
   const handleMouseMove = useCallback((e) => {
     const st = stateRef.current;
