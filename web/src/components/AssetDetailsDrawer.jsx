@@ -43,10 +43,11 @@ import {
 import {
   ChevronRightIcon,
   ChevronLeftIcon,
+  ChevronDownIcon,
   CopyIcon,
 } from '@chakra-ui/icons';
 import { useTranslation } from '../i18n/LanguageContext';
-import { fabColors, fabRadius, fabSpacing, brandColors } from '../theme/fabTokens';
+import { fabColors, fabRadius, fabSpacing, brandColors, fabTypo } from '../theme/fabTokens';
 import AssetImage from './AssetImage';
 import { formatFileSize, formatDate } from '../utils/formatUtils';
 
@@ -315,13 +316,14 @@ const AssetDetailsDrawer = ({
         // === LM CUSTOMIZATION: SelectionDrawer END ===
       >
         {/* === LM CUSTOMIZATION: SelectionDrawer START === */}
-        {/* v3.5 决策：放弃"抽屉打开期间外部可交互"目标（A 方案）。
-            历经多轮调试无法稳定实现：DrawerOverlay 的事件透传与 Chakra 内部焦点/动画管理
-            存在难以根除的副作用。回归保守策略 — overlay 透明但保留事件接收，
-            配合 closeOnOverlayClick={false} 使外部点击"无副作用"（不假死、也不误关）。
-            真正的"点空白关抽屉"由 useDrawerCloseGuard 接管。
+        {/* v3.7 修复"切换卡片要点几下才出抽屉"：DrawerOverlay 即使 bg=transparent
+            仍会捕获点击事件（默认 pointer-events:auto），导致用户点其他卡片时
+            第一次 click 被 overlay 吞掉 → useDrawerCloseGuard 同时判定为"想关"派 onClose →
+            抽屉关闭后第二次 click 才落到新卡片 → 体感"要点几下"+"卡卡的"。
+            修复：pointerEvents="none" 让透明遮罩对事件完全透明，所有 click 都直达下层卡片。
+            关闭路径仍由 useDrawerCloseGuard（document 级监听）接管，不受影响。
             合入英伟达新版时：保留本块；属性与原版兼容。 */}
-        <DrawerOverlay bg="transparent" />
+        <DrawerOverlay bg="transparent" pointerEvents="none" />
         {/* === LM CUSTOMIZATION: SelectionDrawer END === */}
         <DrawerContent
           maxW={DRAWER_WIDTH_COLLAPSED}
@@ -376,8 +378,8 @@ const AssetDetailsDrawer = ({
       // === LM CUSTOMIZATION: SelectionDrawer END ===
     >
       {/* === LM CUSTOMIZATION: SelectionDrawer START === */}
-      {/* v3.5 决策：放弃 A 方案，详见 collapsed 分支同位置注释。 */}
-      <DrawerOverlay bg="transparent" />
+      {/* v3.7 修复：见 collapsed 分支同位置注释。pointerEvents="none" 让 overlay 不再吞噬点击。 */}
+      <DrawerOverlay bg="transparent" pointerEvents="none" />
       {/* === LM CUSTOMIZATION: SelectionDrawer END === */}
       <DrawerContent
         maxW={responsiveWidth}
@@ -577,35 +579,43 @@ const AssetDetailsDrawer = ({
                 )}
               </Box>
 
-              {/* 区块 5：高级折叠面板—v3 TC-A8：展开时左侧出现金色 4px 竖线强调 */}
+              {/* 区块 5：高级折叠面板—v1.1 去掉金色左边框 + 标题改用 eyebrow.sm */}
               <Box data-section="advanced">
                 <Accordion allowToggle defaultIndex={[]}>
                   <AccordionItem border="0">
                     {({ isExpanded }) => (
                       <>
                         <AccordionButton
-                          px={fabSpacing['3']}
-                          py={fabSpacing['2']}
+                          px={fabSpacing['1']}
+                          py={fabSpacing['1.5']}
                           _hover={{ bg: fabColors.bgElevatedHigh }}
                           borderRadius={fabRadius['1']}
                           // === LM CUSTOMIZATION: detail-modal-revamp START ===
-                          borderLeft="4px solid"
-                          borderLeftColor={isExpanded ? brandColors.primary : 'transparent'}
-                          transition="border-left-color 180ms ease, background 120ms ease"
+                          // v1.1：移除 4px 金色左边框（原设计在展开时出现，被用户反馈为“太显眼会抢夺品牌色”）
                           // === LM CUSTOMIZATION: detail-modal-revamp END ===
                         >
-                          <Box flex="1" textAlign="left" fontSize="sm" color={fabColors.textSecondary}>
-                            {t('detailsDrawerAdvancedTitle')}
-                          </Box>
-                          <AccordionIcon />
+                          <HStack flex="1" spacing={fabSpacing['1.5']}>
+                            {/* v1.1：折叠箭头放到标题左侧，体积缩小为 14px */}
+                            {isExpanded
+                              ? <ChevronDownIcon boxSize="14px" color={fabColors.textSecondary} />
+                              : <ChevronRightIcon boxSize="14px" color={fabColors.textSecondary} />}
+                            <Text
+                              fontSize={fabTypo.eyebrow.sm.size}
+                              lineHeight={fabTypo.eyebrow.sm.lineHeight}
+                              letterSpacing={fabTypo.eyebrow.sm.letterSpacing}
+                              fontWeight={fabTypo.eyebrow.sm.weight}
+                              color={fabColors.textSecondary}
+                              textTransform="uppercase"
+                            >
+                              {t('detailsDrawerAdvancedTitle')}
+                            </Text>
+                          </HStack>
                         </AccordionButton>
                         <AccordionPanel
                           px={0}
                           pt={fabSpacing['2']}
                           // === LM CUSTOMIZATION: detail-modal-revamp START ===
-                          borderLeft="4px solid"
-                          borderLeftColor={isExpanded ? brandColors.primary : 'transparent'}
-                          transition="border-left-color 180ms ease"
+                          // v1.1：同上，面板内部也去掉金色左边框
                           // === LM CUSTOMIZATION: detail-modal-revamp END ===
                         >
                           {advancedPanelContent ?? (
