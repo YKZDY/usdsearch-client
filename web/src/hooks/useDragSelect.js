@@ -223,6 +223,26 @@ export function useDragSelect({
     return result;
   }, [containerRef]);
 
+  // [PERF v2] Set 等值比较：避免向上层抛出"内容相同"的新 Set 引用
+  //   性能根因：mousemove 期间每帧都会重新计算 next Set 并 onChangeRef.current?.(next)；
+  //   父级 setSelectedItems(next) 即便内容未变也会触发整棵搜索结果重渲染（renderItem
+  //   依赖 selectedItems 引用→重建→VirtualizedResults 内每张可视卡 reconciliation）。
+  //   通过 lastEmittedRef 做 size+ID 等值比较，命中卡片未变化时直接 return，60Hz 下从
+  //   "每帧都重渲"降到"仅在选区跨边界时重渲"，是拖拽丝滑度的关键。
+  const lastEmittedRef = useRef(null);
+  const setEquals = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.size !== b.size) return false;
+    for (const v of a) if (!b.has(v)) return false;
+    return true;
+  };
+  const emitIfChanged = useCallback((next) => {
+    if (setEquals(lastEmittedRef.current, next)) return;
+    lastEmittedRef.current = next;
+    onChangeRef.current?.(next);
+  }, []);
+
   // 把 paintedIds 应用到 baseSet：根据 paintMode 决定是 ∪ 还是 \
   const applyPaint = useCallback(() => {
     const st = stateRef.current;
@@ -232,8 +252,8 @@ export function useDragSelect({
     } else {
       st.paintedIds.forEach((id) => next.add(id));
     }
-    onChangeRef.current?.(next);
-  }, []);
+    emitIfChanged(next);
+  }, [emitIfChanged]);
 
   const handleMouseDown = useCallback((e) => {
     if (!enabled || e.button !== 0) return;
@@ -305,12 +325,18 @@ export function useDragSelect({
       paintedIds: new Set(),
       paintMode,
     };
+    resetEmitted(); // [PERF v2] 新一轮拖拽重置等值比较记忆
 
     // 容器内非卡片区域 preventDefault 阻止文本选区
     if (!insideCard) {
       e.preventDefault();
     }
-  }, [enabled, isInsideCard, containerRef, baseSelection, findCardFromEl]);
+  }, [enabled, isInsideCard, containerRef, baseSelection, findCardFromEl, resetEmitted]);
+
+  // 拖拽起点重置 lastEmitted，使下一次 mousedown 不被旧值短路
+  const resetEmitted = useCallback(() => {
+    lastEmittedRef.current = null;
+  }, []);
 
   const handleMouseMove = useCallback((e) => {
     const st = stateRef.current;
@@ -398,7 +424,7 @@ export function useDragSelect({
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = requestAnimationFrame(() => {
         const next = computeSelectedByRect(rectVp);
-        onChangeRef.current?.(next);
+        emitIfChanged(next);
       });
     } else if (st.mode === 'paint') {
       // 卡片刷选：用 elementFromPoint 找当前指针下卡片，加入 paintedIds

@@ -1231,19 +1231,22 @@ const VirtualizedHybridSearchResults = ({
         />
         {/* === LM CUSTOMIZATION: DragSelectMarquee START === */}
         {/* Drag selection rectangle overlay
-            v2 修复"出现/消失不丝滑"：
-              - 旧版：条件渲染 {isDragging && <Box/>}，mousedown 瞬间挂载、mouseup 瞬间卸载，
-                视觉上是"硬切"。
-              - 新版：始终挂载，用 opacity + transform + transition 平滑过渡。
-                mount 时 opacity 0 → 1（80ms fade-in，无方向位移避免抖动）
-                unmount 时 opacity 1 → 0 + 微弱 scale(0.98)（120ms fade-out，给"收起"反馈）
-              - 当 selectionRect=null（mouseup 后短暂状态）时保留位置，避免 0 尺寸闪烁。
-              - 加 boxShadow 增强焦点感，但保持 pointerEvents:none 不挡其他交互。
+            v3 修复"拖拽时仍卡顿"：
+              - 旧版 v2：始终挂载 + opacity/transform 切换，但 mousemove 期间每帧都更新
+                left/top/width/height（4 个 layout 属性），触发 layout thrashing；
+                同时 useDragSelect 内 computeSelectedByRect 每帧 querySelectorAll +
+                getBoundingClientRect 强制 reflow，与 marquee 的 layout 写互相打架。
+              - 新版 v3：
+                a) Marquee 用 transform: translate3d(x,y,0) 处理高频位置变化（GPU 合成）
+                b) width/height 保留（拖拽幅度变化时只触发本元素 layout）
+                c) contain:strict 隔离 layout/paint/style 影响范围，
+                   marquee 的 layout 不再传染到外部 cards 的 getBoundingClientRect
+                d) opacity/transform fade 仍保留 v2 的丝滑出入场
             合入英伟达新版时：保留本块；marquee 是 LM 新增功能。 */}
         <Box
           position="fixed"
-          left={`${selectionRect?.x ?? 0}px`}
-          top={`${selectionRect?.y ?? 0}px`}
+          left="0"
+          top="0"
           width={`${selectionRect?.width ?? 0}px`}
           height={`${selectionRect?.height ?? 0}px`}
           bg="rgba(255, 210, 48, 0.08)"
@@ -1251,14 +1254,19 @@ const VirtualizedHybridSearchResults = ({
           borderRadius="4px"
           boxShadow={isDragging ? "0 0 0 1px rgba(255, 210, 48, 0.15), 0 4px 16px rgba(255, 210, 48, 0.06)" : "none"}
           opacity={isDragging && selectionRect ? 1 : 0}
-          transform={isDragging && selectionRect ? 'scale(1)' : 'scale(0.98)'}
-          transformOrigin="center"
+          transform={
+            isDragging && selectionRect
+              ? `translate3d(${selectionRect.x}px, ${selectionRect.y}px, 0) scale(1)`
+              : `translate3d(${selectionRect?.x ?? 0}px, ${selectionRect?.y ?? 0}px, 0) scale(0.98)`
+          }
+          transformOrigin="top left"
           transition={
             isDragging && selectionRect
-              ? "opacity 0.08s cubic-bezier(0.0, 0, 0.2, 1), transform 0.08s cubic-bezier(0.0, 0, 0.2, 1)"
-              : "opacity 0.12s cubic-bezier(0.4, 0, 1, 1), transform 0.12s cubic-bezier(0.4, 0, 1, 1)"
+              ? "opacity 0.08s cubic-bezier(0.0, 0, 0.2, 1)"  // 仅 opacity transition；transform 跟随 mousemove 不要 transition 否则会"拖尾"
+              : "opacity 0.12s cubic-bezier(0.4, 0, 1, 1), transform 0.12s cubic-bezier(0.4, 0, 1, 1)"  // 退场时给 transform transition 实现 0.98 收回
           }
-          willChange="opacity, transform"
+          willChange="opacity, transform, width, height"
+          sx={{ contain: 'strict' }}  // [PERF v3] 隔离 layout/paint，让 marquee 的尺寸变化不触发外部 reflow
           pointerEvents="none"
           zIndex={9999}
           aria-hidden="true"

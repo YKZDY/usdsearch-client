@@ -1193,12 +1193,12 @@ const HybridSearchResults = ({
       </Box>
       {/* === LM CUSTOMIZATION: DragSelectMarquee START === */}
       {/* Drag selection rectangle overlay
-          v2 修复"出现/消失不丝滑"：始终挂载 + opacity/transform 切换 + GPU willChange，
-          与 VirtualizedHybridSearchResults 同步行为，避免双路径视觉不一致。 */}
+          v3 修复"拖拽时仍卡顿"：left/top 改用 transform GPU 合成 + contain:strict 隔离 layout，
+          与 VirtualizedHybridSearchResults 同步。 */}
       <Box
         position="fixed"
-        left={`${selectionRect?.x ?? 0}px`}
-        top={`${selectionRect?.y ?? 0}px`}
+        left="0"
+        top="0"
         width={`${selectionRect?.width ?? 0}px`}
         height={`${selectionRect?.height ?? 0}px`}
         bg="rgba(255, 210, 48, 0.10)"
@@ -1210,14 +1210,19 @@ const HybridSearchResults = ({
             : "0 0 0 1px rgba(0,0,0,0.2)"
         }
         opacity={isDragging && selectionRect ? 1 : 0}
-        transform={isDragging && selectionRect ? 'scale(1)' : 'scale(0.98)'}
-        transformOrigin="center"
+        transform={
+          isDragging && selectionRect
+            ? `translate3d(${selectionRect.x}px, ${selectionRect.y}px, 0) scale(1)`
+            : `translate3d(${selectionRect?.x ?? 0}px, ${selectionRect?.y ?? 0}px, 0) scale(0.98)`
+        }
+        transformOrigin="top left"
         transition={
           isDragging && selectionRect
-            ? "opacity 0.08s cubic-bezier(0.0, 0, 0.2, 1), transform 0.08s cubic-bezier(0.0, 0, 0.2, 1)"
+            ? "opacity 0.08s cubic-bezier(0.0, 0, 0.2, 1)"
             : "opacity 0.12s cubic-bezier(0.4, 0, 1, 1), transform 0.12s cubic-bezier(0.4, 0, 1, 1)"
         }
-        willChange="opacity, transform"
+        willChange="opacity, transform, width, height"
+        sx={{ contain: 'strict' }}
         pointerEvents="none"
         zIndex={9999}
         aria-hidden="true"
