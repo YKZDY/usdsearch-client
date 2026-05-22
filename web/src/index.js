@@ -928,9 +928,32 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                     {/* === LM CUSTOMIZATION: DeviceFlowFallback END === */}
 
                     {ssoError && (
-                        <Text fontSize="xs" color={LA.danger} textAlign="center" lineHeight="1.5">
-                            {ssoError}
-                        </Text>
+                        // === LM CUSTOMIZATION: SSO error retry button START ===
+                        // 原因：原版 ssoError 仅展示红字文案，用户被拦截/超时后只能滚回去
+                        //      重新找"使用 SSO 登录"按钮，多一次认知跳转。
+                        // 修复：在错误下方加一个低调的"重试"按钮，直接再次触发 handleSSOLogin。
+                        // 合入英伟达新版时：本块整体可移除（NVIDIA 原版无 IOA SSO）。
+                        <VStack spacing={2} w="full">
+                            <Text fontSize="xs" color={LA.danger} textAlign="center" lineHeight="1.5">
+                                {ssoError}
+                            </Text>
+                            <Button
+                                size="xs"
+                                variant="outline"
+                                borderColor={LA.danger}
+                                color={LA.danger}
+                                bg="transparent"
+                                _hover={{ bg: LA.dangerDim, borderColor: LA.danger }}
+                                _focusVisible={{ boxShadow: `0 0 0 2px ${LA.dangerDim}` }}
+                                onClick={handleSSOLogin}
+                                isDisabled={ssoLoading}
+                                aria-label={t('ssoRetry') || '重试登录'}
+                                fontWeight="medium"
+                            >
+                                {t('ssoRetry') || '重试登录'}
+                            </Button>
+                        </VStack>
+                        // === LM CUSTOMIZATION: SSO error retry button END ===
                     )}
 
                     {ssoLoading && (

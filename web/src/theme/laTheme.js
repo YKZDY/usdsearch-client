@@ -24,6 +24,13 @@ const LA = {
     danger: '#FF4D4F',       // Red for danger
     info: '#1890FF',         // Blue for info
     purple: '#B37FEB',       // Purple accent
+    // === LM CUSTOMIZATION: status dim tokens START ===
+    // 原因：success/danger/info 缺半透明态（对齐已有的 primaryDim 模式），
+    //      错误/成功按钮 hover/focus 背景需要低饱和的同色调底色。
+    successDim: 'rgba(82, 196, 26, 0.10)',
+    dangerDim: 'rgba(255, 77, 79, 0.10)',
+    infoDim: 'rgba(24, 144, 255, 0.10)',
+    // === LM CUSTOMIZATION: status dim tokens END ===
 };
 
 const theme = extendTheme({

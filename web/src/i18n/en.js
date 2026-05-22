@@ -657,6 +657,7 @@ const en = {
   ssoPopupClosed: "Login popup was closed before completion",
   ssoPopupPlaceholderTitle: "Redirecting to IOA login…",
   ssoPopupPlaceholderBody: "Please wait while we redirect you to the IOA single sign-on page. If nothing happens, close this window and try again.",
+  ssoRetry: "Retry login",
   ssoWaitingAuth: "Waiting for SSO authentication…",
   orDivider: "OR",
   ssoLoginFailed: "Login failed: {message}",
