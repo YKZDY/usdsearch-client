@@ -24,6 +24,12 @@
 import React from 'react';
 import { Box, Skeleton } from '@chakra-ui/react';
 import { keyframes } from '@emotion/react';
+// === LM CUSTOMIZATION: SkeletonFabTokenColors START ===
+// 原因：原版 shimmer/ghost 用 Chakra gray.200/gray.700，深色主题灰度跟 Fab 风格不一致；
+//       切换到 fabTokens 中的语义灰阶，更精致且与卡片背景统一。
+// 合入英伟达新版时：保留本块；如果上游引入新设计令牌系统，可重写映射。
+import { fabColors } from '../theme/fabTokens';
+// === LM CUSTOMIZATION: SkeletonFabTokenColors END ===
 
 // Custom shimmer animation
 const shimmer = keyframes`
@@ -46,6 +52,8 @@ const ImageSkeleton = ({
   variant = "ghost" // "ghost", "pulse", or "shimmer"
 }) => {
   if (variant === "shimmer") {
+    // === LM CUSTOMIZATION: SkeletonFabTokenColors START ===
+    // 深色主题专用：底色用 bgElevatedHigh（与卡片背景一致），高光用 borderSubtle（白 15%）
     return (
       <Box
         width={width}
@@ -53,8 +61,7 @@ const ImageSkeleton = ({
         borderRadius={borderRadius}
         position="relative"
         overflow="hidden"
-        bg="gray.200"
-        _dark={{ bg: "gray.700" }}
+        bg={fabColors.bgElevatedHigh}
       >
         <Box
           position="absolute"
@@ -66,51 +73,40 @@ const ImageSkeleton = ({
             linear-gradient(
               90deg,
               transparent,
-              rgba(255, 255, 255, 0.4),
+              ${fabColors.borderSubtle},
               transparent
             )
           `}
-          _dark={{
-            background: `
-              linear-gradient(
-                90deg,
-                transparent,
-                rgba(255, 255, 255, 0.1),
-                transparent
-              )
-            `
-          }}
           backgroundSize="468px 100%"
           animation={`${shimmer} 1.6s ease-in-out infinite`}
         />
       </Box>
     );
+    // === LM CUSTOMIZATION: SkeletonFabTokenColors END ===
   }
 
   if (variant === "pulse") {
+    // === LM CUSTOMIZATION: SkeletonFabTokenColors START ===
     return (
       <Skeleton
         width={width}
         height={height}
         borderRadius={borderRadius}
-        startColor="gray.200"
-        endColor="gray.300"
-        _dark={{
-          startColor: "gray.700",
-          endColor: "gray.600"
-        }}
+        startColor={fabColors.bgElevatedHigh}
+        endColor={fabColors.bgMenu}
       />
     );
+    // === LM CUSTOMIZATION: SkeletonFabTokenColors END ===
   }
 
   // Default "ghost" variant with subtle animated placeholder
+  // === LM CUSTOMIZATION: SkeletonFabTokenColors START ===
   return (
     <Box
       width={width}
       height={height}
       borderRadius={borderRadius}
-      bg="gray.100"
-      _dark={{ bg: "gray.800" }}
+      bg={fabColors.bgElevatedHigh}
       display="flex"
       alignItems="center"
       justifyContent="center"
@@ -124,10 +120,10 @@ const ImageSkeleton = ({
         left="0"
         right="0"
         bottom="0"
-        opacity="0.1"
+        opacity="0.08"
         backgroundImage={`
-          radial-gradient(circle at 25% 25%, gray 2px, transparent 2px),
-          radial-gradient(circle at 75% 75%, gray 2px, transparent 2px)
+          radial-gradient(circle at 25% 25%, ${fabColors.textSecondary} 2px, transparent 2px),
+          radial-gradient(circle at 75% 75%, ${fabColors.textSecondary} 2px, transparent 2px)
         `}
         backgroundSize="20px 20px"
       />
@@ -139,8 +135,7 @@ const ImageSkeleton = ({
             key={index}
             width="6px"
             height="6px"
-            bg="gray.400"
-            _dark={{ bg: "gray.500" }}
+            bg={fabColors.textSecondary}
             borderRadius="full"
             animation={`${pulse} 1.4s ease-in-out infinite`}
             style={{
@@ -151,6 +146,7 @@ const ImageSkeleton = ({
       </Box>
     </Box>
   );
+  // === LM CUSTOMIZATION: SkeletonFabTokenColors END ===
 };
 
 // Pulse animation for dots
@@ -178,25 +174,26 @@ export const ImageWithSkeleton = ({
   ...imageProps 
 }) => {
   if (hasError) {
+    // === LM CUSTOMIZATION: SkeletonFabTokenColors START ===
     return (
       <Box
         display="flex"
         alignItems="center"
         justifyContent="center"
-        bg="gray.50"
-        color="gray.500"
+        bg={fabColors.bgElevatedHigh}
+        color={fabColors.textSecondary}
         fontSize="sm"
         fontWeight="medium"
         width={imageProps.width || imageProps.w || "200px"}
         height={imageProps.height || imageProps.h || "150px"}
         borderRadius={imageProps.borderRadius || "md"}
         border="2px dashed"
-        borderColor="gray.200"
-        _dark={{ bg: "gray.800", color: "gray.400", borderColor: "gray.600" }}
+        borderColor={fabColors.borderSubtle}
       >
         {errorContent}
       </Box>
     );
+    // === LM CUSTOMIZATION: SkeletonFabTokenColors END ===
   }
 
   if (isLoading || !src) {

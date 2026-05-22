@@ -91,9 +91,12 @@ const AssetImage = ({
       height={height}
       borderRadius={borderRadius}
       objectFit="cover"
+      // === LM CUSTOMIZATION: SkeletonShimmerVariant START ===
+      // 与卡片缩略图保持一致：shimmer 流光占位（更接近主流图片占位惯例）
       skeletonProps={{
-        variant: "ghost"
+        variant: "shimmer"
       }}
+      // === LM CUSTOMIZATION: SkeletonShimmerVariant END ===
       errorContent={errorMessage}
       {...imageProps}
     />
