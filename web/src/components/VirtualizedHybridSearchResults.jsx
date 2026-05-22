@@ -991,8 +991,7 @@ const VirtualizedHybridSearchResults = ({
   onAutoLoadMore,                   // 第 1 层：增 userLimit、客户端切片，无网络请求
   onTriggerBackendLoadMore,         // 第 2 层：触发更大 limit 的后端二次搜索
   onRetryLoadMore,                  // 加载出错后的重试回调
-  // 向父级上抛内部 useDragSelect 的 isDragging，供父级 polyfill hook 使用
-  onDragStateChange,
+  // [PERF v3] 移除 onDragStateChange prop：isDragging body 样式已在 useDragSelect 内部 applyDragBodyStyles 合并处理
   // === LM CUSTOMIZATION: InfiniteScroll END ===
   // === LM CUSTOMIZATION: CardTagBar START ===
   // serverUrl 从父级 HybridDeepSearchUI 透传，由下游透传到 GridItem/ListItem 给 CardTagBar 使用。
@@ -1031,14 +1030,13 @@ const VirtualizedHybridSearchResults = ({
   });
 
   // === LM CUSTOMIZATION: InfiniteScroll START ===
-  // 原因：上抛 isDragging 到父级供 polyfill hook 消费（需求 D-2－补充浏览器前缀 + cursor）。
-  // 不重复计算 isDragging、不修改 A 的 useDragSelect，仅做单向出口。
-  // 合入上游时：本 useEffect 独立与 NVIDIA 原代码不交叉。
-  useEffect(() => {
-    if (typeof onDragStateChange === 'function') {
-      onDragStateChange(isDragging);
-    }
-  }, [isDragging, onDragStateChange]);
+  // [PERF v3 — 2026-05-22 trace 驱动] 移除 onDragStateChange 上抛 useEffect。
+  // 原代码是为了让父级 polyfill hook 响应 isDragging 改变。现在 polyfill 副作用已合并进 useDragSelect.applyDragBodyStyles，
+  // 不需要上抛。避免首次拖拽进入时 setState 穿透到 HybridDeepSearchUI (3812 行) 的巨树重渲。
+  // 原代码：
+  //   useEffect(() => {
+  //     if (typeof onDragStateChange === 'function') onDragStateChange(isDragging);
+  //   }, [isDragging, onDragStateChange]);
 
   // 原因：sentinel + IntersectionObserver 实现滚到底自动加载下一页（需求 D-1.1/1.4）。
   // root 选 scrollContainerRef.current（VirtualizedResults 暴露的滚动容器），rootMargin

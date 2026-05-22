@@ -251,6 +251,63 @@ export function useDragSelect({
     lastEmittedRef.current = null;
   }, []);
 
+  // === LM CUSTOMIZATION: DragSelectBodyStyles START ===
+  // [PERF v3 — 2026-05-22 trace 驱动] 合并拖拽期间的 body 样式写入
+  // 背景：Chrome DevTools trace 表明，"首次激活 rect mode" 会产生 ≈196ms 的巨任务。
+  //   调用链：setIsDragging(true) → useEffect onDragStateChange(true) → 父级 setIsDraggingForPolyfill
+  //   → HybridDeepSearchUI (3812 行) 整棵重渲 → usePolyfillNoSelectPrefixes 写 body.style。
+  // 优化思路：polyfill 只是写 body.style.MozUserSelect / msUserSelect / cursor（纯 DOM），
+  //   完全不需要 React state。我们在进入 / 退出拖拽时一同写入，释放 onDragStateChange 上抛，
+  //   避免父级巨树重渲。
+  // 退出拖拽时需以原值还原，使用 prevBodyStylesRef 保存进入前的 body.style 原值。
+  const prevBodyStylesRef = useRef(null);
+  const applyDragBodyStyles = useCallback((entering) => {
+    const body = document.body;
+    if (!body) return;
+    if (entering) {
+      if (!prevBodyStylesRef.current) {
+        prevBodyStylesRef.current = {
+          userSelect: body.style.userSelect,
+          webkitUserSelect: body.style.webkitUserSelect,
+          MozUserSelect: body.style.MozUserSelect,
+          msUserSelect: body.style.msUserSelect,
+          cursor: body.style.cursor,
+        };
+      }
+      body.style.userSelect = 'none';
+      body.style.webkitUserSelect = 'none';
+      body.style.MozUserSelect = 'none';
+      body.style.msUserSelect = 'none';
+      body.style.cursor = 'crosshair';
+    } else {
+      const prev = prevBodyStylesRef.current;
+      if (prev) {
+        body.style.userSelect = prev.userSelect || '';
+        body.style.webkitUserSelect = prev.webkitUserSelect || '';
+        body.style.MozUserSelect = prev.MozUserSelect || '';
+        body.style.msUserSelect = prev.msUserSelect || '';
+        body.style.cursor = prev.cursor || '';
+        prevBodyStylesRef.current = null;
+      } else {
+        // 底底则未进入拖拽但被调退出（例如项顶初始化）：直接清空。
+        body.style.userSelect = '';
+        body.style.webkitUserSelect = '';
+        body.style.MozUserSelect = '';
+        body.style.msUserSelect = '';
+        body.style.cursor = '';
+      }
+    }
+  }, []);
+  // unmount 兼底：组件卸载时如果还在拖拽，强制还原 body 样式
+  useEffect(() => {
+    return () => {
+      if (prevBodyStylesRef.current) {
+        applyDragBodyStyles(false);
+      }
+    };
+  }, [applyDragBodyStyles]);
+  // === LM CUSTOMIZATION: DragSelectBodyStyles END ===
+
   // 把 paintedIds 应用到 baseSet：根据 paintMode 决定是 ∪ 还是 \
   const applyPaint = useCallback(() => {
     const st = stateRef.current;
@@ -356,8 +413,7 @@ export function useDragSelect({
       st.paintedIds = new Set();
       setIsDragging(false);
       setSelectionRect(null);
-      document.body.style.userSelect = '';
-      document.body.style.webkitUserSelect = '';
+      applyDragBodyStyles(false);
       if (autoScrollRef.current) {
         cancelAnimationFrame(autoScrollRef.current);
         autoScrollRef.current = null;
@@ -381,8 +437,7 @@ export function useDragSelect({
         st.mode = 'rect';
         st.baseSet = new Set(); // 从容器外发起 = 全新选择
         setIsDragging(true);
-        document.body.style.userSelect = 'none';
-        document.body.style.webkitUserSelect = 'none';
+        applyDragBodyStyles(true);
       }
       // 未超阈值则什么都不做（让其他 hook 正常工作）
       if (!st.isActive) return;
@@ -401,8 +456,7 @@ export function useDragSelect({
     if (st.mode === null) {
       st.mode = st.startedInsideCard ? 'paint' : 'rect';
       setIsDragging(true);
-      document.body.style.userSelect = 'none';
-      document.body.style.webkitUserSelect = 'none';
+      applyDragBodyStyles(true);
 
       // paint 模式：把"起始卡片"立刻应用（确保用户拖过即选/即取消）
       if (st.mode === 'paint') {
@@ -442,7 +496,7 @@ export function useDragSelect({
         }
       });
     }
-  }, [tickAutoScroll, computeSelectedByRect, findCardFromEl, applyPaint]);
+  }, [tickAutoScroll, computeSelectedByRect, findCardFromEl, applyPaint, applyDragBodyStyles]);
 
   const handleMouseUp = useCallback((e) => {
     const st = stateRef.current;
@@ -463,8 +517,7 @@ export function useDragSelect({
     st.isActive = false;
     st.mode = null;
     setIsDragging(false);
-    document.body.style.userSelect = '';
-    document.body.style.webkitUserSelect = '';
+    applyDragBodyStyles(false);
     setSelectionRect(null);
 
     if (autoScrollRef.current) {
@@ -491,7 +544,7 @@ export function useDragSelect({
         }
       }
     }
-  }, [containerRef, isInsideCard]);
+  }, [containerRef, isInsideCard, applyDragBodyStyles]);
 
   // 全局监听 mousedown/mousemove/mouseup/dragstart
   useEffect(() => {
@@ -567,8 +620,7 @@ export function useDragSelect({
       st.paintedIds = new Set();
       setIsDragging(false);
       setSelectionRect(null);
-      document.body.style.userSelect = '';
-      document.body.style.webkitUserSelect = '';
+      applyDragBodyStyles(false);
       if (autoScrollRef.current) {
         cancelAnimationFrame(autoScrollRef.current);
         autoScrollRef.current = null;

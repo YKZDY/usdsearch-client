@@ -128,10 +128,11 @@ import { isNoisePath } from "./utils/pathFilters";
 import { getApiLimit } from "./utils/oversample";
 
 // === LM CUSTOMIZATION: NoSelectPolyfill START ===
-// 原因：需求 D-2（拖拽时禁止黄色文本选区）—— A 的 useDragSelect.js 已处理 userSelect / webkitUserSelect
-// 与所有拖拽退出场景，本 hook 仅补防御式 polyfill：Firefox MozUserSelect / IE Edge Legacy msUserSelect / cursor:crosshair。
-// 合入上游新版时：本 import 独立于 NVIDIA 原代码，冲突概率极低。
-import usePolyfillNoSelectPrefixes from "./hooks/usePolyfillNoSelectPrefixes";
+// [PERF v3 — 2026-05-22 trace 驱动] 原本调用 usePolyfillNoSelectPrefixes(isDraggingForPolyfill)。
+// trace 表明该路径（VirtualizedHybridSearchResults isDragging 上抛 → setIsDraggingForPolyfill → HybridDeepSearchUI 重渲 → polyfill effect）
+// 会造成首次进入拖拽时一个≈196ms 的巨帧。现在把 polyfill 所需的 cursor / Moz/ms 前缀写入合并进 useDragSelect
+// 的 applyDragBodyStyles，该 hook 不再需要。保留文件以防需要回退；import 删除。
+// 合入上游新版时：本区块独立与 NVIDIA 原代码不交叉。
 // === LM CUSTOMIZATION: NoSelectPolyfill END ===
 
 
@@ -551,7 +552,8 @@ const HybridDeepSearchUI = () => {
   // 合入上游新版时：本块独立在 visibleResults 后，不交叉 NVIDIA 原代码。
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(null);
-  const [isDraggingForPolyfill, setIsDraggingForPolyfill] = useState(false);
+  // [PERF v3] 移除 isDraggingForPolyfill state：所需副作用已合入 useDragSelect.applyDragBodyStyles
+  // 原： const [isDraggingForPolyfill, setIsDraggingForPolyfill] = useState(false);
   // 主搜索 AbortController ref（覆盖验收 TC-D5：新搜索发起时旧请求 abort）
   const searchAbortRef = useRef(null);
 
@@ -585,13 +587,14 @@ const HybridDeepSearchUI = () => {
     handleTriggerBackendLoadMore();
   }, [handleTriggerBackendLoadMore]);
 
-  // 接收从 VirtualizedHybridSearchResults 上抛的 isDragging，并馈送给 polyfill hook
-  const handleDragStateChange = useCallback((dragging) => {
-    setIsDraggingForPolyfill(dragging);
-  }, []);
-
-  // 调用 polyfill hook：补 Firefox/IE Legacy 前缀 + cursor:crosshair
-  usePolyfillNoSelectPrefixes(isDraggingForPolyfill);
+  // [PERF v3 — 2026-05-22 trace 驱动] 移除 isDragging 上抛链路
+  // 原：VirtualizedHybridSearchResults 通过 onDragStateChange 上抛 isDragging
+  //     → handleDragStateChange → setIsDraggingForPolyfill → HybridDeepSearchUI (3812行) 整棵重渲 → polyfill effect
+  // trace 显示该链路首次进入拖拽时产生 ≈196ms 的巨帧。现以 useDragSelect.applyDragBodyStyles
+  //     直接写入 body.style，零 React 调度开销。handleDragStateChange / usePolyfillNoSelectPrefixes 调用均删除。
+  // 原代码：
+  //   const handleDragStateChange = useCallback((dragging) => { setIsDraggingForPolyfill(dragging); }, []);
+  //   usePolyfillNoSelectPrefixes(isDraggingForPolyfill);
 
   // hasMore 判定：只要 isResultShortage=false 或底层还有数据就认为还能加载
   // 简化处理：只要有当前结果且未达到软上限 (默认 1000、5 页”) 认为 hasMore。
@@ -3557,7 +3560,7 @@ const HybridDeepSearchUI = () => {
               onAutoLoadMore={handleAutoLoadMore}
               onTriggerBackendLoadMore={handleTriggerBackendLoadMore}
               onRetryLoadMore={handleRetryLoadMore}
-              onDragStateChange={handleDragStateChange}
+              // [PERF v3] 移除 onDragStateChange 上抛：isDragging body 样式已合入 useDragSelect
               // === LM CUSTOMIZATION: CardTagBar START ===
               // CardTagBar 需要 nucleus host（已经过 resolveNucleusHost 解析）
               // 合入英伟达新版时：本 prop 透传与 NVIDIA 不交叉，保留。
