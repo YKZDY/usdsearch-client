@@ -244,9 +244,14 @@ const NavigableAssetImage = ({
         height="100%"
         borderRadius={borderRadius}
         objectFit="cover"
+        // === LM CUSTOMIZATION: SkeletonShimmerVariant START ===
+        // 原因：默认 "ghost" variant 是 3 个跳动小灰点，视觉上更像 toast 而非图片占位；
+        //       切换到 "shimmer"（横向流光），与 YouTube/Instagram/Fab.com 等主流图片占位惯例一致。
+        // 合入英伟达新版时：如果上游引入了新的 skeleton 默认风格，按上游为准；本块可直接删除。
         skeletonProps={{
-          variant: "ghost"
+          variant: "shimmer"
         }}
+        // === LM CUSTOMIZATION: SkeletonShimmerVariant END ===
         errorContent={errorMessage}
         {...imageProps}
       />
