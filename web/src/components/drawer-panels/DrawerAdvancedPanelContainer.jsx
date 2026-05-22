@@ -31,15 +31,20 @@
 import React, { useImperativeHandle, forwardRef, useEffect } from "react";
 import { VStack } from "@chakra-ui/react";
 import useAssetAdvancedData from "../../hooks/useAssetAdvancedData";
+// 直接从各自源文件 import，绕开 ./index.js barrel —— 避免循环依赖：
+//   index.js 导出本文件的 default，本文件又从 index.js 取兄弟组件，
+//   会触发 webpack "Cannot access '__WEBPACK_DEFAULT_EXPORT__' before initialization"。
 import {
   DependenciesSubPanel,
   InverseDependenciesSubPanel,
-  UsdPropertiesSubPanel,
-  IndexManagementSubPanel,
+} from "./DependenciesSubPanel";
+import UsdPropertiesSubPanel from "./UsdPropertiesSubPanel";
+import IndexManagementSubPanel from "./IndexManagementSubPanel";
+import {
   SearchExplanationsSubPanel,
   AIGeneratedMetadataSubPanel,
   VLMMetadataSubPanel,
-} from "./index";
+} from "./ConditionalPanels";
 import AdvancedMatchInfo from "../AdvancedMatchInfo";
 import { fabSpacing } from "../../theme/fabTokens";
 
