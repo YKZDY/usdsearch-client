@@ -23,6 +23,7 @@ const en = {
   authSuccessful: "Authentication successful!",
   createdApiToken: "Created permanent API token for {username}.",
   createdJwtToken: "Logged in as {username} (using temporary JWT for local dev).",
+  createdSessionJwt: "Logged in as {username} (using session JWT credentials).",
   ssoLocalDevFallbackTitle: "Local development mode",
   ssoLocalDevFallbackDesc: "Discovery service unreachable; falling back to JWT as temporary credential (valid ~8-24h)",
   failedCreateApiToken: "Failed to create API token",

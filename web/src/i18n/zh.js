@@ -23,6 +23,7 @@ const zh = {
   authSuccessful: "认证成功！",
   createdApiToken: "已为 {username} 创建永久 API 令牌。",
   createdJwtToken: "已为 {username} 登录（本地开发使用临时 JWT 凭证）。",
+  createdSessionJwt: "已为 {username} 登录（使用本会话 JWT 凭证）。",
   ssoLocalDevFallbackTitle: "本地开发模式",
   ssoLocalDevFallbackDesc: "Discovery 服务不可达，已使用 JWT 作为临时凭证（约 8-24 小时有效）",
   failedCreateApiToken: "创建 API 令牌失败",

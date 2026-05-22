@@ -476,8 +476,11 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                     console.log('[SSO]', 'createApiToken host resolved:', { serverArg, apiTokenHost });
                 }
 
+                // === LM CUSTOMIZATION: SSO API Token EXISTS-tolerant START ===
                 let effectiveApiToken;
                 let isFallbackToken = false;
+                let isExistsErrorFallback = false; // EXISTS 专用，区分于本地 dev 降级，影响成功 toast 文案
+                // === LM CUSTOMIZATION: SSO API Token EXISTS-tolerant END ===
                 try {
                     const apiTokenResult = await createApiToken(
                         apiTokenHost,
@@ -507,7 +510,8 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
                         console.warn('[SSO] API token name already exists, falling back to JWT for this session:', errMsg);
                         effectiveApiToken = token;
                         isFallbackToken = true;
-                        // 不弹红色错误 toast；下面统一的 "authSuccessful" toast 会用 createdJwtToken 文案告知用户
+                        isExistsErrorFallback = true;
+                        // 不弹红色错误 toast；下面统一的 "authSuccessful" toast 会用 createdSessionJwt 文案告知用户
                     } else if (isLocalDev) {
                         // 本地开发：Discovery 不可达等其他错误 → JWT 兜底（与原逻辑一致）
                         console.warn('[SSO] createApiToken failed in local dev, falling back to JWT:', errMsg);
@@ -549,9 +553,17 @@ const AuthForm = ({ auth, setAuth, getServerStorageKey, selectedServer = '' }) =
 
                 toast({
                     title: t('authSuccessful') || '认证成功！',
-                    description: isFallbackToken
-                        ? (t('createdJwtToken', { username }) || `已为 ${username} 登录（本地开发使用临时 JWT 凭证）。`)
-                        : (t('createdApiToken', { username }) || `已为 ${username} 创建永久 API 令牌。`),
+                    // === LM CUSTOMIZATION: SSO success toast tri-state START ===
+                    // 三态文案：
+                    //   1. EXISTS 降级（生产+dev 均可能）  → createdSessionJwt（中性措辞，不提"本地开发"）
+                    //   2. 本地 dev 其他错误降级        → createdJwtToken（含"本地开发"字样）
+                    //   3. 成功创建永久 token              → createdApiToken
+                    description: isExistsErrorFallback
+                        ? (t('createdSessionJwt', { username }) || `已为 ${username} 登录（使用本会话 JWT 凭证）。`)
+                        : isFallbackToken
+                            ? (t('createdJwtToken', { username }) || `已为 ${username} 登录（本地开发使用临时 JWT 凭证）。`)
+                            : (t('createdApiToken', { username }) || `已为 ${username} 创建永久 API 令牌。`),
+                    // === LM CUSTOMIZATION: SSO success toast tri-state END ===
                     status: "success",
                     duration: 5000,
                 });
