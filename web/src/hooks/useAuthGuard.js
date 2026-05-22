@@ -11,10 +11,20 @@
  *
  * 事件协议：
  *   - dispatch: 'auth-guard-open'      detail: { reason, serverUrl }
+ *       reason 枚举（按发起方区分，便于排查）：
+ *         · 'no-token'           : 启动时无任何凭据
+ *         · 'expired'            : 主动校验 /info/plugins 返回 401/403
+ *         · 'http-401'           : 全局 fetch 拦截器拦到 401/403
+ *         · 'wss-auth-fail'      : [P0 fix/lm] tag 增删时 wss 握手鉴权失败（来自 useTagManager catch）
+ *         · 'wss-token-expired'  : [P0 fix/lm] tag preflight 检测 access_token 过期（来自 useTagManager.syncToServer）
+ *         · 'wss-refresh-failed' : [P0 fix/lm] refreshAccessToken 抛错（来自 services/taggingService）
  *   - dispatch: 'auth-verify-status'   detail: { status, server }  status ∈ verifying|ok|offline|expired
  *   - listen:   'auth-updated'         重置内部状态
  *   - listen:   'storage'              其他标签变更时同步
  *   - listen:   'visibilitychange'     切回本页时重校验
+ *
+ * 注意：本 Hook 的 fetch 拦截器只能感知 HTTP 路径；wss 路径鉴权失败需要由调用方
+ * 主动派发 'auth-guard-open'，统一入口在 utils/authReauthBus.js#requestReauth。
  */
 import { useEffect, useRef, useCallback } from 'react';
 import {

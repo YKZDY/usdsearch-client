@@ -47,6 +47,106 @@ WebSocketClient.register();
 // Client ID for this application
 const CLIENT_ID = "USD-Search-Explorer";
 
+// ============================================================================
+// [P1 fix/lm-tag-wss-auth-expiry] DiscoverySearch 实例缓存
+// ----------------------------------------------------------------------------
+// 背景：未登录态 / 登出后，pollForToken 每 5/10s 一次都会 new DiscoverySearch()
+//   → discovery.find() 触发 SDK 内部 healthcheck 探测（path-based + port-based）
+//   → 浏览器对 CORS 拒绝 / 426 Upgrade Required 必然写 console error（user-space 无法抑制）
+//   → 单次未登录态会话累积 100+ red error，严重影响演示体验
+//
+// SDK 自身设计：
+//   - DiscoverySearch 构造函数不发请求
+//   - 真正发请求的是首次 find() → _connect() → _establish() → healthcheck
+//   - _connect() 有 if (!this._ws) 缓存，同一实例后续 find() 不重做 healthcheck
+//
+// 修复思路：
+//   - 全局缓存 DiscoverySearch 实例（per normalizedUrl）
+//   - 不再每次 connectToService 都 new + close discovery（client transport 仍各自 close）
+//   - 监听 auth-updated / storage 事件，登录态切换时清缓存避免跨用户串
+//
+// 紧急关闭开关（极端情况下回滚）：
+//   sessionStorage.setItem('disableDiscoveryCache', '1') 后刷新页面即可
+//
+// 关联文档：docs/troubleshooting/discovery-healthcheck-noise.md
+// ============================================================================
+
+/** @type {Map<string, DiscoverySearch>} */
+const discoveryCache = new Map();
+
+/**
+ * 检查紧急关闭开关。读取失败（隐私模式等）默认 false（启用缓存）。
+ */
+function isDiscoveryCacheDisabled() {
+  try {
+    return typeof window !== 'undefined'
+      && window.sessionStorage?.getItem('disableDiscoveryCache') === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 拿到（或新建）指定 server 的 DiscoverySearch 实例。
+ * 同 server 复用同一实例，避免重复 healthcheck。
+ * @param {string} normalizedUrl
+ * @returns {DiscoverySearch}
+ */
+function getDiscovery(normalizedUrl) {
+  if (isDiscoveryCacheDisabled()) {
+    // 退回 lm 原行为：每次新建，不缓存
+    return new DiscoverySearch(normalizedUrl);
+  }
+  let cached = discoveryCache.get(normalizedUrl);
+  if (!cached) {
+    cached = new DiscoverySearch(normalizedUrl);
+    discoveryCache.set(normalizedUrl, cached);
+  }
+  return cached;
+}
+
+/**
+ * 失效缓存。
+ *   - 不传参：清全部（登出 / 切服务器时调用）
+ *   - 传 normalizedUrl：仅清该 server 实例
+ * 清理时调 .close() 释放底层 WebSocket。
+ * @param {string} [normalizedUrl]
+ */
+export function invalidateDiscoveryCache(normalizedUrl) {
+  if (normalizedUrl) {
+    const inst = discoveryCache.get(normalizedUrl);
+    if (inst) {
+      try { inst.close?.(); } catch (e) { /* ignore */ }
+      discoveryCache.delete(normalizedUrl);
+    }
+    return;
+  }
+  // 全清
+  discoveryCache.forEach((inst) => {
+    try { inst.close?.(); } catch (e) { /* ignore */ }
+  });
+  discoveryCache.clear();
+}
+
+// 全局事件订阅：登录态切换时清缓存，避免持有 stale 连接或跨用户串
+//   - auth-updated: authStorage.notifyAuthChanged 主动派发（同 tab 路径）
+//   - storage:      其他 tab 改 localStorage 时触发（跨 tab 路径）
+// 注意：模块顶层副作用只在 module 首次 import 时执行一次，与 React 生命周期解耦
+if (typeof window !== 'undefined') {
+  const onAuthChanged = () => {
+    // 全清。下次 connectToService 会重新建立缓存
+    invalidateDiscoveryCache();
+  };
+  window.addEventListener('auth-updated', onAuthChanged);
+  // storage 事件只在 key 变化时清，避免无关 key（如多选 firstShown）触发清缓存
+  window.addEventListener('storage', (e) => {
+    if (!e?.key) return;
+    if (/nucleus|username|password|api[_-]?key|nucleus_token/i.test(e.key)) {
+      onAuthChanged();
+    }
+  });
+}
+
 /**
  * Convert a Nucleus server URL to a discovery-compatible format
  * Strips omniverse:// prefix if present and ensures proper format
@@ -86,24 +186,23 @@ export function getServerHttpsUrl(serverUrl) {
  */
 async function connectToService(serverUrl, clientType, capabilities = {}) {
   const normalizedUrl = normalizeServerUrl(serverUrl);
-  const discovery = new DiscoverySearch(normalizedUrl);
-  
-  try {
-    const client = await discovery.find(
-      clientType, 
-      { deployment: "external" }, 
-      undefined, 
-      capabilities
-    );
-    
-    if (!client) {
-      throw new Error(`Failed to find ${clientType.name || 'service'} on ${normalizedUrl}`);
-    }
-    
-    return client;
-  } finally {
-    discovery.close();
+  // [P1] 复用缓存的 DiscoverySearch 实例，避免每次 new 都重做 healthcheck（消除 80%+ console 噪音）
+  // 注意：不再在 finally 中 close discovery，但下面的 client transport (DeviceFlow/Tokens/Credentials)
+  // 仍由各 entry 自己 close，避免泄漏 service-level WebSocket。
+  const discovery = getDiscovery(normalizedUrl);
+
+  const client = await discovery.find(
+    clientType,
+    { deployment: "external" },
+    undefined,
+    capabilities
+  );
+
+  if (!client) {
+    throw new Error(`Failed to find ${clientType.name || 'service'} on ${normalizedUrl}`);
   }
+
+  return client;
 }
 
 /**
@@ -130,7 +229,7 @@ export async function startDeviceFlow(serverUrl) {
       user_code: result.user_code,
       device_code: result.device_code,
       verification_uri: result.verification_uri,
-      interval: result.interval || 5,
+      interval: result.interval || 10,
       expires_in: result.expires_in || 900,
       serverUrl: normalizeServerUrl(serverUrl),
     };
@@ -322,7 +421,12 @@ export function useDeviceFlowAuth() {
   }, []);
 
   // Poll for token
-  const startPolling = useCallback(async (serverUrl, deviceCode, interval = 5) => {
+  // [P1 fix/lm-tag-wss-auth-expiry] 默认 interval 5s → 10s
+  //   - user_code 15min 内有效，10s 轮询足够及时（用户从看到 code 到完成登录通常 30s-2min）
+  //   - 配合 DiscoverySearch 缓存，单次未登录态会话的 console 噪音从 ~120 降到 ~20
+  //   - 调用方（如 index.js startPolling(backend, result.device_code, result.interval)）
+  //     传了 server 返回的 interval 时仍尊重 server 值，仅默认值改为 10
+  const startPolling = useCallback(async (serverUrl, deviceCode, interval = 10) => {
     setState(prev => ({ ...prev, isPolling: true, error: null }));
     abortRef.current = false;
     
@@ -469,6 +573,8 @@ export default {
   createApiToken,
   refreshAccessToken,
   authenticateWithCredentials,
+  // [P1] discovery 缓存管理（紧急情况下可手动清）
+  invalidateDiscoveryCache,
   
   // Hooks
   useDeviceFlowAuth,

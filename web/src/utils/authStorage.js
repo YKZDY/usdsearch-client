@@ -104,6 +104,67 @@ export function clearExpiredCredentials(server) {
 }
 
 /**
+ * [P0 fix/lm-tag-wss-auth-expiry] 仅清除 wss 鉴权三件套（access_token / expiry / refresh_token）。
+ *
+ * 与 clearExpiredCredentials 的区别：
+ *   - clearExpiredCredentials 会清掉 username/password/apiKey/nucleusToken（API Token），
+ *     适用于 HTTP 401 场景（API Token 也已失效）
+ *   - clearWssCredentialsOnly 仅清 nucleus_access_token / _expiry / _refresh_token，
+ *     适用于 wss 鉴权失败但 HTTP API Token 仍有效的场景，避免误降级 HTTP 链路
+ *
+ * 双前缀清理：与 services/taggingService.js 中 getTaggingTokenWithMeta 的三级查找
+ * （host-prefixed → alias-prefixed → bare）严格对齐，确保下次拉 token 走完整 fallback。
+ *
+ * 注意：lm 分支的 AUTH_STORAGE_KEYS 不包含 nucleus_access_token 等 wss 专用 key
+ * （它们在 taggingService 中内联使用），所以这里直接用字符串字面量，保持单一事实来源。
+ *
+ * 清完派发 auth-updated 事件，让 useAuthGuard / 其他监听方同步状态。
+ *
+ * @param {string} server         - 主 host（如 'ov.qq.com'）
+ * @param {string[]} [aliases]    - 额外清理的前缀（如 ['nucleus', 'omniverse']）
+ */
+export function clearWssCredentialsOnly(server, aliases = []) {
+  const WSS_KEYS = ['nucleus_access_token', 'nucleus_access_token_expiry', 'nucleus_refresh_token'];
+
+  const prefixes = [server, ...(Array.isArray(aliases) ? aliases : [])].filter(
+    (p) => typeof p === 'string' && p.length > 0
+  );
+  // 去重
+  const seen = new Set();
+  const uniquePrefixes = prefixes.filter((p) => {
+    if (seen.has(p)) return false;
+    seen.add(p);
+    return true;
+  });
+
+  // 1. 各 prefix 下的三件套
+  uniquePrefixes.forEach((prefix) => {
+    WSS_KEYS.forEach((key) => {
+      try {
+        localStorage.removeItem(`${prefix}_${key}`);
+      } catch (e) {
+        // localStorage 可能被禁用或配额满，单条失败不影响其他
+        // eslint-disable-next-line no-console
+        console.warn('[authStorage] clearWssCredentialsOnly key failed', { prefix, key, error: e?.message });
+      }
+    });
+  });
+
+  // 2. 无前缀兜底（与 getTaggingTokenWithMeta 的 storage-bare 路径对齐）
+  WSS_KEYS.forEach((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[authStorage] clearWssCredentialsOnly bare failed', { key, error: e?.message });
+    }
+  });
+
+  // 3. 通知监听方（useAuthGuard 会重置 lastVerifiedAt 但不会立刻弹窗，由调用方决定）
+  notifyAuthChanged();
+}
+
+/**
  * 用户主动登出：清值 + 写 cleared，本会话内 useAuthGuard 不再自动弹窗。
  * 取代 src/index.js:225-238 / L383-409 中重复的 handleClear / 已认证分支清除按钮逻辑。
  * @param {string} [server]
@@ -134,6 +195,7 @@ export default {
   hasStoredCredentials,
   isUserCleared,
   clearExpiredCredentials,
+  clearWssCredentialsOnly,
   clearAuthByUserAction,
   persistNucleusToken,
 };
