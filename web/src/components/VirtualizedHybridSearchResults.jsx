@@ -1321,53 +1321,70 @@ const VirtualizedHybridSearchResults = ({
           — 错误 → 红色提示 + 重试按钮
           — !hasMore → "已经到底了"终态文案
           sentinel 始终渲染在最外层 VStack 末尾（不受 isLoading / isEmpty 控制），
-          函数顶部的“isLoading return null / isEmpty return EmptySearchHint”已经在上游 early return。 */}
+          函数顶部的“isLoading return null / isEmpty return EmptySearchHint”已经在上游 early return。
+          
+          2026-05-25 修复"视口底部 49px 黑带":
+            原来这个 <Box minH="32px" pt={2} pb={4}> 容器无条件渲染,即使 4 种内容
+            状态都未触发(常态)也占 32+24=56px,加上 chakra VStack spacing 把 react-window
+            滚动容器顶上去 ~49px,造成视口底部明显黑带。
+            修复:把 4 种状态展示用 isFooterVisible 聚合,只在真有内容时才渲染外层 Box。
+            合入英伟达新版时:本块是 LM 业务代码,保留。 */}
       <Box ref={sentinelRef} h="1px" data-infinite-sentinel aria-hidden="true" />
-      <Box minH="32px" pt={2} pb={4} display="flex" alignItems="center" justifyContent="center">
-        {isLoadingMore && (
-          <HStack spacing={2} fontSize="xs" color="whiteAlpha.700">
-            <Spinner size="xs" color="#FFD230" thickness="2px" speed="0.6s" />
-            <Text>{t('infiniteLoading') || t('loading') || '加载中...'}</Text>
-          </HStack>
-        )}
-        {!isLoadingMore && loadMoreError && (
-          <HStack spacing={2} fontSize="xs">
-            <Text color="red.300">
-              {t('infiniteError') || '加载失败'}
-            </Text>
-            {typeof onRetryLoadMore === 'function' && (
+      {(() => {
+        const showLoadMoreBtn =
+          !isLoadingMore && !loadMoreError && hasMore && isResultShortage
+          && typeof onTriggerBackendLoadMore === 'function';
+        const showNoMore =
+          !isLoadingMore && !loadMoreError && !hasMore && results.length > 0;
+        const isFooterVisible = isLoadingMore || !!loadMoreError || showLoadMoreBtn || showNoMore;
+        if (!isFooterVisible) return null;
+        return (
+          <Box minH="32px" pt={2} pb={4} display="flex" alignItems="center" justifyContent="center">
+            {isLoadingMore && (
+              <HStack spacing={2} fontSize="xs" color="whiteAlpha.700">
+                <Spinner size="xs" color="#FFD230" thickness="2px" speed="0.6s" />
+                <Text>{t('infiniteLoading') || t('loading') || '加载中...'}</Text>
+              </HStack>
+            )}
+            {!isLoadingMore && loadMoreError && (
+              <HStack spacing={2} fontSize="xs">
+                <Text color="red.300">
+                  {t('infiniteError') || '加载失败'}
+                </Text>
+                {typeof onRetryLoadMore === 'function' && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    color="#FFD230"
+                    _hover={{ bg: 'whiteAlpha.100' }}
+                    onClick={onRetryLoadMore}
+                    aria-label={t('infiniteRetry') || '重试'}
+                  >
+                    {t('infiniteRetry') || '重试'}
+                  </Button>
+                )}
+              </HStack>
+            )}
+            {showLoadMoreBtn && (
               <Button
                 size="xs"
                 variant="ghost"
-                color="#FFD230"
-                _hover={{ bg: 'whiteAlpha.100' }}
-                onClick={onRetryLoadMore}
-                aria-label={t('infiniteRetry') || '重试'}
+                color="whiteAlpha.700"
+                _hover={{ bg: 'whiteAlpha.100', color: '#FFD230' }}
+                onClick={onTriggerBackendLoadMore}
+                aria-label={t('infiniteLoadMore') || '加载更多'}
               >
-                {t('infiniteRetry') || '重试'}
+                {t('infiniteLoadMore') || '加载更多'}
               </Button>
             )}
-          </HStack>
-        )}
-        {!isLoadingMore && !loadMoreError && hasMore && isResultShortage
-          && typeof onTriggerBackendLoadMore === 'function' && (
-          <Button
-            size="xs"
-            variant="ghost"
-            color="whiteAlpha.700"
-            _hover={{ bg: 'whiteAlpha.100', color: '#FFD230' }}
-            onClick={onTriggerBackendLoadMore}
-            aria-label={t('infiniteLoadMore') || '加载更多'}
-          >
-            {t('infiniteLoadMore') || '加载更多'}
-          </Button>
-        )}
-        {!isLoadingMore && !loadMoreError && !hasMore && results.length > 0 && (
-          <Text fontSize="xs" color="whiteAlpha.500" letterSpacing="0.02em">
-            {t('infiniteNoMore') || '已经到底了'}
-          </Text>
-        )}
-      </Box>
+            {showNoMore && (
+              <Text fontSize="xs" color="whiteAlpha.500" letterSpacing="0.02em">
+                {t('infiniteNoMore') || '已经到底了'}
+              </Text>
+            )}
+          </Box>
+        );
+      })()}
       {/* === LM CUSTOMIZATION: InfiniteScroll END === */}
     </VStack>
   );
