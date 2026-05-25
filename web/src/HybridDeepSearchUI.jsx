@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, { useEffect, useState, useCallback, useMemo, useDeferredValue, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useDeferredValue, useRef, startTransition } from "react";
 import {
   Box,
   VStack,
@@ -668,6 +668,13 @@ const HybridDeepSearchUI = () => {
   // === LM CUSTOMIZATION: SelectionDrawer END ===
 
   // Toggle item selection（V2 支持 event + index：Shift+Click 区间选择）
+  // === LM CUSTOMIZATION: Perf D-3 — startTransition 治"卡一下" START ===
+  // 根因：isMultiSelectMode 从 false→true 翻转 → 50 张卡 + Toolbar 整棵子树同步 re-render，
+  //   实测主线程长任务 161-280ms，用户感知为"冻屏"。
+  // 修复：把 setSelectedItems 标记为 transition（低优先级），React 18 调度器自动让出主线程
+  //   给用户输入响应 + Toolbar 显示，"卡一下"消失（卡片重渲后台进行，用户先看到 UI 反馈）。
+  // 不包 lastClickedIndexRef（ref 赋值无需调度）。
+  // === LM CUSTOMIZATION: Perf D-3 — startTransition 治"卡一下" END ===
   const resultsForSelectionRef = useRef([]);
   const handleToggleSelection = useCallback((item, event, index) => {
     const itemId = item?.id || item?.source?.base_key || item?.source?.url;
@@ -677,32 +684,41 @@ const HybridDeepSearchUI = () => {
     if (event?.shiftKey && typeof index === 'number' && lastClickedIndexRef.current !== null) {
       const start = Math.min(lastClickedIndexRef.current, index);
       const end = Math.max(lastClickedIndexRef.current, index);
-      setSelectedItems(prev => {
-        const next = new Set(prev);
-        const currentResults = resultsForSelectionRef.current || [];
-        for (let i = start; i <= end && i < currentResults.length; i++) {
-          const r = currentResults[i];
-          const id = r?.id || r?.source?.base_key || r?.source?.url;
-          if (id) next.add(id);
-        }
-        return next;
+      startTransition(() => {
+        setSelectedItems(prev => {
+          const next = new Set(prev);
+          const currentResults = resultsForSelectionRef.current || [];
+          for (let i = start; i <= end && i < currentResults.length; i++) {
+            const r = currentResults[i];
+            const id = r?.id || r?.source?.base_key || r?.source?.url;
+            if (id) next.add(id);
+          }
+          return next;
+        });
       });
       lastClickedIndexRef.current = index;
       return;
     }
 
-    setSelectedItems(prev => {
-      const next = new Set(prev);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
-      return next;
+    startTransition(() => {
+      setSelectedItems(prev => {
+        const next = new Set(prev);
+        if (next.has(itemId)) next.delete(itemId);
+        else next.add(itemId);
+        return next;
+      });
     });
     if (typeof index === 'number') lastClickedIndexRef.current = index;
   }, []);
 
   // Batch setter for drag-select (set entire selection at once)
   const setBatchSelection = useCallback((newSet) => {
-    setSelectedItems(newSet);
+    // === LM CUSTOMIZATION: Perf D-3 — 拖拽框选批量更新也走 transition ===
+    // 拖拽 mousemove 期间 emitIfChanged 已做 Set 等值短路，但首次 emit（0→N 个）
+    // 与多选首次进入同源，仍会触发整棵卡片子树重渲。
+    startTransition(() => {
+      setSelectedItems(newSet);
+    });
   }, []);
 
   // === LM CUSTOMIZATION: Copy Deploy Fix START ===
