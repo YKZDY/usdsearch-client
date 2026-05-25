@@ -147,15 +147,23 @@ export function useDrawerOrSelect({
     if (shift) {
       const anchorId = anchorIdRef.current;
       const anchorIdx = indexOfId(results, getId, anchorId);
-      // anchor 缺失或已被搜索结果刷掉：退化为无修饰键
+      // === LM CUSTOMIZATION: ShiftClickRobustness START ===
+      // 修复 R-A：anchor 缺失（首次 Shift+click / 搜索结果刷新后）
+      //   原行为：退化为无修饰键单击 → 打开 Drawer。
+      //   用户报告体感是 bug：「Shift+单击居然打开 Drawer 而不是进多选」。
+      //   预期：Shift+click 永远应进入多选模式，即使 anchor=null。
+      //   新行为：anchor 缺失时等价于 Ctrl+click → toggle 该项 + 设为新 anchor，
+      //   后续 Shift+click 立即可正常做区间选。
+      // 合入英伟达新版时：保留本块。
       if (anchorIdx < 0) {
-        handleNoModifier(checkbox, asset);
+        toggleOneAndAnchor(asset);
         return;
       }
+      // === LM CUSTOMIZATION: ShiftClickRobustness END ===
       const targetIdx = indexOfId(results, getId, getId(asset));
       if (targetIdx < 0) {
-        // target 不在 results（理论不会发生，保险）
-        handleNoModifier(checkbox, asset);
+        // target 不在 results（理论不会发生，保险）— 同样退化为 toggle
+        toggleOneAndAnchor(asset);
         return;
       }
       const rangeIds = computeRangeIds(results, getId, anchorIdx, targetIdx);
