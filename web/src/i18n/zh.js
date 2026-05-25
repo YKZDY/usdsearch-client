@@ -713,6 +713,18 @@ const zh = {
   "tagBar.hint": "点击切换 · Enter 创建 · Esc 关闭",
   "tagBar.noLogin": "登录后可管理标签",
   "tagBar.noWritePermission": "无写入权限",
+  // === LM CUSTOMIZATION: TagDeleteUndo START ===
+  // 原因（2026-05-25）：用户反馈卡片删 tag 无任何提示就直接删除，缺乏撤销机制。
+  // 新增"5 秒撤销窗口 toast"所需文案；与上方 tagBar.* 同前缀，便于集中维护。
+  // 合入英伟达新版时：保留本块（NVIDIA 原版无 tag 概念，零冲突风险）。
+  "tagBar.deleted.title": "已删除标签",
+  "tagBar.deleted.undo": "撤销",
+  "tagBar.deleted.undoHint": "Ctrl+Z 撤销",
+  "tagBar.deleted.undoHintMac": "⌘Z 撤销",
+  "tagBar.deleted.restored": "已恢复 \"{tag}\"",
+  "tagBar.deleted.failed": "删除 \"{tag}\" 失败，已恢复",
+  "tagBar.deleted.closeAriaLabel": "关闭提示",
+  // === LM CUSTOMIZATION: TagDeleteUndo END ===
   // AssetTagEditor（抽屉内完整编辑器）
   "tagEditor.title": "标签",
   "tagEditor.placeholder": "输入后按 Enter 添加（或粘贴逗号分隔批量添加）…",

@@ -41,6 +41,7 @@
 
 import { useEffect, useMemo, useCallback } from 'react';
 import useTagManager from './useTagManager';
+import useTagDeleteUndo from './useTagDeleteUndo';
 
 // ─── 模块级事件总线（供同 assetPath 的多个实例做"提示性"刷新）─────────
 // 真正的强同步走 React Context（DrawerTagsSyncContext），本 bus 只用于：
@@ -119,6 +120,10 @@ export default function useAssetTags({ asset, serverUrl, getHeaders, apiUrl }) {
     assetUrl,
   });
 
+  // ─── 撤销删除 toast：默认对所有 removeTag 调用提供 5s 撤销窗口 ─────
+  // 调用方零改动获得撤销能力；批量场景可传 { silent: true } 跳过。
+  const { deleteWithUndo, showDeleteFailed } = useTagDeleteUndo();
+
   // ─── 包一层：广播事件（让同 assetPath 的其他订阅者知道）──────────
   const broadcastChange = useCallback((snapshot) => {
     if (assetPath) notifyAssetTagsChanged(assetPath, snapshot);
@@ -137,12 +142,37 @@ export default function useAssetTags({ asset, serverUrl, getHeaders, apiUrl }) {
     broadcastChange([...(tm.tags?.map(t => t.name || t) || []), ...names]);
   }, [tm, broadcastChange]);
 
-  const removeTag = useCallback((tagName) => {
+  // removeTag 现在默认走撤销 toast 流程；
+  //   silent=true → 跳过 toast 直接删（用于批量场景 / 程序化清理）
+  const removeTag = useCallback((tagName, options) => {
     if (!tagName) return;
+    const silent = options && options.silent === true;
+
+    // 立即从 UI 上移除（乐观更新，useTagManager 内部已实现）
     tm.removeTag(tagName);
     const next = (tm.tags || []).filter(t => (t.name || t) !== tagName).map(t => t.name || t);
     broadcastChange(next);
-  }, [tm, broadcastChange]);
+
+    if (silent) return;
+
+    // 弹撤销 toast
+    deleteWithUndo({
+      tagName,
+      onConfirmedDelete: undefined, // 5s 到点：useTagManager 已经把删除写到后端，无需额外动作
+      onUndo: async () => {
+        // 撤销 = 重新添加 tag（走标准 addTag 路径，自带后端写 + 广播）
+        try {
+          tm.addTag(tagName);
+          // 同样广播一次
+          broadcastChange([...(tm.tags?.map(t => t.name || t) || []), tagName]);
+          return tagName;
+        } catch (e) {
+          showDeleteFailed(tagName);
+          throw e;
+        }
+      },
+    });
+  }, [tm, broadcastChange, deleteWithUndo, showDeleteFailed]);
 
   // ─── 输出标准化：把 useTagManager 的 [{name, status, ...}] 转为字符串数组 ─
   const tagStrings = useMemo(() => {

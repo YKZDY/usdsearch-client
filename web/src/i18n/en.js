@@ -717,6 +717,18 @@ const en = {
   "tagBar.hint": "Click to toggle · Enter to create · Esc to close",
   "tagBar.noLogin": "Sign in to manage tags",
   "tagBar.noWritePermission": "No write permission",
+  // === LM CUSTOMIZATION: TagDeleteUndo START ===
+  // Reason (2026-05-25): user feedback that deleting a tag from card silently
+  // confused the user. Added a 5-second undo toast. Keys live under tagBar.*
+  // prefix so they merge cleanly when upgrading NVIDIA upstream (no conflict).
+  "tagBar.deleted.title": "Tag removed",
+  "tagBar.deleted.undo": "Undo",
+  "tagBar.deleted.undoHint": "Ctrl+Z to undo",
+  "tagBar.deleted.undoHintMac": "⌘Z to undo",
+  "tagBar.deleted.restored": "Restored \"{tag}\"",
+  "tagBar.deleted.failed": "Failed to remove \"{tag}\", restored",
+  "tagBar.deleted.closeAriaLabel": "Dismiss",
+  // === LM CUSTOMIZATION: TagDeleteUndo END ===
   // AssetTagEditor (drawer 内完整编辑器)
   "tagEditor.title": "Tags",
   "tagEditor.placeholder": "Add a tag and press Enter (or paste comma-separated)…",
