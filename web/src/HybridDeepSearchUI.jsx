@@ -713,12 +713,17 @@ const HybridDeepSearchUI = () => {
 
   // Batch setter for drag-select (set entire selection at once)
   const setBatchSelection = useCallback((newSet) => {
-    // === LM CUSTOMIZATION: Perf D-3 — 拖拽框选批量更新也走 transition ===
-    // 拖拽 mousemove 期间 emitIfChanged 已做 Set 等值短路，但首次 emit（0→N 个）
-    // 与多选首次进入同源，仍会触发整棵卡片子树重渲。
-    startTransition(() => {
-      setSelectedItems(newSet);
-    });
+    // === LM CUSTOMIZATION: Perf D-4 — 拖拽框选改回同步更新 START ===
+    // 反转 D-3 的 startTransition：用户报告"框选过一会儿才选中"，根因是 startTransition
+    //   把高频流式更新（mousemove 每帧都可能触发）降级为低优先级，React 调度器一直
+    //   等主线程空闲才 commit。但 mousemove 期间主线程一直在忙（产生新事件），
+    //   React 把所有更新攒到 mouseup 后才 flush → 用户感知"过一会儿才框中"。
+    // 修复：拖拽场景下用户期望即时反馈（60fps 跟手），改为同步 setSelectedItems。
+    //   配合 react-window 虚拟化，单次 commit 实际只更新屏幕内 ~20 张卡，能在一帧内完成。
+    // 注意：onCardCheckboxClick / handleToggleSelection 仍保留 startTransition，
+    //   因为它们是低频离散事件（点一下 checkbox），用 transition 能避开"进入多选"的 167ms 长任务。
+    // === LM CUSTOMIZATION: Perf D-4 END ===
+    setSelectedItems(newSet);
   }, []);
 
   // === LM CUSTOMIZATION: Copy Deploy Fix START ===
