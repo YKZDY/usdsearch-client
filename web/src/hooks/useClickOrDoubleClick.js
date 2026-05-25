@@ -30,7 +30,16 @@ import { useCallback, useRef } from 'react';
 // dblclick 补偿窗口：浏览器 dblclick 通常在 300-500ms 内派发
 // 若 dblclick 相对最近一次 click 在此窗口内，认为是同一次双击，需要回滚
 const DOUBLE_CLICK_WINDOW = 500;
-const MOVE_THRESHOLD = 5; // px
+// === LM CUSTOMIZATION: ClickRobustness START ===
+// 根因 R1：原 5px 阈值太严苛，触控板 / 真实手指按下时常见 3-8px 自然抖动
+//   会被错误判定为拖拽，导致整次 click（含 Shift/Ctrl+click）被早退吞掉。
+// 改为 10px 与 useDragSelect.OUTER_DRAG_THRESHOLD=20 形成"内紧外松"梯度：
+//   - <10px：视为静止点击
+//   - 10~20px：useDragSelect 还未激活拖拽，仍当 click（容错区间）
+//   - >=20px：拖拽框选确认激活
+// 合入英伟达新版时：保留本块；本 hook 由 LM 自有维护，无 NVIDIA 上游版本。
+const MOVE_THRESHOLD = 10; // px
+// === LM CUSTOMIZATION: ClickRobustness END ===
 
 export function useClickOrDoubleClick({ onClick, onDoubleClick, enabled = true }) {
   const downPosRef = useRef(null);
@@ -53,20 +62,35 @@ export function useClickOrDoubleClick({ onClick, onDoubleClick, enabled = true }
   }, []);
 
   const handleClick = useCallback((e) => {
-    // 拖拽（含框选）路径：不触发 click
+    // === LM CUSTOMIZATION: ClickRobustness START ===
+    // 根因 R1 修复：把"修饰键判定"提到 movedRef 早退之前。
+    // 旧顺序：movedRef 早退 → enabled 检查 → 修饰键 → 普通 click。
+    //   问题：用户 Shift+click / Ctrl+click 期间手指轻微抖动 5-9px，整次点击被吞，
+    //   完全没反应。Shift/Ctrl+click 是用户"显式表达多选意图"的强信号，
+    //   位移容差应远高于无修饰键 click。
+    // 新顺序：修饰键命中 → 立即派发，不受 movedRef 影响（任何位移都不丢弃）。
+    //   无修饰键 click 才走原 movedRef 早退保护。
+    // 注：拖拽框选真正激活由 useDragSelect 主导，并通过它自己的 isActive 状态
+    //   判断是否阻止 click 派发，本 hook 不需要顶替它做拖拽识别。
+    // 合入英伟达新版时：保留本块。
+    const hasModifier = !!(e?.shiftKey || e?.metaKey || e?.ctrlKey);
+    if (hasModifier) {
+      // 清掉 movedRef 防止下次干扰
+      movedRef.current = false;
+      // enabled=false 时也派发，以免修饰键 click 被旗标关闭误吞
+      lastClickTimeRef.current = -1;
+      onClick?.(e);
+      return;
+    }
+    // === LM CUSTOMIZATION: ClickRobustness END ===
+
+    // 拖拽（含框选）路径：不触发 click（仅无修饰键路径走早退）
     if (movedRef.current) {
       movedRef.current = false;
       return;
     }
     // enabled=false：退化为普通 click，不启用双击回滚机制
     if (!enabled) {
-      onClick?.(e);
-      return;
-    }
-    // 修饰键（Shift/Cmd/Ctrl+Click）：立即触发，且不计入双击窗口
-    // 避免"Shift+区间选" + 500ms 内双击同一目标被误判为需要回滚
-    if (e?.shiftKey || e?.metaKey || e?.ctrlKey) {
-      lastClickTimeRef.current = -1;
       onClick?.(e);
       return;
     }
