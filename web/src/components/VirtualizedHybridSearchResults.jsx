@@ -1248,16 +1248,19 @@ const VirtualizedHybridSearchResults = ({
           // 原值 250 留了 ~66px 空白 slot，每条都多出一大块空档，资产越多越夸张。
           // 与 gap=16 组合后单 slot=200，刚好贴合卡片且行间留出微呼吸。
           // === LM CUSTOMIZATION: VirtualGridItemHeight START ===
-          // 修复 limit > 50（虚拟化分支）"中段空白带 + 视口底部黑带"问题：
-          //   2026-05-25 用 Playwright 实测对比非虚拟化分支(limit ≤ 50)与虚拟化分支:
-          //     非虚拟化卡片自然内容总高 = 317px(缩略图 154 + 标题/作者 + 标签栏 + 大小/日期 + 按钮 → 紧贴)
-          //     虚拟化分支 itemHeight=360 时实际渲染 342px(中间 flex={1} 把大小行撑开 25px)
-          //     ⇒ 容器多出 18px 死带 + 内部 25px 膨胀 + 视口底部 25px 黑带
-          //   修正：itemHeight=320(贴 317 + 3px 安全 buffer),让虚拟化分支视觉与非虚拟化一致。
-          //   gridSize='S' 紧凑模式同步收敛到 188(原 200，预留 12px buffer 在 AFTER 验证后再校准)。
-          //   行间 gap 仍 16,单行总高 336(原 376),滚动总高也对应缩短,黑带消失。
+          // 修复 limit > 50（虚拟化分支）"卡片底部按钮被挤压 + 视口底部黑带"问题：
+          //   2026-05-25 第二轮用 Playwright 精准实测 .chakra-card 真实高度:
+          //     非虚拟化分支(limit ≤ 50): chakra-card.h = 335px (含 padding,内容紧贴底部 9px buffer)
+          //     react-window 内部 rowHeight = itemHeight + gap, top = row * rowHeight
+          //     ⇒ itemHeight 必须等于 chakra-card 自然高度,既不能少(挤压内容)也不能多(死带)
+          //   修正历史:
+          //     原值 360:每行多 25px 死带 + 内部 flex={1} 把按钮行往下撑 → 中段空白 + 底部黑带
+          //     第一轮改 320:错把 chakra-stack 内容高(317)当作卡片高,导致按钮行被挤压(用户图1反馈)
+          //     第二轮改 335:精准对齐 chakra-card 自然高度,无溢出无空白
+          //   gridSize='S' 紧凑模式: chakra-card 自然高 188,保持 188(已实测对齐)。
+          //   行间 gap=16,单行 rowHeight=351(原 376),滚动总高对应缩短,视口底部黑带消失。
           // 合入英伟达新版时：保留本块；itemHeight 调优属于 LM 自有定制。
-          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 188 : 320) : 184}
+          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 188 : 335) : 184}
           // === LM CUSTOMIZATION: VirtualGridItemHeight END ===
           containerHeight="100%"
           overscan={5}
