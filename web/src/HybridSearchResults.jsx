@@ -1129,14 +1129,25 @@ const HybridSearchResults = ({
       {/* === v5: TitleBar + 结果计数已移入 FabToolbar 合并行，此处不再独立渲染 === */}
 
       {/* Results Display - scrollable content area */}
+      {/* === LM CUSTOMIZATION: ScrollContainerOverflow START === */}
+      {/* 原因（2026-05-25 用户反馈"右侧出现两条滚动条 + 上下滑动时界面往左抖一下"）：
+          只写 overflowY="auto" 时，CSS 规范规定另一个轴的 visible 计算值会被强制为 auto
+          （overflow-x/overflow-y 的 visible/clip 会成对自动转 auto）。
+          一旦内部元素瞬时溢出 1px（图片解码完撑大、卡片标签栏 hover 阴影、
+          react-window inner 容器与卡片绝对定位的细微 round-off），横向滚动条短暂出现，
+          占用 ~6px 高度 → 内容可视高度变化 → 触发 ResizeObserver 重排 → 视觉抖动 + 残影双滚动条。
+          解决：显式 overflowX="hidden" 锁死横向，仅保留垂直滚动。
+          合入英伟达新版时：保留本块；如上游改造此 Box，将 overflowX="hidden" 合并进去。 */}
       <Box
         flex={1}
         minH={0}
+        overflowX="hidden"
         overflowY="auto"
         position="relative"
         ref={scrollContainerRef}
         style={{ userSelect: isDragging ? 'none' : 'auto' }}
       >
+      {/* === LM CUSTOMIZATION: ScrollContainerOverflow END === */}
         {viewMode === "grid" ? (
           <Grid 
             templateColumns={`repeat(auto-fill, minmax(${gridSize === "S" ? "140px" : "280px"}, 1fr))`}

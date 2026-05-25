@@ -190,6 +190,7 @@ const VirtualizedResults = ({
     <Box
       ref={scrollElementRef}
       height={containerHeight}
+      overflowX="hidden"
       overflowY="auto"
       onScroll={handleScroll}
       position="relative"
