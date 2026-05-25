@@ -1137,12 +1137,19 @@ const HybridSearchResults = ({
           react-window inner 容器与卡片绝对定位的细微 round-off），横向滚动条短暂出现，
           占用 ~6px 高度 → 内容可视高度变化 → 触发 ResizeObserver 重排 → 视觉抖动 + 残影双滚动条。
           解决：显式 overflowX="hidden" 锁死横向，仅保留垂直滚动。
-          合入英伟达新版时：保留本块；如上游改造此 Box，将 overflowX="hidden" 合并进去。 */}
+
+          [补丁 2026-05-25] 用户实测仍偶发抖动。Playwright 复现确认根因之二：
+          垂直滚动条本身的占位会因内容高度变化而出现/消失（默认 scrollbar-gutter=auto），
+          内容从溢出变为不溢出时 clientWidth 从 294 跳到 300，再溢出又变回 294 —
+          抖动 6px。修复：scrollbarGutter="stable" 强制为滚动条保留固定占位，
+          无论内容是否溢出，宽度始终一致。
+          合入英伟达新版时：保留本块；如上游改造此 Box，将本块两个属性合并进去。 */}
       <Box
         flex={1}
         minH={0}
         overflowX="hidden"
         overflowY="auto"
+        sx={{ scrollbarGutter: 'stable' }}
         position="relative"
         ref={scrollContainerRef}
         style={{ userSelect: isDragging ? 'none' : 'auto' }}
