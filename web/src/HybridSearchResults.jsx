@@ -632,7 +632,7 @@ const HybridSearchResultGridItem = memo(({
                 serverUrl={serverUrl}
                 getHeaders={getHeaders}
                 apiUrl={apiUrl}
-                maxVisible={gridSize === "L" ? 4 : 3}
+                maxVisible={3}
               />
             ) : (
               <CardTagBar
