@@ -58,7 +58,12 @@ import { SEARCH_DEFAULTS, FEATURE_FLAGS } from "./config";
 import CardSelectCheckbox from "./components/shared/CardSelectCheckbox";
 import EmptySearchHint from "./components/EmptySearchHint";
 import { useDragSelect } from "./hooks/useDragSelect";
-import { useClickOrDoubleClick } from "./hooks/useClickOrDoubleClick";
+// === LM CUSTOMIZATION: ClickHandlerUnify START ===
+// 卡片点击事件统一入口：SINGLE_CLICK_DRAWER 模式下走轻量直通路径，避免与
+// useDragSelect 双重消费 mousemove。详见 hooks/useDrawerCardHandlers.js 头部注释。
+// 合入英伟达新版时：保留 import；本 hook 由 LM 自有维护，无 NVIDIA 上游版本。
+import { useDrawerCardHandlers } from "./hooks/useDrawerCardHandlers";
+// === LM CUSTOMIZATION: ClickHandlerUnify END ===
 import TaggedBadge from "./components/TaggedBadge";
 import FailedBadge from "./components/FailedBadge";
 // === LM CUSTOMIZATION: CardTagBar START ===
@@ -367,12 +372,20 @@ const HybridSearchResultGridItem = memo(({
     ? "rgba(255, 210, 48, 0.15)"
     : "rgba(255, 255, 255, 0.05)";
 
-  // 单击 = 切换选中；双击 = 打开详情（B 方案 + 220ms 双击窗口，避免多选态闪入闪出）
-  const clickHandlers = useClickOrDoubleClick({
-    onClick: (e) => onSelectionChange?.(result, e, index),
-    onDoubleClick: () => onItemClick?.(result),
+  // === LM CUSTOMIZATION: ClickHandlerUnify START ===
+  // 卡片点击事件统一入口（替换原 useClickOrDoubleClick 直接挂载）。
+  // SINGLE_CLICK_DRAWER=true：走轻量直通，不监听 mousemove，让 useDragSelect 独占，避免 click 误吞。
+  // SINGLE_CLICK_DRAWER=false：内部 fallback 到 useClickOrDoubleClick 原行为。
+  // 合入英伟达新版时：保留本块。
+  const clickHandlers = useDrawerCardHandlers({
+    result,
+    index,
+    onSelectionChange,
+    onItemClick,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
   });
+  // === LM CUSTOMIZATION: ClickHandlerUnify END ===
 
   // [TagSearchFix P3] 识别"是否因 tag 命中而被搜出"，并提取命中的 tag 文本，
   // 用于在 category badge 上优先展示并加主题色描边——让用户秒懂"打过这个 tag 才搜到"。
@@ -804,12 +817,18 @@ const HybridSearchResultItem = memo(({
     );
   }, [result.metadata?.explanations]);
 
-  // 单击 = 切换选中；双击 = 打开详情（与 Grid 卡片一致）
-  const clickHandlers = useClickOrDoubleClick({
-    onClick: (e) => onSelectionChange?.(result, e, index),
-    onDoubleClick: () => onItemClick?.(result),
+  // === LM CUSTOMIZATION: ClickHandlerUnify START ===
+  // 卡片点击事件统一入口（List 视图，与 Grid 一致）。
+  // 合入英伟达新版时：保留本块。
+  const clickHandlers = useDrawerCardHandlers({
+    result,
+    index,
+    onSelectionChange,
+    onItemClick,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
   });
+  // === LM CUSTOMIZATION: ClickHandlerUnify END ===
 
   return (
     <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>

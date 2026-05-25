@@ -58,7 +58,12 @@ import { useTranslation } from "../i18n/LanguageContext";
 import CardSelectCheckbox from "./shared/CardSelectCheckbox";
 import EmptySearchHint from "./EmptySearchHint";
 import { useDragSelect } from "../hooks/useDragSelect";
-import { useClickOrDoubleClick } from "../hooks/useClickOrDoubleClick";
+// === LM CUSTOMIZATION: ClickHandlerUnify START ===
+// 卡片点击事件统一入口：SINGLE_CLICK_DRAWER 模式下走轻量直通路径，避免与
+// useDragSelect 双重消费 mousemove。详见 hooks/useDrawerCardHandlers.js 头部注释。
+// 合入英伟达新版时：保留 import；本 hook 由 LM 自有维护，无 NVIDIA 上游版本。
+import { useDrawerCardHandlers } from "../hooks/useDrawerCardHandlers";
+// === LM CUSTOMIZATION: ClickHandlerUnify END ===
 import TaggedBadge from "./TaggedBadge";
 import FailedBadge from "./FailedBadge";
 // === LM CUSTOMIZATION: CardTagBar START ===
@@ -338,12 +343,21 @@ const VirtualizedResultGridItem = memo(({
     onFindSimilar?.(baseKey);
   }, [onFindSimilar, baseKey]);
 
-  // NEW CARD INTERACTION: 单击=选中 / 双击=详情（B 方案 + 220ms 双击窗口）
-  const clickHandlers = useClickOrDoubleClick({
-    onClick: (e) => onSelectionChange?.(result, e, index),
-    onDoubleClick: () => onItemClick?.(result),
+  // === LM CUSTOMIZATION: ClickHandlerUnify START ===
+  // 卡片点击事件统一入口（替换原 useClickOrDoubleClick 直接挂载）。
+  // SINGLE_CLICK_DRAWER=true：走轻量直通，仅记 mousedown 起点；不监听 mousemove，让
+  //   useDragSelect 独占 mousemove，避免与其 innerPending 形成双重消费导致 click 误吞。
+  // SINGLE_CLICK_DRAWER=false：内部 fallback 到 useClickOrDoubleClick 原行为。
+  // 合入英伟达新版时：保留本块。
+  const clickHandlers = useDrawerCardHandlers({
+    result,
+    index,
+    onSelectionChange,
+    onItemClick,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
   });
+  // === LM CUSTOMIZATION: ClickHandlerUnify END ===
   // 兼容旧逻辑：非新交互时仍走原 onClick 路径
   const handleCardClick = useCallback((e) => {
     if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
@@ -733,12 +747,21 @@ const VirtualizedResultListItem = memo(({
     onToggle();
   }, [onToggle]);
 
-  // NEW CARD INTERACTION: 单击=选中 / 双击=详情（B 方案 + 220ms 双击窗口）
-  const clickHandlers = useClickOrDoubleClick({
-    onClick: (e) => onSelectionChange?.(result, e, index),
-    onDoubleClick: () => onItemClick?.(result),
+  // === LM CUSTOMIZATION: ClickHandlerUnify START ===
+  // 卡片点击事件统一入口（替换原 useClickOrDoubleClick 直接挂载）。
+  // SINGLE_CLICK_DRAWER=true：走轻量直通，仅记 mousedown 起点；不监听 mousemove，让
+  //   useDragSelect 独占 mousemove，避免与其 innerPending 形成双重消费导致 click 误吞。
+  // SINGLE_CLICK_DRAWER=false：内部 fallback 到 useClickOrDoubleClick 原行为。
+  // 合入英伟达新版时：保留本块。
+  const clickHandlers = useDrawerCardHandlers({
+    result,
+    index,
+    onSelectionChange,
+    onItemClick,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
   });
+  // === LM CUSTOMIZATION: ClickHandlerUnify END ===
   const handleCardClick = useCallback((e) => {
     if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
       onSelectionChange?.(result, e, index);
