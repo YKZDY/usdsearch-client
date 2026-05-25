@@ -407,6 +407,9 @@ const VirtualizedResultGridItem = memo(({
       onClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onClick : handleCardClick}
       onDoubleClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onDoubleClick : undefined}
       onMouseDown={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseDown : undefined}
+      // === LM CUSTOMIZATION: ModifierClickEmulation START ===
+      onMouseUp={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseUp : undefined}
+      // === LM CUSTOMIZATION: ModifierClickEmulation END ===
       onMouseMove={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseMove : undefined}
       h="100%"
       borderRadius="12px"
@@ -800,6 +803,9 @@ const VirtualizedResultListItem = memo(({
       onClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onClick : handleCardClick}
       onDoubleClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onDoubleClick : undefined}
       onMouseDown={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseDown : undefined}
+      // === LM CUSTOMIZATION: ModifierClickEmulation START ===
+      onMouseUp={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseUp : undefined}
+      // === LM CUSTOMIZATION: ModifierClickEmulation END ===
       onMouseMove={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseMove : undefined}
       borderRadius="12px"
       position="relative"

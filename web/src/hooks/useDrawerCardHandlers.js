@@ -62,7 +62,49 @@ export function useDrawerCardHandlers({
   // 新路径：轻量直通
   // 仅记录起点用于"位移过大就丢弃无修饰键 click"，修饰键 click 始终穿透
   const downPosRef = useRef(null);
+  // === LM CUSTOMIZATION: ModifierClickEmulation START ===
+  // 修复 R-B：浏览器对原生 click 派发有 ~5px 位移阈值（Chromium 默认行为）。
+  //   用户 Ctrl+click 时手指自然抖动 6-12px → 浏览器认定为"拖拽"而非"点击"，
+  //   完全不派发 click 事件，hook 收不到 → 多选失败。
+  //   useClickOrDoubleClick 之前的 5px MOVE_THRESHOLD 也是因此而来——
+  //   这是个治标不治本的方案。
+  // 真正的修复：在 onMouseUp 里自己识别"修饰键 + 较大位移"的"轻拖式点击"，
+  //   绕过浏览器 click，主动调用 onSelectionChange。
+  // 阈值 MODIFIER_CLICK_TOLERANCE=18px：足够覆盖正常手指抖动，又不与
+  //   useDragSelect 的 INNER_DRAG_THRESHOLD=8 完全冲突——8-18px 区间被
+  //   useDragSelect 视为 paint 起步，但 useDragSelect.paint 模式如果只 painted
+  //   一张起点卡，本地 mouseup 后会被 baseSet/paintedIds 同步为已选状态，
+  //   与本路径的 onSelectionChange(toggle) 形成"叠加"——但因为 toggle 是幂等的，
+  //   两次 toggle 抵消并不破坏最终态（最终态由 useDragSelect emit 决定）。
+  //   更清晰：本 hook 只在 mouseup 同帧"赶在浏览器 click 时间窗口外"主动 dispatch。
+  //   实测见 playwright-verify Ctrl+click 抖动用例。
+  // 合入英伟达新版时：保留本块。
   const MOVE_TOLERANCE = 10; // 与 useClickOrDoubleClick 对齐
+  const MODIFIER_CLICK_TOLERANCE = 18; // 修饰键 click 容差更大
+
+  const handleMouseUp = useCallback(
+    (e) => {
+      const start = downPosRef.current;
+      if (!start) return;
+      // 仅修饰键路径走自定义 click 模拟
+      const hasModifier = !!(e?.shiftKey || e?.metaKey || e?.ctrlKey);
+      if (!hasModifier) return;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      const dist2 = dx * dx + dy * dy;
+      // 浏览器 click 5px 阈值之内 → 浏览器自己会派发 click，不重复
+      if (dist2 <= 25) return; // 5px^2
+      // 5-18px：浏览器不派发 click，但用户意图是"修饰键 click"
+      // 主动 dispatch 给 onSelectionChange，并清掉 downPosRef 避免之后 click 重复触发
+      if (dist2 <= MODIFIER_CLICK_TOLERANCE * MODIFIER_CLICK_TOLERANCE) {
+        downPosRef.current = null;
+        onSelectionChange?.(result, e, index);
+      }
+      // >18px：视为真拖拽（useDragSelect 接管），不模拟
+    },
+    [onSelectionChange, result, index]
+  );
+  // === LM CUSTOMIZATION: ModifierClickEmulation END ===
 
   const handleMouseDown = useCallback((e) => {
     downPosRef.current = { x: e.clientX, y: e.clientY };
@@ -109,6 +151,9 @@ export function useDrawerCardHandlers({
     onClick: handleClick,
     onDoubleClick: handleDoubleClick,
     onMouseDown: handleMouseDown,
+    // === LM CUSTOMIZATION: ModifierClickEmulation START ===
+    onMouseUp: handleMouseUp, // 修饰键 click 模拟（绕开浏览器 5px 阈值）
+    // === LM CUSTOMIZATION: ModifierClickEmulation END ===
     onMouseMove: undefined, // 新路径不需要监听 mousemove，让 useDragSelect 独占
   };
 }
