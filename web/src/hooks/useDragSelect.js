@@ -28,6 +28,18 @@ const CARD_INDEX_ATTR = 'data-card-index';
 const CARD_SELECTOR = `[${CARD_INDEX_ATTR}]`;
 const CARD_CLASS = 'chakra-card';
 const DRAG_THRESHOLD = 8; // px：>5 给抖动/双击留缓冲，避免误判为拖拽分支
+// === LM CUSTOMIZATION: InnerDragThreshold START ===
+// 根因 R2：容器内 mousedown 当帧立即 isActive=true，与 useClickOrDoubleClick 的 movedRef
+//   形成"双重消费 mousemove"。虽然 mousemove 里 mode===null && dist<DRAG_THRESHOLD 已早退
+//   保护 click 不受副作用影响，但 isActive=true 会让 mouseup 走入"已激活"分支处理逻辑，
+//   增加边界出错概率（如 onEmptyClick 误触发等）。
+// 解决：引入 innerPending 缓冲态，与 outerPending 形成对称——容器内 mousedown 仅记录起点，
+//   等 mousemove 真正越过 INNER_DRAG_THRESHOLD 才正式 isActive=true，进入框选/刷选模式。
+//   位移不足时 mouseup 直接干净退出，让原生 click 正常派发到卡片。
+// 与 OUTER_DRAG_THRESHOLD=20 形成"内紧外松"梯度：内部已确定意图（用户在结果区），8px 即激活。
+// 合入英伟达新版时：保留本块；本 hook 由 LM 自有维护，无 NVIDIA 上游版本。
+const INNER_DRAG_THRESHOLD = 8; // px：容器内起点的拖拽激活阈值（与 DRAG_THRESHOLD 等值，仅语义解耦）
+// === LM CUSTOMIZATION: InnerDragThreshold END ===
 const OUTER_DRAG_THRESHOLD = 20; // px：容器外起点需要更大位移才启动框选，避免与"单击退出多选"冲突
 
 /**
@@ -106,6 +118,8 @@ export function useDragSelect({
     startX: 0,
     startY: 0,
     isActive: false,
+    // [LM ClickRobustness] innerPending：容器内 mousedown 后达到 INNER_DRAG_THRESHOLD 前的缓冲态
+    innerPending: false,
     mode: null,           // 'rect' | 'paint' | null
     startedInsideCard: false,
     baseSet: new Set(),
@@ -410,7 +424,12 @@ export function useDragSelect({
     stateRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      isActive: true,
+      // === LM CUSTOMIZATION: InnerDragThreshold START ===
+      // 根因 R2：不再当帧 isActive=true，改为 innerPending，等 mousemove 越过 INNER_DRAG_THRESHOLD 才激活。
+      // 位移不足时 mouseup 干净退出，让原生 click 正常派发到卡片 onClick → useDrawerOrSelect 真值表。
+      isActive: false,
+      innerPending: true,
+      // === LM CUSTOMIZATION: InnerDragThreshold END ===
       outerPending: false,
       mode: null,
       startedInsideCard: insideCard,
@@ -434,8 +453,9 @@ export function useDragSelect({
     //   导致 outerPending=true 残留 → 下次纯移动鼠标累积位移误激活 rect。
     // 防御：只要鼠标无任何按键按下，强制清理状态并退出。
     // 仅在我们处于"有状态"时干预，避免误伤完全空闲的 mousemove。
-    if (e.buttons === 0 && (st.outerPending || st.isActive)) {
+    if (e.buttons === 0 && (st.outerPending || st.innerPending || st.isActive)) {
       st.outerPending = false;
+      st.innerPending = false;
       st.isActive = false;
       st.mode = null;
       st.paintedIds = new Set();
@@ -470,6 +490,23 @@ export function useDragSelect({
       // 未超阈值则什么都不做（让其他 hook 正常工作）
       if (!st.isActive) return;
     }
+
+    // === LM CUSTOMIZATION: InnerDragThreshold START ===
+    // 容器内待激活：达到 INNER_DRAG_THRESHOLD 才正式 isActive，之前不动
+    // 避免与 useClickOrDoubleClick.movedRef 双重消费 mousemove。
+    if (st.innerPending && !st.isActive) {
+      const dx = e.clientX - st.startX;
+      const dy = e.clientY - st.startY;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= INNER_DRAG_THRESHOLD) {
+        st.isActive = true;
+        st.innerPending = false;
+        // mode 仍由下面原逻辑决定（insideCard → 'paint'，否则 'rect'）
+      } else {
+        return; // 未足阈值：保持静默，click 会正常派发
+      }
+    }
+    // === LM CUSTOMIZATION: InnerDragThreshold END ===
 
     if (!st.isActive) return;
 
@@ -539,6 +576,17 @@ export function useDragSelect({
       return;
     }
 
+    // === LM CUSTOMIZATION: InnerDragThreshold START ===
+    // 容器内待激活状态（没超过阈值的单击）→ 静默清理，不调 onEmptyClick
+    // 这里同时不阻止 click 派发，让卡片 onClick / 容器空白区 click 正常走原路径。
+    if (st.innerPending) {
+      st.innerPending = false;
+      st.isActive = false;
+      st.mode = null;
+      return;
+    }
+    // === LM CUSTOMIZATION: InnerDragThreshold END ===
+
     if (!st.isActive) return;
 
     const wasDragging = st.mode !== null;
@@ -606,7 +654,7 @@ export function useDragSelect({
     // 仅在 hook 状态为"待激活/已激活"时干预，避免误伤其它正常拖拽（如外部文件拖入）。
     const onDragStart = (e) => {
       const st = stateRef.current;
-      if (st && (st.outerPending || st.isActive)) {
+      if (st && (st.outerPending || st.innerPending || st.isActive)) {
         e.preventDefault();
       }
     };
@@ -643,8 +691,9 @@ export function useDragSelect({
     //   只要 hook 处于"有状态"就强制重置。
     const safetyReset = () => {
       const st = stateRef.current;
-      if (!st || (!st.outerPending && !st.isActive)) return;
+      if (!st || (!st.outerPending && !st.innerPending && !st.isActive)) return;
       st.outerPending = false;
+      st.innerPending = false;
       st.isActive = false;
       st.mode = null;
       st.paintedIds = new Set();
