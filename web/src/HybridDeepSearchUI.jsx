@@ -2709,21 +2709,18 @@ const HybridDeepSearchUI = () => {
 
   const handleItemClick = useCallback((item) => {
     // === LM CUSTOMIZATION: Perf-Drawer-FastSwitch START ===
-    // \u4fee\u590d "\u8fde\u7eed\u70b9\u51fb\u5361\u7247\u5931\u7075/\u5361\u987f"\uff1a
-    //   \u539f\u5b9e\u73b0 setSelectedItem(item) \u662f\u540c\u6b65 setState\uff0c\u89e6\u53d1 React \u540c\u6b65\u91cd\u6e32\u67d3
-    //   \u6574\u4e2a Drawer \u5b50\u6811\uff08~200ms long task\uff09\u3002\u671f\u95f4 click event \u4e3b\u7ebf\u7a0b\u88ab\u963b\u585e\uff0c
-    //   \u7528\u6237\u5feb\u901f\u8fde\u70b9\u65f6\u540e\u7eed click \u88ab React \u81ea\u52a8 batching \u5408\u5e76\u4e22\u5e03\uff08\u4e2d\u95f4\u5e27\u4e22\u5931\uff09\u3002
-    // \u4fee\u590d\uff1a\u7528 startTransition \u8ba9 setSelectedItem \u4ee5\u4f4e\u4f18\u5148\u7ea7\u8c03\u5ea6\u6e32\u67d3\u3002
-    //   - click event \u672c\u8eab\u7acb\u5373\u8fd4\u56de\uff08< 16ms\uff09\uff0c\u4e0d\u963b\u585e\u540e\u7eed click
-    //   - React \u4f1a\u5728\u7a7a\u95f2\u65f6\u95f4\u91cd\u6e32\u67d3 Drawer\uff0c\u53ef\u88ab\u540e\u7eed click \u6253\u65ad\uff08\u53d6\u6700\u65b0\uff09
-    //   - onDetailsOpen \u6539\u540c\u6b65\u8c03\u7528\uff0c\u8ba9 isOpen \u72b6\u6001\u7acb\u5373\u751f\u6548\uff08Drawer \u7eaf\u9690/\u663e\u72b6\u6001 \u5fae\u8c03\u4f4e\u5ef6\u8fdf\uff09
-    // \u8fd9\u4e0e\u4e4b\u524d\u201c\u53cd\u8f6c\u62d6\u62fd\u6846\u9009 startTransition\u201d\u4e0d\u77db\u76fe\uff1a\u62d6\u62fd\u9700\u8981\u6bcf\u5e27\u53ef\u89c1\u53cd\u9988\uff08\u540c\u6b65\uff09\uff0c
-    // \u800c Drawer \u5207\u6362\u5141\u8bb8 100ms \u5ef6\u8fdf\uff0c\u6362\u53d6\u201c\u70b9\u51fb\u4e0d\u88ab\u963b\u585e\u201d\u7684\u4e1d\u6ed1\u4f53\u9a8c\u3002
-    // \u5408\u5165\u82f1\u4f1f\u8fbe\u65b0\u7248\u65f6\uff1a\u4fdd\u7559\u672c\u5757\uff1bstartTransition \u662f React 18 \u6807\u51c6 API\u3002
+    // 修复"连续点击卡片中间几次无反应"：
+    //   v1 实现用 startTransition 包 setSelectedItem，让 click event 立即返回不阻塞。
+    //   但带来副作用：低优先级渲染会被后续 click 打断丢弃，连续点击 4 张卡片只渲染最后一张，
+    //   用户感知就是"前面几次单击没反应"——Playwright 探针实测复现：4 次 click 派发都成功，
+    //   但只有最后 1 次触发 drawer-change DOM 变更。
+    //   v2 改为同步 setSelectedItem，让每次 click 都立即更新 Drawer 顶层（资产名/缩略图）。
+    //   高级面板和 tags 编辑器在 AssetDetailsDrawer 内已用 useDeferredValue 包裹，
+    //   重子树会被 React 调度到低优先级渲染，不阻塞主路径。
+    //   onDetailsOpen 同步保证 isOpen 立即生效。
+    // 合入英伟达新版时：保留本块；useDeferredValue 是 React 18 标准 API。
+    setSelectedItem(item);
     onDetailsOpen();
-    startTransition(() => {
-      setSelectedItem(item);
-    });
     // === LM CUSTOMIZATION: Perf-Drawer-FastSwitch END ===
   }, [onDetailsOpen]);
 

@@ -1247,7 +1247,15 @@ const VirtualizedHybridSearchResults = ({
           // List 视图卡片实际高度 ≈ 150（缩略图）+ 32（CardBody p=4 上下各 16）+ 2（border）≈ 184。
           // 原值 250 留了 ~66px 空白 slot，每条都多出一大块空档，资产越多越夸张。
           // 与 gap=16 组合后单 slot=200，刚好贴合卡片且行间留出微呼吸。
-          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 200 : 320) : 184}
+          // === LM CUSTOMIZATION: VirtualGridItemHeight START ===
+          // 修复 limit > 50（虚拟化分支）卡片底部"大小/修改时间/按钮"被压缩：
+          //   非虚拟化分支卡片自然撑开到 335px（实测），但虚拟化分支以前 itemHeight=320px
+          //   强行限定容器高，导致 size/modified 双行被截断、按钮顶上来（用户图1红框）。
+          //   实测 335px 高 + tag 多时可能再涨 10-15px，统一给 360px 留出余量。
+          //   行间 gap 仍 16，单行总高 376（与之前 336 仅差 40px，滚动总高变化可忽略）。
+          // 合入英伟达新版时：保留本块；itemHeight 调优属于 LM 自有定制。
+          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 200 : 360) : 184}
+          // === LM CUSTOMIZATION: VirtualGridItemHeight END ===
           containerHeight="100%"
           overscan={5}
           gridMode={viewMode === "grid"}
