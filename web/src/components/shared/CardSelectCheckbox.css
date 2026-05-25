@@ -1,17 +1,23 @@
 /* CardSelectCheckbox - 智能隐现 + 视觉强化 */
 
 /* === 基础态：完全隐藏（连 visibility 都收掉，避免抢占焦点） === */
+/* === LM CUSTOMIZATION: Perf D-3 START ===
+   修复"进入多选卡一下"：50 个 checkbox 同时切 .always-visible 时，
+   原 transition 包含 background/box-shadow → 触发 paint → 浏览器一次性 paint
+   50 个区域 + 祖先栈 → 实测主线程 long task 167ms。
+   方案：transition 只保留 opacity + transform（GPU 合成器 free），
+   background/box-shadow 改瞬切。视觉零损失（这两个属性在 .always-visible 上不变,
+   只在 .checked 上变，单张卡切换不会引发集体 paint）。
+   visibility 保留（浏览器对它高度优化，且需要和 opacity 同步收回避免抢焦点）。
+   === LM CUSTOMIZATION: Perf D-3 END === */
 .card-select-checkbox {
   opacity: 0;
   visibility: hidden;
   transform: scale(0.85);
-  /* transform 用更柔和的曲线；visibility/opacity 150ms 后再出，避免 hover 闪烁 */
   transition:
     opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1) 0ms,
     visibility 0.18s linear 0ms,
-    transform 0.18s cubic-bezier(0.4, 0, 0.2, 1),
-    background 0.15s ease,
-    box-shadow 0.2s ease;
+    transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* === 多选模式：始终显示（进入时带一次弹性进入动画） === */
@@ -38,7 +44,7 @@
     visibility: visible;
     transform: scale(1);
     /* 延迟 120ms，用户真停留才显示，快速划过不闪 */
-    transition-delay: 120ms, 120ms, 0ms, 0ms, 0ms;
+    transition-delay: 120ms, 120ms, 0ms;
   }
 }
 
