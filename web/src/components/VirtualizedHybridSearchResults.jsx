@@ -1248,13 +1248,16 @@ const VirtualizedHybridSearchResults = ({
           // 原值 250 留了 ~66px 空白 slot，每条都多出一大块空档，资产越多越夸张。
           // 与 gap=16 组合后单 slot=200，刚好贴合卡片且行间留出微呼吸。
           // === LM CUSTOMIZATION: VirtualGridItemHeight START ===
-          // 修复 limit > 50（虚拟化分支）卡片底部"大小/修改时间/按钮"被压缩：
-          //   非虚拟化分支卡片自然撑开到 335px（实测），但虚拟化分支以前 itemHeight=320px
-          //   强行限定容器高，导致 size/modified 双行被截断、按钮顶上来（用户图1红框）。
-          //   实测 335px 高 + tag 多时可能再涨 10-15px，统一给 360px 留出余量。
-          //   行间 gap 仍 16，单行总高 376（与之前 336 仅差 40px，滚动总高变化可忽略）。
+          // 修复 limit > 50（虚拟化分支）"中段空白带 + 视口底部黑带"问题：
+          //   2026-05-25 用 Playwright 实测对比非虚拟化分支(limit ≤ 50)与虚拟化分支:
+          //     非虚拟化卡片自然内容总高 = 317px(缩略图 154 + 标题/作者 + 标签栏 + 大小/日期 + 按钮 → 紧贴)
+          //     虚拟化分支 itemHeight=360 时实际渲染 342px(中间 flex={1} 把大小行撑开 25px)
+          //     ⇒ 容器多出 18px 死带 + 内部 25px 膨胀 + 视口底部 25px 黑带
+          //   修正：itemHeight=320(贴 317 + 3px 安全 buffer),让虚拟化分支视觉与非虚拟化一致。
+          //   gridSize='S' 紧凑模式同步收敛到 188(原 200，预留 12px buffer 在 AFTER 验证后再校准)。
+          //   行间 gap 仍 16,单行总高 336(原 376),滚动总高也对应缩短,黑带消失。
           // 合入英伟达新版时：保留本块；itemHeight 调优属于 LM 自有定制。
-          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 200 : 360) : 184}
+          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 188 : 320) : 184}
           // === LM CUSTOMIZATION: VirtualGridItemHeight END ===
           containerHeight="100%"
           overscan={5}
