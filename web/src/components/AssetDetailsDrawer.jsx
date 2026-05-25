@@ -396,6 +396,12 @@ const AssetDetailsDrawer = ({
           //   条件化 pointerEvents 让退出动画期间 click 透透到下层卡片。
           //   合入英伟达新版时：保留；isOpen 是原生 prop，无依赖 LM 逻辑。
           pointerEvents={isOpen ? 'auto' : 'none'}
+          // v4 修复"Drawer 已开点其他卡片无反应"：
+          //   Chakra <Drawer> 默认会插入一个全屏 .chakra-modal__content-container，其
+          //   pointer-events:auto 会拦截所有外部 click，让 useDrawerCloseGuard 误判为"想关"。
+          //   通过 containerProps 让该 wrapper 权重为透明：click 直达下层卡片。
+          //   DrawerContent 自身仍保留 pointer-events:auto，抽屉内部交互不受影响。
+          containerProps={{ pointerEvents: 'none' }}
           // === LM CUSTOMIZATION: SelectionDrawer END ===
         >
           {/* TC-A5：折叠态把展开按钮放上方居中，关闭按钮放下方，避免重叠 */}
@@ -457,6 +463,12 @@ const AssetDetailsDrawer = ({
         // === LM CUSTOMIZATION: SelectionDrawer START ===
         // v3.8 同上：退出动画期间让 click 透过 DrawerContent，即“立刻重开抽屉”不被吞。
         pointerEvents={isOpen ? 'auto' : 'none'}
+        // v4 修复"Drawer 已开点其他卡片无反应"：
+        //   让全屏 .chakra-modal__content-container wrapper 权重透明，click 直达下层卡片；
+        //   DrawerContent 自身 pointer-events:auto 保留交互。
+        //   与 useDrawerCloseGuard 交错工作：click 直达卡片 → 命中 KEEP_OPEN（[data-card-index]）→
+        //   Guard 不关 Drawer → useDrawerOrSelect 切换内容。
+        containerProps={{ pointerEvents: 'none' }}
         // === LM CUSTOMIZATION: SelectionDrawer END ===
       >
         {/* === LM CUSTOMIZATION: SelectionDrawer START === */}
