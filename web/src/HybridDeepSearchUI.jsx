@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, { useEffect, useState, useCallback, useMemo, useDeferredValue, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useDeferredValue, useRef, startTransition } from "react";
 import {
   Box,
   VStack,
@@ -72,14 +72,43 @@ import SearchFilters from "./SearchFilters";
 import HybridSearchResults from "./HybridSearchResults";
 import VirtualizedHybridSearchResults from "./components/VirtualizedHybridSearchResults";
 import AssetDetailsModal from "./AssetDetailsModal";
+// === LM CUSTOMIZATION: SelectionInteraction START ===
+// Group A 任务 5：右侧抽屉 + 方案 B 单击交互（FEATURE_FLAGS.SINGLE_CLICK_DRAWER 控制；
+// 旗标关闭时回退 AssetDetailsModal 路径，原版 NVIDIA 行为完整保留）。
+import AssetDetailsDrawer from "./components/AssetDetailsDrawer";
+import { useDrawerOrSelect } from "./hooks/useDrawerOrSelect";
+// === LM CUSTOMIZATION: SelectionInteraction END ===
+// === LM CUSTOMIZATION: AdvancedPanel START ===
+// 原因：Group B 需求 4 — 抽屉“高级面板”内容插槽填充。
+// 合入英伟达新版时：保留本 import；AdvancedMatchInfo 是 LM 新建组件，与 NVIDIA 不交叉。
+import AdvancedMatchInfo from "./components/AdvancedMatchInfo";
+// === LM CUSTOMIZATION: AdvancedPanel END ===
+// === LM CUSTOMIZATION: detail-modal-revamp START ===
+// 原因：补齐 Drawer 高级面板（依赖图 / USD 属性 / 索引管理 / AI / VLM / 解释），
+// 与 Modal 行为一致；DrawerAdvancedPanelContainer 是 LM 新建组件，与 NVIDIA 不交叉。
+// 合入英伟达新版时：保留本 import。
+import DrawerAdvancedPanelContainer from "./components/drawer-panels/DrawerAdvancedPanelContainer";
+// === LM CUSTOMIZATION: detail-modal-revamp END ===
+// === LM CUSTOMIZATION: AssetTagEditor START ===
+// 原因：Group B 需求 5 — 抽屉内完整 tag 编辑器插槽填充。
+// 合入英伟达新版时：保留本 import。
+import AssetTagEditor from "./components/AssetTagEditor";
+// === LM CUSTOMIZATION: AssetTagEditor END ===
 import AssetImage from "./components/AssetImage";
 // === LM CUSTOMIZATION: Fab Toolbar START ===
 import FabToolbar from "./components/FabToolbar";
 // === LM CUSTOMIZATION: Fab Toolbar END ===
+// === LM CUSTOMIZATION: Search Settings Popover START ===
+// 原因：C 组任务 3 — 顶栏齿轮按钮触发的搜索设置面板（搜索方法 / 每页结果数 / 去重 / Tag 权重 / 高级混合配置）
+// 合入英伟达新版时：保留这一行 import 和下方对应 JSX 区块即可
+import SearchSettingsPopover from "./components/SearchSettingsPopover";
+// === LM CUSTOMIZATION: Search Settings Popover END ===
 // === LM CUSTOMIZATION: Selection Mode Bar ===
 import SelectionModeBar from "./components/SelectionModeBar";
 // === LM CUSTOMIZATION: 全局空白点击退出多选（无涟漪反馈，依赖 Bar 自身淡出动画） ===
 import useExitMultiSelectOnEmptyClick from "./hooks/useExitMultiSelectOnEmptyClick";
+// === LM CUSTOMIZATION: SelectionDrawer === v3 抽屉关闭白名单守卫（修 TC-A4/A6）
+import useDrawerCloseGuard from "./hooks/useDrawerCloseGuard";
 // === V2: 批量打标签工作流 ===
 import BatchTagModal from "./components/BatchTagModal";
 import UndoToast from "./components/UndoToast";
@@ -97,6 +126,14 @@ import { useNucleusTree } from "./hooks/useNucleusTree";
 import buildSearchPayload from "./utils/buildSearchPayload";
 import { isNoisePath } from "./utils/pathFilters";
 import { getApiLimit } from "./utils/oversample";
+
+// === LM CUSTOMIZATION: NoSelectPolyfill START ===
+// [PERF v3 — 2026-05-22 trace 驱动] 原本调用 usePolyfillNoSelectPrefixes(isDraggingForPolyfill)。
+// trace 表明该路径（VirtualizedHybridSearchResults isDragging 上抛 → setIsDraggingForPolyfill → HybridDeepSearchUI 重渲 → polyfill effect）
+// 会造成首次进入拖拽时一个≈196ms 的巨帧。现在把 polyfill 所需的 cursor / Moz/ms 前缀写入合并进 useDragSelect
+// 的 applyDragBodyStyles，该 hook 不再需要。保留文件以防需要回退；import 删除。
+// 合入上游新版时：本区块独立与 NVIDIA 原代码不交叉。
+// === LM CUSTOMIZATION: NoSelectPolyfill END ===
 
 
 // === LM CUSTOMIZATION: Copy Deploy Fix START ===
@@ -159,7 +196,25 @@ const MemoizedResults = React.memo(({
   // 空白处单击退出多选（由父级传入 clearSelection）
   onEmptyAreaClick,
   // === LM CUSTOMIZATION: Search/Tag decoupling v4 — 结果区大标题所需数据 ===
-  titleBarProps
+  titleBarProps,
+  // === LM CUSTOMIZATION: InfinitePagination START ===
+  // 原因：需求 D-1 双层无限滚动。本 props 透传给下游 VirtualizedHybridSearchResults。
+  // 合入上游新版时：MemoizedResults 是本仓定制包装器，props 追加与 NVIDIA 不交叉。
+  hasMore,
+  isLoadingMore,
+  loadMoreError,
+  isResultShortage,
+  onAutoLoadMore,
+  onTriggerBackendLoadMore,
+  onRetryLoadMore,
+  onDragStateChange,
+  // === LM CUSTOMIZATION: InfinitePagination END ===
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  // 原因：Group B 需求 — CardTagBar 需要 nucleus host 调 wss tagging。
+  // 透传 nucleusServerUrl（已经 resolveNucleusHost 解析过，是真实 host 如 'ov.qq.com'）到下游。
+  // 合入英伟达新版时：本 prop 追加与 NVIDIA 原代码不交叉，保留。
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const filteredResults = useMemo(() => 
     showOnlyWithPreviews 
@@ -195,6 +250,17 @@ const MemoizedResults = React.memo(({
       onRetryFailed={onRetryFailed}
       onEmptyAreaClick={onEmptyAreaClick}
       titleBarProps={titleBarProps}
+      hasMore={hasMore}
+      isLoadingMore={isLoadingMore}
+      loadMoreError={loadMoreError}
+      isResultShortage={isResultShortage}
+      onAutoLoadMore={onAutoLoadMore}
+      onTriggerBackendLoadMore={onTriggerBackendLoadMore}
+      onRetryLoadMore={onRetryLoadMore}
+      onDragStateChange={onDragStateChange}
+      /* === LM CUSTOMIZATION: CardTagBar START === */
+      serverUrl={serverUrl}
+      /* === LM CUSTOMIZATION: CardTagBar END === */
     />
   );
 }, (prevProps, nextProps) => {
@@ -477,6 +543,66 @@ const HybridDeepSearchUI = () => {
     };
   }, [tagFilteredResults, showOnlyWithPreviews, userLimit]);
 
+  // === LM CUSTOMIZATION: InfinitePagination START ===
+  // 原因：需求 D-1 双层无限滚动 + AbortController。
+  // 架构说明见 .codebuddy/plan/group-d-quick-fixes/CODE-RECON.md §1.3：
+  //   —— NVIDIA /search_hybrid 不支持 offset，本仓已有"过采样 + 客户端切片"机制（见上方 visibleResults）。
+  //   —— 第 1 层：滚到底自动增 userLimit（客户端切片）→ 无网络请求
+  //   —— 第 2 层：客户端切片不够（isResultShortage=true）时显示按钮设置更大 limit 重发
+  // 合入上游新版时：本块独立在 visibleResults 后，不交叉 NVIDIA 原代码。
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(null);
+  // [PERF v3] 移除 isDraggingForPolyfill state：所需副作用已合入 useDragSelect.applyDragBodyStyles
+  // 原： const [isDraggingForPolyfill, setIsDraggingForPolyfill] = useState(false);
+  // 主搜索 AbortController ref（覆盖验收 TC-D5：新搜索发起时旧请求 abort）
+  const searchAbortRef = useRef(null);
+
+  // 第 1 层：滚到底自动增 userLimit（客户端切片、无网络请求）
+  const handleAutoLoadMore = useCallback(() => {
+    setUserLimit(prev => prev + 50);
+  }, []);
+
+  // 第 2 层：点击"加载更多"按钮→ 调高 searchParams.limit 触发后端二次搜索
+  // 后端返回后会走同步 setUserLimit 逻辑（在 line 831 付近），无需手动同步。
+  // 这里在调 setSearchParams 后调一次 setUserLimit 预设，让 visibleResults 提前多展示。
+  const handleTriggerBackendLoadMore = useCallback(() => {
+    setIsLoadingMore(true);
+    setLoadMoreError(null);
+    setSearchParams(prev => {
+      const cur = parseInt(prev.limit) || DEFAULT_SEARCH_PARAMS.limit;
+      return { ...prev, limit: cur + 50 };
+    });
+    setUserLimit(prev => prev + 50);
+    // 由于 setSearchParams 可能会触发上层 useEffect 重发搜索（如仓里现有逻辑），或需要手动调 handleSearch；
+    // 仓里上游 setSearchParams 不带自动重搜，需手动触发。调用方为 handleSearchRef.current。
+    // 使用 setTimeout 避免状态未同步到 ref 导致警告。
+    setTimeout(() => {
+      if (handleSearchRef.current) handleSearchRef.current();
+    }, 0);
+  }, []);
+
+  // 重试失败的加载更多
+  const handleRetryLoadMore = useCallback(() => {
+    setLoadMoreError(null);
+    handleTriggerBackendLoadMore();
+  }, [handleTriggerBackendLoadMore]);
+
+  // [PERF v3 — 2026-05-22 trace 驱动] 移除 isDragging 上抛链路
+  // 原：VirtualizedHybridSearchResults 通过 onDragStateChange 上抛 isDragging
+  //     → handleDragStateChange → setIsDraggingForPolyfill → HybridDeepSearchUI (3812行) 整棵重渲 → polyfill effect
+  // trace 显示该链路首次进入拖拽时产生 ≈196ms 的巨帧。现以 useDragSelect.applyDragBodyStyles
+  //     直接写入 body.style，零 React 调度开销。handleDragStateChange / usePolyfillNoSelectPrefixes 调用均删除。
+  // 原代码：
+  //   const handleDragStateChange = useCallback((dragging) => { setIsDraggingForPolyfill(dragging); }, []);
+  //   usePolyfillNoSelectPrefixes(isDraggingForPolyfill);
+
+  // hasMore 判定：只要 isResultShortage=false 或底层还有数据就认为还能加载
+  // 简化处理：只要有当前结果且未达到软上限 (默认 1000、5 页”) 认为 hasMore。
+  // 后端返回的总计数（data.total）未入库进状态不能精准判断，用软上限打底免得无限加载。
+  const HARD_LIMIT_USER_LIMIT = 1000;
+  const hasMore = userLimit < HARD_LIMIT_USER_LIMIT && (visibleResults.length > 0 || isResultShortage);
+  // === LM CUSTOMIZATION: InfinitePagination END ===
+
   // pathTree 用 visibleResults 聚合，确保节点徽章数字 == 该路径下实际可见卡片数
   const { tree: pathTree } = usePathSuggestions(visibleResults, { liveTree });
   
@@ -514,10 +640,17 @@ const HybridDeepSearchUI = () => {
   // 在多选模式 ON 时，document 级监听 mousedown/mouseup，识别"短按 + 无位移 + 非交互元素"
   // 即可退出多选；覆盖顶部搜索栏空白、左侧产品类型树空白、结果区 titleBar 空白等所有结果容器外区域。
   // 反馈方式：依靠 SelectionModeBar 自身的淡出动画 + Badge 脉冲，无额外涟漪噪音。
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // [Group A 任务 6 修复] Drawer 打开时的空白点击应让 Drawer 自己处理（关 Drawer），
+  // 不应顺带退出多选模式。通过 shouldSkip 把 isDetailsOpen 状态注入。
   useExitMultiSelectOnEmptyClick({
     enabled: isMultiSelectMode,
     onExit: clearSelection,
+    shouldSkip: () => isDetailsOpen, // Drawer 打开时跳过退出多选
   });
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
+
+  // === LM CUSTOMIZATION: SelectionDrawer === v3 useDrawerCloseGuard 接入移到 useDisclosure 之后（避免 TDZ）
 
   // Deselect all but KEEP multi-select mode（"取消全选"按钮走这里）
   // 用户清空选中后仍可继续单击/框选卡片，bar 不会消失
@@ -527,21 +660,21 @@ const HybridDeepSearchUI = () => {
     lastClickedIndexRef.current = null;
   }, []);
 
-  // === NEW CARD INTERACTION: Esc 键全局退出多选模式（提升键盘可达性） ===
-  useEffect(() => {
-    if (!isMultiSelectMode) return undefined;
-    const onKeyDown = (e) => {
-      if (e.key !== 'Escape') return;
-      // 让 Modal/弹窗优先消费 Esc，仅当没有打开的对话框时才清除选中
-      const hasOpenDialog = document.querySelector('[role="dialog"][aria-modal="true"]');
-      if (hasOpenDialog) return;
-      clearSelection();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isMultiSelectMode, clearSelection]);
+  // === LM CUSTOMIZATION: SelectionDrawer START ===
+  // 原因：原 NEW CARD INTERACTION 的 ESC 监听器（多选退出）已统一迁移到
+  //       useKeyboardShortcuts hook（带 isEditableTarget 守卫 + isAnyDialog 让位），
+  //       此处保留空块，避免双重监听导致 Drawer 打开时按一次 ESC 既关抽屉又清选中。
+  // 合入英伟达新版时：原版 V2 没有此监听，可直接删除整个标记块。
+  // === LM CUSTOMIZATION: SelectionDrawer END ===
 
   // Toggle item selection（V2 支持 event + index：Shift+Click 区间选择）
+  // === LM CUSTOMIZATION: Perf D-3 — startTransition 治"卡一下" START ===
+  // 根因：isMultiSelectMode 从 false→true 翻转 → 50 张卡 + Toolbar 整棵子树同步 re-render，
+  //   实测主线程长任务 161-280ms，用户感知为"冻屏"。
+  // 修复：把 setSelectedItems 标记为 transition（低优先级），React 18 调度器自动让出主线程
+  //   给用户输入响应 + Toolbar 显示，"卡一下"消失（卡片重渲后台进行，用户先看到 UI 反馈）。
+  // 不包 lastClickedIndexRef（ref 赋值无需调度）。
+  // === LM CUSTOMIZATION: Perf D-3 — startTransition 治"卡一下" END ===
   const resultsForSelectionRef = useRef([]);
   const handleToggleSelection = useCallback((item, event, index) => {
     const itemId = item?.id || item?.source?.base_key || item?.source?.url;
@@ -551,31 +684,45 @@ const HybridDeepSearchUI = () => {
     if (event?.shiftKey && typeof index === 'number' && lastClickedIndexRef.current !== null) {
       const start = Math.min(lastClickedIndexRef.current, index);
       const end = Math.max(lastClickedIndexRef.current, index);
-      setSelectedItems(prev => {
-        const next = new Set(prev);
-        const currentResults = resultsForSelectionRef.current || [];
-        for (let i = start; i <= end && i < currentResults.length; i++) {
-          const r = currentResults[i];
-          const id = r?.id || r?.source?.base_key || r?.source?.url;
-          if (id) next.add(id);
-        }
-        return next;
+      startTransition(() => {
+        setSelectedItems(prev => {
+          const next = new Set(prev);
+          const currentResults = resultsForSelectionRef.current || [];
+          for (let i = start; i <= end && i < currentResults.length; i++) {
+            const r = currentResults[i];
+            const id = r?.id || r?.source?.base_key || r?.source?.url;
+            if (id) next.add(id);
+          }
+          return next;
+        });
       });
       lastClickedIndexRef.current = index;
       return;
     }
 
-    setSelectedItems(prev => {
-      const next = new Set(prev);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
-      return next;
+    startTransition(() => {
+      setSelectedItems(prev => {
+        const next = new Set(prev);
+        if (next.has(itemId)) next.delete(itemId);
+        else next.add(itemId);
+        return next;
+      });
     });
     if (typeof index === 'number') lastClickedIndexRef.current = index;
   }, []);
 
   // Batch setter for drag-select (set entire selection at once)
   const setBatchSelection = useCallback((newSet) => {
+    // === LM CUSTOMIZATION: Perf D-4 — 拖拽框选改回同步更新 START ===
+    // 反转 D-3 的 startTransition：用户报告"框选过一会儿才选中"，根因是 startTransition
+    //   把高频流式更新（mousemove 每帧都可能触发）降级为低优先级，React 调度器一直
+    //   等主线程空闲才 commit。但 mousemove 期间主线程一直在忙（产生新事件），
+    //   React 把所有更新攒到 mouseup 后才 flush → 用户感知"过一会儿才框中"。
+    // 修复：拖拽场景下用户期望即时反馈（60fps 跟手），改为同步 setSelectedItems。
+    //   配合 react-window 虚拟化，单次 commit 实际只更新屏幕内 ~20 张卡，能在一帧内完成。
+    // 注意：onCardCheckboxClick / handleToggleSelection 仍保留 startTransition，
+    //   因为它们是低频离散事件（点一下 checkbox），用 transition 能避开"进入多选"的 167ms 长任务。
+    // === LM CUSTOMIZATION: Perf D-4 END ===
     setSelectedItems(newSet);
   }, []);
 
@@ -928,6 +1075,19 @@ const HybridDeepSearchUI = () => {
   const { isOpen: isDetailsOpen, onClose: onDetailsClose, onOpen: onDetailsOpen } = useDisclosure();
   const { isOpen: __, onClose: ___onWelcomeClose, onOpen: onWelcomeOpen } = useDisclosure();
 
+  // === LM CUSTOMIZATION: SelectionDrawer START ===
+  // v3 TC-A4/A6 修复：Drawer 打开时的关闭白名单守卫。
+  // - Chakra <Drawer closeOnOverlayClick={false}> 已禁用遮罩点击关闭（在 AssetDetailsDrawer 内）
+  // - 这里再补一个全局监听：仅当用户点击带 [data-true-empty-area="true"] 标记的真空白
+  //   元素时才触发 onDetailsClose。其他位置（卡片/复选框/工具栏/搜索框）一律不关。
+  // - 关闭白名单总览：×按钮 / Esc / server-changed / 真空白点击（共 4 条）
+  // 合入英伟达新版时：保留本块；旗标关闭即等价于原版（NVIDIA 原版不会调用本 hook）。
+  useDrawerCloseGuard({
+    enabled: isDetailsOpen,
+    onClose: onDetailsClose,
+  });
+  // === LM CUSTOMIZATION: SelectionDrawer END ===
+
   // 注：toast 已在本组件靠前位置定义（Copy Deploy Fix 块），此处不再重复声明。
 
   // Shared helper: show unauthorized toast (defined after useToast to avoid "before initialization" error)
@@ -968,6 +1128,20 @@ const HybridDeepSearchUI = () => {
 
   // URL serialization functions (memoized to stabilize handleFindSimilar reference)
   const serializedDefaultHybridConfig = useMemo(() => JSON.stringify(DEFAULT_HYBRID_CONFIG), []);
+
+  // === LM CUSTOMIZATION: SearchSettingsCustomBadge START ===
+  // 原因：C 组任务 4.6 — 顶栏齿轮按钮需要"Custom"小圆点提示用户当前有非默认配置；
+  //       但 hybridConfig state 在 HybridDeepSearchUI 内部，顶栏触发器在 index.js 里，
+  //       两者跨组件树。用 CustomEvent 单向广播是最小侵入解法。
+  // 合入英伟达新版时：保留本 useEffect。
+  useEffect(() => {
+    const isCustom = serializedHybridConfig !== serializedDefaultHybridConfig;
+    window.dispatchEvent(
+      new CustomEvent('hybrid-config-customized', { detail: { isCustom } }),
+    );
+  }, [serializedHybridConfig, serializedDefaultHybridConfig]);
+  // === LM CUSTOMIZATION: SearchSettingsCustomBadge END ===
+
   const serializeToURL = useCallback((backendOverride = null) => {
     const params = new URLSearchParams();
     
@@ -1091,8 +1265,23 @@ const HybridDeepSearchUI = () => {
     const scores = urlParams.get('scores');
     if (scores === 'true') setShowScores(true);
     
+    // === LM CUSTOMIZATION: HideListView START ===
+    // 原因：List 视图入口被隐藏后，旧分享链接 ?view=list 或 localStorage 残留 viewMode=list
+    //   仍可能塞回 'list'，导致用户期望"看到 List"但 UI 找不到入口去切回 Grid。
+    //   这里在 URL 反序列化时对 'list' 做静默降级到 'grid'。同时清掉 localStorage 中
+    //   任何残留的 viewMode='list'（防御式：当前代码没主动写过该 key，但用户/浏览器扩展可能已塞过）。
+    // 合入英伟达新版时：如英伟达正式弃用 List 视图，则可以删除本块；否则保留。
     const view = urlParams.get('view');
-    if (view) setViewMode(view);
+    if (view) {
+      setViewMode(view === 'list' ? 'grid' : view);
+    }
+    try {
+      const lsView = window.localStorage?.getItem('viewMode');
+      if (lsView === 'list') {
+        window.localStorage.setItem('viewMode', 'grid');
+      }
+    } catch (_) { /* localStorage 不可用时静默忽略 */ }
+    // === LM CUSTOMIZATION: HideListView END ===
     
     const gridSizeParam = urlParams.get('gridSize');
     if (gridSizeParam) setGridSize(gridSizeParam);
@@ -2100,6 +2289,20 @@ const HybridDeepSearchUI = () => {
     setSimilarSearchAsset(null); // Clear similar search when doing regular search
     setLastSearchQuery(currentQuery); // Store the query being used for this search
     
+    // === LM CUSTOMIZATION: InfinitePagination START ===
+    // 原因：新搜索发起时 abort 旧请求（覆盖验收 TC-D5），同时重置第 1 层 userLimit、清理加载更多状态。
+    // 合入上游新版时：本块仅插在 handleSearch 顶部，与下游 fetch 逻辑不交叉。
+    if (searchAbortRef.current) {
+      try { searchAbortRef.current.abort(); } catch (_) { /* noop */ }
+    }
+    const _abortCtrl = new AbortController();
+    searchAbortRef.current = _abortCtrl;
+    // 第 1 层 userLimit 重置（需求 D-1.3：切搜索词重置 page=1）
+    setUserLimit(parseInt(currentSearchParams.limit) || DEFAULT_SEARCH_PARAMS.limit);
+    setIsLoadingMore(false);
+    setLoadMoreError(null);
+    // === LM CUSTOMIZATION: InfinitePagination END ===
+    
     // Clear active image requests to allow retries on new search
     const { clearActiveRequests } = await import('./utils/imageLoader');
     clearActiveRequests();
@@ -2265,6 +2468,10 @@ const HybridDeepSearchUI = () => {
         method: "POST",
         headers: getHeaders(),
         body: JSON.stringify(requestBody),
+        // === LM CUSTOMIZATION: InfinitePagination START ===
+        // signal: 让本次请求可被后续搜索 abort（需求 D、验收 TC-D5）。
+        signal: _abortCtrl.signal,
+        // === LM CUSTOMIZATION: InfinitePagination END ===
       });
 
       if (response.status === 401) {
@@ -2477,6 +2684,12 @@ const HybridDeepSearchUI = () => {
       }
 
     } catch (error) {
+      // === LM CUSTOMIZATION: InfinitePagination START ===
+      // AbortError 是我们主动 abort 旧请求造成的，不弹 toast / 不记录错误（需求 D、验收 TC-D5）。
+      if (error?.name === 'AbortError') {
+        return; // 静默退出，不走下方 toast
+      }
+      // === LM CUSTOMIZATION: InfinitePagination END ===
       console.error("Search error:", error);
       toast({
         title: t('searchFailed'),
@@ -2485,6 +2698,13 @@ const HybridDeepSearchUI = () => {
         duration: 5000,
       });
     } finally {
+      // === LM CUSTOMIZATION: InfinitePagination START ===
+      // 收尾清理：仅在当前请求仍是本调用发起者时才重置 isLoadingMore，
+      // 避免"后续搜索已接管但旧 finally 最后执行"导致 isLoadingMore 错误关闭。
+      if (searchAbortRef.current === _abortCtrl) {
+        setIsLoadingMore(false);
+      }
+      // === LM CUSTOMIZATION: InfinitePagination END ===
       setIsLoading(false);
     }
   }, [apiUrl, getHeaders, serializeToURL, handleSearchComplete, toast, t, showOnlyWithPreviews]);
@@ -2504,9 +2724,51 @@ const HybridDeepSearchUI = () => {
   }, []);
 
   const handleItemClick = useCallback((item) => {
+    // === LM CUSTOMIZATION: Perf-Drawer-FastSwitch START ===
+    // 修复"连续点击卡片中间几次无反应"：
+    //   v1 实现用 startTransition 包 setSelectedItem，让 click event 立即返回不阻塞。
+    //   但带来副作用：低优先级渲染会被后续 click 打断丢弃，连续点击 4 张卡片只渲染最后一张，
+    //   用户感知就是"前面几次单击没反应"——Playwright 探针实测复现：4 次 click 派发都成功，
+    //   但只有最后 1 次触发 drawer-change DOM 变更。
+    //   v2 改为同步 setSelectedItem，让每次 click 都立即更新 Drawer 顶层（资产名/缩略图）。
+    //   高级面板和 tags 编辑器在 AssetDetailsDrawer 内已用 useDeferredValue 包裹，
+    //   重子树会被 React 调度到低优先级渲染，不阻塞主路径。
+    //   onDetailsOpen 同步保证 isOpen 立即生效。
+    // 合入英伟达新版时：保留本块；useDeferredValue 是 React 18 标准 API。
     setSelectedItem(item);
     onDetailsOpen();
+    // === LM CUSTOMIZATION: Perf-Drawer-FastSwitch END ===
   }, [onDetailsOpen]);
+
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // Group A 任务 5：方案 B 单击交互接入。
+  // 通过 FEATURE_FLAGS.SINGLE_CLICK_DRAWER 双轨：
+  //   - 关闭：保持原版 handleToggleSelection 路径不动，双击打开 Modal（NVIDIA 默认）
+  //   - 开启：单击本体 → 打开抽屉；点复选框/Shift/Ctrl → 走真值表（见 SELECTION-SPEC.md）
+  // hook 内部识别复选框命中通过 [data-role="card-checkbox"]（CardSelectCheckbox 已加）。
+  //
+  // 合入英伟达新版时：保留本块即可；旗标关闭即等价于原版逻辑。
+  const drawerSelect = useDrawerOrSelect({
+    results: visibleResults,
+    getId: (item) => item?.id || item?.source?.base_key || item?.source?.url,
+    selectedIds: selectedItems,
+    setSelectedIds: setSelectedItems,
+    onOpenDrawer: handleItemClick,           // 复用同一入口：set selectedItem + onDetailsOpen
+    onOpenLegacyModal: handleItemClick,       // 旗标关闭时双击退化也走同一函数
+    enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
+  });
+
+  // 包装：onSelectionChange 在新交互下完全由 hook 接管，
+  // 在旧交互下退回原 handleToggleSelection。
+  const handleSelectionInteractionV2 = useCallback((item, event /* , index */) => {
+    if (FEATURE_FLAGS.SINGLE_CLICK_DRAWER) {
+      drawerSelect.handleClick(event, item);
+    } else {
+      handleToggleSelection(item, event /* , index */);
+    }
+  }, [drawerSelect, handleToggleSelection]);
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   // Feedback popup handlers (only if feature is enabled)
   const handleFeedbackLater = useCallback(() => {
@@ -3157,7 +3419,12 @@ const HybridDeepSearchUI = () => {
           </GridItem>
 
           {/* Right Content - Results */}
-          <GridItem overflow="hidden" display="flex" flexDirection="column" h="100%">
+          {/* === LM CUSTOMIZATION: SelectionDrawer === v3 TC-A4 修复：
+               结果区 GridItem 整体打 data-true-empty-area="true"。
+               配合 useDrawerCloseGuard：用户点这个 GridItem 内的"真空白"区域（即卡片以外、
+               工具栏以外、SelectionModeBar 以外的页面背景）才会关闭抽屉；
+               点卡片本身/复选框/工具栏均被 KEEP_OPEN_SELECTOR 短路，不会关抽屉。 */}
+          <GridItem overflow="hidden" display="flex" flexDirection="column" h="100%" data-true-empty-area="true">
             {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar 同层 crossfade 互斥显示 === */}
             {/* 关键：两者渲染在同一 relative 容器内，双层 absolute + opacity 切换；
                  容器高度由 FabToolbar 撑起（SelectionModeBar 设为 absolute 脱离流，
@@ -3165,11 +3432,17 @@ const HybridDeepSearchUI = () => {
                  SelectionModeBar 内部垂直居中对齐，视觉上仍是一整条 bar。 */}
             <Box position="relative" mb="8px">
               {/* Layer 1: FabToolbar —— 撑起容器高度，多选时透明但不脱流
-                   退出层：160ms（比进入层稍慢），让新内容先到位，旧内容随后淡出 */}
+                   v2 修复"切换不丝滑"：缩短退出至 120ms 让 FabToolbar 更快让位，
+                   delay 0ms（立刻开始），避免与 SelectionModeBar 进入层重叠超过 60ms；
+                   transform translateZ 提升合成层但不做位移，纯 opacity 切换。 */}
               <Box
                 opacity={isMultiSelectMode ? 0 : 1}
                 pointerEvents={isMultiSelectMode ? 'none' : 'auto'}
-                transition="opacity 0.16s cubic-bezier(0.4, 0, 0.2, 1)"
+                transition={
+                  isMultiSelectMode
+                    ? "opacity 0.12s cubic-bezier(0.4, 0, 1, 1)"  // 退出：稍快、ease-in
+                    : "opacity 0.18s cubic-bezier(0.0, 0, 0.2, 1) 0.04s"  // 进入：稍慢、ease-out + 40ms delay 等 SelectionBar 退出
+                }
                 willChange="opacity"
                 transform="translateZ(0)"
                 aria-hidden={isMultiSelectMode}
@@ -3241,9 +3514,11 @@ const HybridDeepSearchUI = () => {
                 />
               </Box>
               {/* Layer 2: SelectionModeBar —— 绝对定位覆盖在 FabToolbar 上方，
-                   高度由内部撑开，top:0/bottom:0 让其垂直居中于容器
-                   进入层：120ms + 更陡曲线，让用户尽快看到"已选中 X 个"结果
-                   退出时：opacity + 轻微 Y(-2px) 位移，给眼睛一个"消散感"，更高级 */}
+                   v2 修复"切换不丝滑"：
+                     - 进入：50ms delay 让 FabToolbar 先消失大半，避免双 bar 叠影
+                     - 进入 transform 从 translate3d(0,-6px,0)（更明显的"飞入"方向感）
+                     - 进入 ease-out 曲线 + 200ms duration（既快又有质感）
+                     - 退出：100ms 快速淡出 + 向上 -4px 收回，给"消散感" */}
               <Box
                 position="absolute"
                 top={0}
@@ -3251,9 +3526,13 @@ const HybridDeepSearchUI = () => {
                 right={0}
                 bottom={0}
                 opacity={isMultiSelectMode ? 1 : 0}
-                transform={isMultiSelectMode ? 'translate3d(0,0,0)' : 'translate3d(0,-2px,0)'}
+                transform={isMultiSelectMode ? 'translate3d(0,0,0)' : 'translate3d(0,-6px,0)'}
                 pointerEvents={isMultiSelectMode ? 'auto' : 'none'}
-                transition="opacity 0.18s cubic-bezier(0.2, 0, 0.2, 1), transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)"
+                transition={
+                  isMultiSelectMode
+                    ? "opacity 0.20s cubic-bezier(0.0, 0, 0.2, 1) 0.05s, transform 0.24s cubic-bezier(0.22, 1, 0.36, 1) 0.05s"
+                    : "opacity 0.10s cubic-bezier(0.4, 0, 1, 1), transform 0.14s cubic-bezier(0.4, 0, 1, 1)"
+                }
                 willChange="opacity, transform"
                 display="flex"
                 alignItems="center"
@@ -3281,6 +3560,21 @@ const HybridDeepSearchUI = () => {
               </Box>
             </Box>
             {/* === LM CUSTOMIZATION: FabToolbar / SelectionModeBar crossfade END === */}
+            {/* === LM CUSTOMIZATION: Search Settings Popover START ===
+                 原因：C 组任务 3 — 从顶栏齿轮按钮触发的搜索设置面板。
+                 本身不占布局空间（fixed 定位 + isOpen 受控）；
+                 监听 CustomEvent('open-search-settings') 开启，与 FabToolbar 的视图设置 Popover 互斥。
+                 合入英伟达新版时：本区块整体保留。 */}
+            <SearchSettingsPopover
+              hybridConfig={hybridConfig}
+              onHybridConfigChange={setHybridConfig}
+              searchParams={searchParams}
+              setSearchParams={setSearchParams}
+              onTriggerSearch={triggerSearchFromToolbar}
+              defaultHybridConfig={DEFAULT_HYBRID_CONFIG}
+              defaultSearchParams={DEFAULT_SEARCH_PARAMS}
+            />
+            {/* === LM CUSTOMIZATION: Search Settings Popover END === */}
             <MemoizedResults
               results={visibleResults}
               showOnlyWithPreviews={false}
@@ -3295,7 +3589,12 @@ const HybridDeepSearchUI = () => {
               getHeaders={getHeaders}
               apiUrl={apiUrl}
               selectedItems={selectedItems}
-              onSelectionChange={handleToggleSelection}
+              onSelectionChange={
+                // === LM CUSTOMIZATION: SelectionInteraction START ===
+                // 旗标开启 → 走方案 B 真值表 hook；关闭 → 原 handleToggleSelection
+                handleSelectionInteractionV2
+                // === LM CUSTOMIZATION: SelectionInteraction END ===
+              }
               onBatchSelection={setBatchSelection}
               onCopySelectedUrls={copySelectedUrls}
               isMultiSelectMode={isMultiSelectMode}
@@ -3303,6 +3602,19 @@ const HybridDeepSearchUI = () => {
               onRetryFailed={handleRetryFailedFromCard}
               onEmptyAreaClick={clearSelection}
               titleBarProps={titleBarProps}
+              hasMore={hasMore}
+              isLoadingMore={isLoadingMore}
+              loadMoreError={loadMoreError}
+              isResultShortage={isResultShortage}
+              onAutoLoadMore={handleAutoLoadMore}
+              onTriggerBackendLoadMore={handleTriggerBackendLoadMore}
+              onRetryLoadMore={handleRetryLoadMore}
+              // [PERF v3] 移除 onDragStateChange 上抛：isDragging body 样式已合入 useDragSelect
+              // === LM CUSTOMIZATION: CardTagBar START ===
+              // CardTagBar 需要 nucleus host（已经过 resolveNucleusHost 解析）
+              // 合入英伟达新版时：本 prop 透传与 NVIDIA 不交叉，保留。
+              serverUrl={nucleusServerUrl}
+              // === LM CUSTOMIZATION: CardTagBar END ===
             />
           </GridItem>
         </Grid>
@@ -3310,22 +3622,71 @@ const HybridDeepSearchUI = () => {
       </VStack>
 
       {/* Asset Details Modal */}
-      {selectedItem && (
-        <AssetDetailsModal
+      {/* === LM CUSTOMIZATION: SelectionInteraction START === */}
+      {/* Group A 任务 5：旗标双轨渲染。
+            - SINGLE_CLICK_DRAWER=true（默认）：右侧详情抽屉 AssetDetailsDrawer（任务 4 骨架）。
+            - SINGLE_CLICK_DRAWER=false：完整退回 NVIDIA 原版 AssetDetailsModal。
+          抽屉与 Modal 共用同一 (selectedItem, isDetailsOpen, onDetailsClose)，
+          便于一键回滚（仅修改 config.jsx 的旗标）。
+          任务 8 性能调优：Drawer 路径常驻挂载（asset 切换复用同一实例，避免每次开关 unmount/remount），
+            Modal 路径保留 selectedItem 守卫（原版行为不变）。
+          合入英伟达新版时：保留本块；旗标关闭即等价于原版。 */}
+      {FEATURE_FLAGS.SINGLE_CLICK_DRAWER ? (
+        <AssetDetailsDrawer
+          /* TC-A4 修复：isOpen 不再依赖 !!selectedItem，让切换卡片时
+             Drawer 持续保持打开（asset 内部用 displayAsset 缓存避免空态闪现）。 */
           isOpen={isDetailsOpen}
+          asset={selectedItem}
           onClose={onDetailsClose}
-          selectedItem={selectedItem}
-          copyToClipboard={copyToClipboard}
-          showScores={showScores}
-          plugins={plugins}
           getHeaders={getHeaders}
           apiUrl={apiUrl}
           serverUrl={nucleusServerUrl}
-          triggerReindexAllPlugins={triggerReindexAllPlugins}
-          triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
-          onTagsChanged={handleTagsChanged}
+          copyToClipboard={copyToClipboard}
+          // === LM CUSTOMIZATION: AdvancedPanel START ===
+          // Group B 任务 7：高级面板填充原 HYBRID/匹配字段信息
+          // detail-modal-revamp：扩充为完整高级面板组合（依赖 / 反向依赖 / USD / 索引管理 / 条件性面板 / Hybrid 匹配信息）
+          advancedPanelContent={
+            selectedItem ? (
+              <DrawerAdvancedPanelContainer
+                asset={selectedItem}
+                plugins={plugins}
+                getHeaders={getHeaders}
+                triggerReindexAllPlugins={triggerReindexAllPlugins}
+                triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
+                isAuthorized={true}
+              />
+            ) : null
+          }
+          // === LM CUSTOMIZATION: AdvancedPanel END ===
+          // === LM CUSTOMIZATION: AssetTagEditor START ===
+          // Group B 任务 8：抽屉内完整 tag 编辑器
+          tagsAreaContent={
+            selectedItem
+              ? <AssetTagEditor asset={selectedItem} serverUrl={nucleusServerUrl} getHeaders={getHeaders} apiUrl={apiUrl} />
+              : null
+          }
+          // === LM CUSTOMIZATION: AssetTagEditor END ===
+          // actionButtons 留给 B 组后续任务注入。
         />
+      ) : (
+        selectedItem && (
+          <AssetDetailsModal
+            isOpen={isDetailsOpen}
+            onClose={onDetailsClose}
+            selectedItem={selectedItem}
+            copyToClipboard={copyToClipboard}
+            showScores={showScores}
+            plugins={plugins}
+            getHeaders={getHeaders}
+            apiUrl={apiUrl}
+            serverUrl={nucleusServerUrl}
+            triggerReindexAllPlugins={triggerReindexAllPlugins}
+            triggerReindexIndividualPlugin={triggerReindexIndividualPlugin}
+            onTagsChanged={handleTagsChanged}
+          />
+        )
       )}
+      {/* === LM CUSTOMIZATION: SelectionInteraction END === */}
 
       {/* V2: 批量打标签弹框 */}
       <BatchTagModal

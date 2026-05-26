@@ -58,9 +58,20 @@ import { SEARCH_DEFAULTS, FEATURE_FLAGS } from "./config";
 import CardSelectCheckbox from "./components/shared/CardSelectCheckbox";
 import EmptySearchHint from "./components/EmptySearchHint";
 import { useDragSelect } from "./hooks/useDragSelect";
-import { useClickOrDoubleClick } from "./hooks/useClickOrDoubleClick";
+// === LM CUSTOMIZATION: ClickHandlerUnify START ===
+// 卡片点击事件统一入口：SINGLE_CLICK_DRAWER 模式下走轻量直通路径，避免与
+// useDragSelect 双重消费 mousemove。详见 hooks/useDrawerCardHandlers.js 头部注释。
+// 合入英伟达新版时：保留 import；本 hook 由 LM 自有维护，无 NVIDIA 上游版本。
+import { useDrawerCardHandlers } from "./hooks/useDrawerCardHandlers";
+// === LM CUSTOMIZATION: ClickHandlerUnify END ===
 import TaggedBadge from "./components/TaggedBadge";
 import FailedBadge from "./components/FailedBadge";
+// === LM CUSTOMIZATION: CardTagBar START ===
+// 原因：Group B 需求 1+2 兑底接入。HybridSearchResults 是非虚拟化 fallback（结果数 ≤ 50 时使用），
+// 与 VirtualizedHybridSearchResults 保持一致体验。
+// 合入英伟达新版时：保留本 import。
+import CardTagBar from "./components/CardTagBar";
+// === LM CUSTOMIZATION: CardTagBar END ===
 
 const HighlightedText = ({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
   const truncateProps = {};
@@ -336,6 +347,9 @@ const HybridSearchResultGridItem = memo(({
   isMultiSelectMode = false,
   failedReason = null,
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
   
@@ -344,20 +358,34 @@ const HybridSearchResultGridItem = memo(({
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // v3 TC-A9 修复：原 v2 改 List 视图（下方）时漏改 Grid 视图的 cardTooltip。
+  // 方案 B 单击本体 = 打开 Drawer，原"单击选中·双击查看详情"提示已不准确，
+  // SINGLE_CLICK_DRAWER=true 时一律不显示 tooltip（避免 hover 干扰）。
+  // 合入英伟达新版时：保留本块；旗标关闭时退回原 NEW_CARD_INTERACTION 提示。
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? (isMultiSelectMode ? t('clickOrDoubleClickHint') : t('clickOrDoubleClickHint'))
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
     ? "rgba(255, 210, 48, 0.15)"
     : "rgba(255, 255, 255, 0.05)";
 
-  // 单击 = 切换选中；双击 = 打开详情（B 方案 + 220ms 双击窗口，避免多选态闪入闪出）
-  const clickHandlers = useClickOrDoubleClick({
-    onClick: (e) => onSelectionChange?.(result, e, index),
-    onDoubleClick: () => onItemClick?.(result),
+  // === LM CUSTOMIZATION: ClickHandlerUnify START ===
+  // 卡片点击事件统一入口（替换原 useClickOrDoubleClick 直接挂载）。
+  // SINGLE_CLICK_DRAWER=true：走轻量直通，不监听 mousemove，让 useDragSelect 独占，避免 click 误吞。
+  // SINGLE_CLICK_DRAWER=false：内部 fallback 到 useClickOrDoubleClick 原行为。
+  // 合入英伟达新版时：保留本块。
+  const clickHandlers = useDrawerCardHandlers({
+    result,
+    index,
+    onSelectionChange,
+    onItemClick,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
   });
+  // === LM CUSTOMIZATION: ClickHandlerUnify END ===
 
   // [TagSearchFix P3] 识别"是否因 tag 命中而被搜出"，并提取命中的 tag 文本，
   // 用于在 category badge 上优先展示并加主题色描边——让用户秒懂"打过这个 tag 才搜到"。
@@ -591,10 +619,31 @@ const HybridSearchResultGridItem = memo(({
               </HStack>
             )}
 
-            {/* Query Match Badges */}
+            {/* === LM CUSTOMIZATION: CardTagBar START === */}
+            {/* 原 QueryMatchBadges 被业务 tag 区取代；保留原代码以便将来开关。 */}
+            {/*
             {gridSize !== "S" && (
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
             )}
+            */}
+            {gridSize !== "S" ? (
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                maxVisible={3}
+              />
+            ) : (
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                compact
+              />
+            )}
+            {/* === LM CUSTOMIZATION: CardTagBar END === */}
 
             {/* Metadata */}
             <VStack spacing={1} align={gridSize === "S" ? "end" : "stretch"} fontSize="2xs" color="gray.300" flex={1}>
@@ -729,6 +778,9 @@ const HybridSearchResultItem = memo(({
   isMultiSelectMode = false,
   failedReason = null,
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
   const { isOpen, onToggle } = useDisclosure();
@@ -743,9 +795,14 @@ const HybridSearchResultItem = memo(({
   const filename = baseKey?.split('/').pop() || 'Unknown';
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // Tooltip text based on mode
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示已不准确
+  // 合入英伟达新版时：保留
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? t('clickOrDoubleClickHint')
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
     ? "rgba(255, 210, 48, 0.15)"
@@ -760,12 +817,18 @@ const HybridSearchResultItem = memo(({
     );
   }, [result.metadata?.explanations]);
 
-  // 单击 = 切换选中；双击 = 打开详情（与 Grid 卡片一致）
-  const clickHandlers = useClickOrDoubleClick({
-    onClick: (e) => onSelectionChange?.(result, e, index),
-    onDoubleClick: () => onItemClick?.(result),
+  // === LM CUSTOMIZATION: ClickHandlerUnify START ===
+  // 卡片点击事件统一入口（List 视图，与 Grid 一致）。
+  // 合入英伟达新版时：保留本块。
+  const clickHandlers = useDrawerCardHandlers({
+    result,
+    index,
+    onSelectionChange,
+    onItemClick,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
   });
+  // === LM CUSTOMIZATION: ClickHandlerUnify END ===
 
   return (
     <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>
@@ -909,14 +972,23 @@ const HybridSearchResultItem = memo(({
                 </HStack>
               </HStack>
 
-              {/* Query Match Badges */}
+              {/* === LM CUSTOMIZATION: CardTagBar START === */}
+              {/* 原 QueryMatchBadges + SmartHighlightedContent 被业务 tag 区取代。 */}
+              {/*
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
-
-              {/* Smart Highlighted Content */}
               <SmartHighlightedContent 
                 result={result} 
                 searchQuery={searchQuery}
               />
+              */}
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                maxVisible={5}
+              />
+              {/* === LM CUSTOMIZATION: CardTagBar END === */}
 
               {/* Metadata */}
               {result.source && (
@@ -992,6 +1064,9 @@ const HybridSearchResults = ({
   // V2 U1: 批量失败持久化到卡片
   failedBatchItems = null, // Map<assetUrl, { reason, timestamp }>
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  serverUrl = "",
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
 
@@ -1054,14 +1129,32 @@ const HybridSearchResults = ({
       {/* === v5: TitleBar + 结果计数已移入 FabToolbar 合并行，此处不再独立渲染 === */}
 
       {/* Results Display - scrollable content area */}
+      {/* === LM CUSTOMIZATION: ScrollContainerOverflow START === */}
+      {/* 原因（2026-05-25 用户反馈"右侧出现两条滚动条 + 上下滑动时界面往左抖一下"）：
+          只写 overflowY="auto" 时，CSS 规范规定另一个轴的 visible 计算值会被强制为 auto
+          （overflow-x/overflow-y 的 visible/clip 会成对自动转 auto）。
+          一旦内部元素瞬时溢出 1px（图片解码完撑大、卡片标签栏 hover 阴影、
+          react-window inner 容器与卡片绝对定位的细微 round-off），横向滚动条短暂出现，
+          占用 ~6px 高度 → 内容可视高度变化 → 触发 ResizeObserver 重排 → 视觉抖动 + 残影双滚动条。
+          解决：显式 overflowX="hidden" 锁死横向，仅保留垂直滚动。
+
+          [补丁 2026-05-25] 用户实测仍偶发抖动。Playwright 复现确认根因之二：
+          垂直滚动条本身的占位会因内容高度变化而出现/消失（默认 scrollbar-gutter=auto），
+          内容从溢出变为不溢出时 clientWidth 从 294 跳到 300，再溢出又变回 294 —
+          抖动 6px。修复：scrollbarGutter="stable" 强制为滚动条保留固定占位，
+          无论内容是否溢出，宽度始终一致。
+          合入英伟达新版时：保留本块；如上游改造此 Box，将本块两个属性合并进去。 */}
       <Box
         flex={1}
         minH={0}
+        overflowX="hidden"
         overflowY="auto"
+        sx={{ scrollbarGutter: 'stable' }}
         position="relative"
         ref={scrollContainerRef}
         style={{ userSelect: isDragging ? 'none' : 'auto' }}
       >
+      {/* === LM CUSTOMIZATION: ScrollContainerOverflow END === */}
         {viewMode === "grid" ? (
           <Grid 
             templateColumns={`repeat(auto-fill, minmax(${gridSize === "S" ? "140px" : "280px"}, 1fr))`}
@@ -1091,6 +1184,9 @@ const HybridSearchResults = ({
                   isMultiSelectMode={isMultiSelectMode}
                   failedReason={failedEntry?.reason || null}
                   onRetryFailed={onRetryFailed}
+                  /* === LM CUSTOMIZATION: CardTagBar START === */
+                  serverUrl={serverUrl}
+                  /* === LM CUSTOMIZATION: CardTagBar END === */
                 />
               </GridItem>
               );
@@ -1122,6 +1218,9 @@ const HybridSearchResults = ({
                   isMultiSelectMode={isMultiSelectMode}
                   failedReason={failedEntry?.reason || null}
                   onRetryFailed={onRetryFailed}
+                  /* === LM CUSTOMIZATION: CardTagBar START === */
+                  serverUrl={serverUrl}
+                  /* === LM CUSTOMIZATION: CardTagBar END === */
                 />
               </Box>
               );
@@ -1129,22 +1228,43 @@ const HybridSearchResults = ({
           </VStack>
         )}
       </Box>
-      {/* Drag selection rectangle overlay */}
-      {isDragging && selectionRect && (
-        <Box
-          position="fixed"
-          left={`${selectionRect.x}px`}
-          top={`${selectionRect.y}px`}
-          width={`${selectionRect.width}px`}
-          height={`${selectionRect.height}px`}
-          bg="rgba(255, 210, 48, 0.10)"
-          border="1.5px solid rgba(255, 210, 48, 0.6)"
-          borderRadius="4px"
-          pointerEvents="none"
-          zIndex={9999}
-          boxShadow="0 0 0 1px rgba(0,0,0,0.2)"
-        />
-      )}
+      {/* === LM CUSTOMIZATION: DragSelectMarquee START === */}
+      {/* Drag selection rectangle overlay
+          v3 修复"拖拽时仍卡顿"：left/top 改用 transform GPU 合成 + contain:strict 隔离 layout，
+          与 VirtualizedHybridSearchResults 同步。 */}
+      <Box
+        position="fixed"
+        left="0"
+        top="0"
+        width={`${selectionRect?.width ?? 0}px`}
+        height={`${selectionRect?.height ?? 0}px`}
+        bg="rgba(255, 210, 48, 0.10)"
+        border="1.5px solid rgba(255, 210, 48, 0.6)"
+        borderRadius="4px"
+        boxShadow={
+          isDragging
+            ? "0 0 0 1px rgba(0,0,0,0.2), 0 4px 16px rgba(255, 210, 48, 0.06)"
+            : "0 0 0 1px rgba(0,0,0,0.2)"
+        }
+        opacity={isDragging && selectionRect ? 1 : 0}
+        transform={
+          isDragging && selectionRect
+            ? `translate3d(${selectionRect.x}px, ${selectionRect.y}px, 0) scale(1)`
+            : `translate3d(${selectionRect?.x ?? 0}px, ${selectionRect?.y ?? 0}px, 0) scale(0.98)`
+        }
+        transformOrigin="top left"
+        transition={
+          isDragging && selectionRect
+            ? "opacity 0.08s cubic-bezier(0.0, 0, 0.2, 1)"
+            : "opacity 0.12s cubic-bezier(0.4, 0, 1, 1), transform 0.12s cubic-bezier(0.4, 0, 1, 1)"
+        }
+        willChange="opacity, transform, width, height"
+        sx={{ contain: 'strict' }}
+        pointerEvents="none"
+        zIndex={9999}
+        aria-hidden="true"
+      />
+      {/* === LM CUSTOMIZATION: DragSelectMarquee END === */}
     </VStack>
   );
 };

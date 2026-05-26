@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import React, { useMemo, useCallback, memo, useRef } from "react";
+import React, { useMemo, useCallback, useEffect, memo, useRef } from "react";
 import {
   Box,
   VStack,
@@ -39,6 +39,7 @@ import {
   GridItem,
   useDisclosure,
   CircularProgress,
+  Spinner,
 } from "@chakra-ui/react";
 import {
   ChevronDownIcon,
@@ -57,9 +58,19 @@ import { useTranslation } from "../i18n/LanguageContext";
 import CardSelectCheckbox from "./shared/CardSelectCheckbox";
 import EmptySearchHint from "./EmptySearchHint";
 import { useDragSelect } from "../hooks/useDragSelect";
-import { useClickOrDoubleClick } from "../hooks/useClickOrDoubleClick";
+// === LM CUSTOMIZATION: ClickHandlerUnify START ===
+// 卡片点击事件统一入口：SINGLE_CLICK_DRAWER 模式下走轻量直通路径，避免与
+// useDragSelect 双重消费 mousemove。详见 hooks/useDrawerCardHandlers.js 头部注释。
+// 合入英伟达新版时：保留 import；本 hook 由 LM 自有维护，无 NVIDIA 上游版本。
+import { useDrawerCardHandlers } from "../hooks/useDrawerCardHandlers";
+// === LM CUSTOMIZATION: ClickHandlerUnify END ===
 import TaggedBadge from "./TaggedBadge";
 import FailedBadge from "./FailedBadge";
+// === LM CUSTOMIZATION: CardTagBar START ===
+// 原因：Group B 需求 1+2 — 卡片底部以业务 tag 区取代原 匹配字段标签。
+// 合入英伟达新版时：保留本 import；CardTagBar 是 LM 新建组件，与 NVIDIA 原代码路径不交叉。
+import CardTagBar from "./CardTagBar";
+// === LM CUSTOMIZATION: CardTagBar END ===
 
 // Memoized components for better performance
 const HighlightedText = memo(({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
@@ -295,6 +306,11 @@ const VirtualizedResultGridItem = memo(({
   isMultiSelectMode = false,
   failedReason = null,
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  // serverUrl 供 CardTagBar 调 useGlobalTags / useTagManager 使用。
+  // 合入英伟达新版时：保留本 prop。
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
   const baseKey = result.source?.base_key || result.source?.url || result.id;
@@ -327,12 +343,21 @@ const VirtualizedResultGridItem = memo(({
     onFindSimilar?.(baseKey);
   }, [onFindSimilar, baseKey]);
 
-  // NEW CARD INTERACTION: 单击=选中 / 双击=详情（B 方案 + 220ms 双击窗口）
-  const clickHandlers = useClickOrDoubleClick({
-    onClick: (e) => onSelectionChange?.(result, e, index),
-    onDoubleClick: () => onItemClick?.(result),
+  // === LM CUSTOMIZATION: ClickHandlerUnify START ===
+  // 卡片点击事件统一入口（替换原 useClickOrDoubleClick 直接挂载）。
+  // SINGLE_CLICK_DRAWER=true：走轻量直通，仅记 mousedown 起点；不监听 mousemove，让
+  //   useDragSelect 独占 mousemove，避免与其 innerPending 形成双重消费导致 click 误吞。
+  // SINGLE_CLICK_DRAWER=false：内部 fallback 到 useClickOrDoubleClick 原行为。
+  // 合入英伟达新版时：保留本块。
+  const clickHandlers = useDrawerCardHandlers({
+    result,
+    index,
+    onSelectionChange,
+    onItemClick,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
   });
+  // === LM CUSTOMIZATION: ClickHandlerUnify END ===
   // 兼容旧逻辑：非新交互时仍走原 onClick 路径
   const handleCardClick = useCallback((e) => {
     if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
@@ -341,9 +366,14 @@ const VirtualizedResultGridItem = memo(({
   }, [onSelectionChange, result, index]);
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示“单击选中·双击查看详情”已不准确。
+  // SINGLE_CLICK_DRAWER 开启时不显示 tooltip（避免干扰 hover）。
+  // 合入英伟达新版时：保留
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? t('clickOrDoubleClickHint')
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   // Border color: subtle hint in multi-select mode for unselected cards
   const defaultBorderColor = isMultiSelectMode && !isSelected
@@ -352,7 +382,16 @@ const VirtualizedResultGridItem = memo(({
 
   return (
     <Tooltip label={cardTooltip} openDelay={600} placement="top" isDisabled={!cardTooltip} hasArrow>
+    {/* === LM CUSTOMIZATION: SelectionInteraction START === */}
+    {/* v3.2 修复：补 data-card-index 属性。
+        useDrawerCloseGuard 的 KEEP_OPEN 名单 + useDragSelect 的命中查询都依赖这个属性。
+        缺失会导致：
+          1) 双击打开抽屉后，第二次 mouseup 落在卡片上但因无 data-card-index 被 guard 判为
+             "落在真空白" → 立即触发 onClose → 抽屉秒关（用户反馈 "双击会先弹一下又收回去"）。
+          2) 拖拽框选无法识别卡片 → 框选体验异常。
+        合入英伟达新版时：data-card-index 是无害扩展属性，可保留。 */}
     <Card 
+      data-card-index={index}
       bg={isSelected ? "#2a2b1e" : "rgba(255, 255, 255, 0.05)"} 
       borderColor={isSelected ? "#FFD230" : defaultBorderColor} 
       borderWidth="1px"
@@ -368,12 +407,16 @@ const VirtualizedResultGridItem = memo(({
       onClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onClick : handleCardClick}
       onDoubleClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onDoubleClick : undefined}
       onMouseDown={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseDown : undefined}
+      // === LM CUSTOMIZATION: ModifierClickEmulation START ===
+      onMouseUp={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseUp : undefined}
+      // === LM CUSTOMIZATION: ModifierClickEmulation END ===
       onMouseMove={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseMove : undefined}
       h="100%"
       borderRadius="12px"
       overflow="hidden"
       position="relative"
     >
+    {/* === LM CUSTOMIZATION: SelectionInteraction END === */}
       {/* V2 Q1-A: 命中角标（已去除：与 checkbox 打勾视觉冲突） */}
       {/* {isTagHit && <TaggedBadge size={gridSize === 'S' ? 'sm' : 'md'} />} */}
       {/* V2 U1: 失败角标 */}
@@ -521,9 +564,33 @@ const VirtualizedResultGridItem = memo(({
               </HStack>
             )}
 
+            {/* === LM CUSTOMIZATION: CardTagBar START === */}
+            {/* 原 QueryMatchBadges（HYBRID/匹配字段标签）被业务 tag 区取代。
+                保留原代码注释，以便将来回滚或接“管理者高级模式”开关。
+                合入英伟达新版时：本块是 LM 业务代码，保留。 */}
+            {/*
             {gridSize !== "S" && (
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
             )}
+            */}
+            {gridSize !== "S" ? (
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                maxVisible={3}
+              />
+            ) : (
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                compact
+              />
+            )}
+            {/* === LM CUSTOMIZATION: CardTagBar END === */}
 
             <VStack spacing={1} align={gridSize === "S" ? "end" : "stretch"} fontSize="2xs" color="gray.300" flex={1}>
               {result.source?.size && (
@@ -637,6 +704,9 @@ const VirtualizedResultListItem = memo(({
   isMultiSelectMode = false,
   failedReason = null,
   onRetryFailed,
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  serverUrl,
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
   const { isOpen, onToggle } = useDisclosure();
@@ -680,12 +750,21 @@ const VirtualizedResultListItem = memo(({
     onToggle();
   }, [onToggle]);
 
-  // NEW CARD INTERACTION: 单击=选中 / 双击=详情（B 方案 + 220ms 双击窗口）
-  const clickHandlers = useClickOrDoubleClick({
-    onClick: (e) => onSelectionChange?.(result, e, index),
-    onDoubleClick: () => onItemClick?.(result),
+  // === LM CUSTOMIZATION: ClickHandlerUnify START ===
+  // 卡片点击事件统一入口（替换原 useClickOrDoubleClick 直接挂载）。
+  // SINGLE_CLICK_DRAWER=true：走轻量直通，仅记 mousedown 起点；不监听 mousemove，让
+  //   useDragSelect 独占 mousemove，避免与其 innerPending 形成双重消费导致 click 误吞。
+  // SINGLE_CLICK_DRAWER=false：内部 fallback 到 useClickOrDoubleClick 原行为。
+  // 合入英伟达新版时：保留本块。
+  const clickHandlers = useDrawerCardHandlers({
+    result,
+    index,
+    onSelectionChange,
+    onItemClick,
     enabled: FEATURE_FLAGS.NEW_CARD_INTERACTION,
+    drawerEnabled: FEATURE_FLAGS.SINGLE_CLICK_DRAWER,
   });
+  // === LM CUSTOMIZATION: ClickHandlerUnify END ===
   const handleCardClick = useCallback((e) => {
     if (!FEATURE_FLAGS.NEW_CARD_INTERACTION) {
       onSelectionChange?.(result, e, index);
@@ -693,9 +772,14 @@ const VirtualizedResultListItem = memo(({
   }, [onSelectionChange, result, index]);
 
   // Tooltip text based on mode
-  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示“单击选中·双击查看详情”已不准确。
+  // SINGLE_CLICK_DRAWER 开启时不显示 tooltip（避免干扰 hover）。
+  // 合入英伟达新版时：保留
+  const cardTooltip = FEATURE_FLAGS.NEW_CARD_INTERACTION && !FEATURE_FLAGS.SINGLE_CLICK_DRAWER
     ? t('clickOrDoubleClickHint')
     : '';
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
 
   const defaultBorderColor = isMultiSelectMode && !isSelected
     ? "rgba(255, 210, 48, 0.15)"
@@ -719,6 +803,9 @@ const VirtualizedResultListItem = memo(({
       onClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onClick : handleCardClick}
       onDoubleClick={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onDoubleClick : undefined}
       onMouseDown={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseDown : undefined}
+      // === LM CUSTOMIZATION: ModifierClickEmulation START ===
+      onMouseUp={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseUp : undefined}
+      // === LM CUSTOMIZATION: ModifierClickEmulation END ===
       onMouseMove={FEATURE_FLAGS.NEW_CARD_INTERACTION ? clickHandlers.onMouseMove : undefined}
       borderRadius="12px"
       position="relative"
@@ -835,8 +922,21 @@ const VirtualizedResultListItem = memo(({
                 </HStack>
               </HStack>
 
+              {/* === LM CUSTOMIZATION: CardTagBar START === */}
+              {/* 原 QueryMatchBadges + SmartHighlightedContent（HYBRID/匹配字段标签）
+                  被业务 tag 区取代，原代码注释保留。 */}
+              {/*
               <QueryMatchBadges explanations={result.metadata?.explanations} showScores={showScores} />
               <SmartHighlightedContent result={result} searchQuery={searchQuery} />
+              */}
+              <CardTagBar
+                asset={result}
+                serverUrl={serverUrl}
+                getHeaders={getHeaders}
+                apiUrl={apiUrl}
+                maxVisible={5}
+              />
+              {/* === LM CUSTOMIZATION: CardTagBar END === */}
 
               {result.source && (
                 <VStack spacing={1} align="stretch" fontSize="sm" color="gray.300">
@@ -907,6 +1007,25 @@ const VirtualizedHybridSearchResults = ({
   onRetryFailed,
   // 空白处单击（无拖拽）触发：通常用于退出多选；由父级传入 clearSelection
   onEmptyAreaClick,
+  // === LM CUSTOMIZATION: InfiniteScroll START ===
+  // 原因：实现需求 D-1 双层无限滚动 — IntersectionObserver 滚到底自动调
+  // onAutoLoadMore （增 userLimit 客户端切片、无网络请求）；当客户端耗尽
+  // 且 isResultShortage 为真时，显示 ghost 小按钮供用户点击触发后端二次搜索。
+  // 合入上游新版时：本块仅是 props 追加与参数透传，与 NVIDIA 原代码路径不交叉，
+  // 合并冲突概率低。若冲突保留本块、手工补入 NVIDIA 新增的其它 props 即可。
+  hasMore = false,                  // 是否还有更多可加载（客户端 OR 后端任一付答）
+  isLoadingMore = false,            // 后端二次搜索进行中
+  loadMoreError = null,             // 加载错误（字符串或 Error）
+  isResultShortage = false,         // 客户端 filtered 不够 userLimit（起后端二次搜索按钮）
+  onAutoLoadMore,                   // 第 1 层：增 userLimit、客户端切片，无网络请求
+  onTriggerBackendLoadMore,         // 第 2 层：触发更大 limit 的后端二次搜索
+  onRetryLoadMore,                  // 加载出错后的重试回调
+  // [PERF v3] 移除 onDragStateChange prop：isDragging body 样式已在 useDragSelect 内部 applyDragBodyStyles 合并处理
+  // === LM CUSTOMIZATION: InfiniteScroll END ===
+  // === LM CUSTOMIZATION: CardTagBar START ===
+  // serverUrl 从父级 HybridDeepSearchUI 透传，由下游透传到 GridItem/ListItem 给 CardTagBar 使用。
+  serverUrl = "",
+  // === LM CUSTOMIZATION: CardTagBar END ===
 }) => {
   const { t } = useTranslation();
 
@@ -939,6 +1058,62 @@ const VirtualizedHybridSearchResults = ({
     onEmptyClick: handleEmptyClick,
   });
 
+  // === LM CUSTOMIZATION: InfiniteScroll START ===
+  // [PERF v3 — 2026-05-22 trace 驱动] 移除 onDragStateChange 上抛 useEffect。
+  // 原代码是为了让父级 polyfill hook 响应 isDragging 改变。现在 polyfill 副作用已合并进 useDragSelect.applyDragBodyStyles，
+  // 不需要上抛。避免首次拖拽进入时 setState 穿透到 HybridDeepSearchUI (3812 行) 的巨树重渲。
+  // 原代码：
+  //   useEffect(() => {
+  //     if (typeof onDragStateChange === 'function') onDragStateChange(isDragging);
+  //   }, [isDragging, onDragStateChange]);
+
+  // 原因：sentinel + IntersectionObserver 实现滚到底自动加载下一页（需求 D-1.1/1.4）。
+  // root 选 scrollContainerRef.current（VirtualizedResults 暴露的滚动容器），rootMargin
+  // 600px 提前预加载；isLoadingMore guard 防重复触发；hasMore=false 后 disconnect。
+  const sentinelRef = useRef(null);
+  // 用 ref 持有最新 callback 与状态，避免 effect 重装导致 observer 重复创建
+  const onAutoLoadMoreRef = useRef(onAutoLoadMore);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const hasMoreRef = useRef(hasMore);
+  useEffect(() => { onAutoLoadMoreRef.current = onAutoLoadMore; }, [onAutoLoadMore]);
+  useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
+  useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = scrollContainerRef.current;
+    if (!sentinel) return undefined;
+    // 注：root=null 时 IntersectionObserver 退化为 viewport，仍可用；不阻断创建。
+    if (!hasMore) return undefined; // 到底了就不起 observer
+    if (typeof onAutoLoadMoreRef.current !== 'function') return undefined;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry || !entry.isIntersecting) return;
+        if (isLoadingMoreRef.current) return;     // 加载中，忽略
+        if (!hasMoreRef.current) return;          // 到底，忽略
+        try {
+          onAutoLoadMoreRef.current();
+        } catch (e) {
+          // 静默：制资人上报错误交由父级 loadMoreError 处理
+          // eslint-disable-next-line no-console
+          console.warn('[InfiniteScroll] auto load more failed:', e);
+        }
+      },
+      {
+        root: root || null,
+        // 提前 600px 预加载，避免用户看到 spinner 的空白帧
+        rootMargin: '0px 0px 600px 0px',
+        threshold: 0,
+      }
+    );
+    observer.observe(sentinel);
+
+    return () => observer.disconnect();
+  }, [hasMore]); // hasMore 改变时重装跟随状态变化
+  // === LM CUSTOMIZATION: InfiniteScroll END ===
+
   // Calculate score range for normalization
   const { maxScore, minScore } = useMemo(() => {
     if (results.length === 0) return { maxScore: 1, minScore: 0 };
@@ -970,9 +1145,12 @@ const VirtualizedHybridSearchResults = ({
       isMultiSelectMode={isMultiSelectMode}
       failedReason={failedEntry?.reason || null}
       onRetryFailed={onRetryFailed}
+      /* === LM CUSTOMIZATION: CardTagBar START === */
+      serverUrl={serverUrl}
+      /* === LM CUSTOMIZATION: CardTagBar END === */
     />
     );
-  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, gridSize, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed]);
+  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, gridSize, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed, serverUrl]);
 
   // List item renderer
   const renderListItem = useCallback((result, index) => {
@@ -996,9 +1174,12 @@ const VirtualizedHybridSearchResults = ({
       isMultiSelectMode={isMultiSelectMode}
       failedReason={failedEntry?.reason || null}
       onRetryFailed={onRetryFailed}
+      /* === LM CUSTOMIZATION: CardTagBar START === */
+      serverUrl={serverUrl}
+      /* === LM CUSTOMIZATION: CardTagBar END === */
     />
     );
-  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, maxScore, minScore, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed]);
+  }, [onSelectionChange, onItemClick, copyToClipboard, onFindSimilar, showScores, maxScore, minScore, searchQuery, getHeaders, apiUrl, selectedItems, isMultiSelectMode, failedBatchItems, onRetryFailed, serverUrl]);
 
   const handleCopyAllUrls = useCallback(() => {
     const allUrls = results.map((result) => 
@@ -1021,18 +1202,66 @@ const VirtualizedHybridSearchResults = ({
   }
 
   return (
-    <VStack spacing={2} align="stretch" flex={1} minH={0} overflow="hidden">
+    <VStack
+      spacing={2}
+      align="stretch"
+      flex={1}
+      minH={0}
+      overflow="hidden"
+      // === LM CUSTOMIZATION: NoTextSelection START ===
+      // 原因（2026-05-15 用户反馈）：A 的 useDragSelect 仅在 mousedown→drag 路径上设 userSelect:none，
+      // 但浏览器原生 Range Selection（Shift+click 跨范围选中）不经过此路径——
+      // 用户先点一张卡片，再 Shift+click 另一张时，浏览器会把两点之间的所有可选文本刷成黄色选区。
+      // 解决方案：在结果区根容器永久禁用文本选区。
+      //   - 卡片标题 / 文件名 / 路径 / 大小 等"可读但不可框选"
+      //   - 用户复制需求由 [📋复制] 按钮承担（已存在 CopyIcon 按钮）
+      //   - Modal 内文本独立于本容器，不受影响
+      //   - 兼容 Firefox MozUserSelect / IE Legacy msUserSelect 前缀
+      // [Round 8 增强 — 2026-05-21] 跨卡片 Shift+click 残余金色防御
+      //   data-results-root 让 index.css 的 [data-results-root] ::selection { transparent }
+      //   覆盖整个结果区（含卡片之间的 VStack/Grid 间隙节点），消除"间隙金色"的视觉残留。
+      //   主修复在 useDragSelect.js 的 mousedown 阶段拦 Shift+click 清 Range（治本），
+      //   本属性是视觉兜底（防御纵深）。
+      // 合入上游新版时：保留本块；如上游 VStack 引入新 props，与本块 sx 合并即可。
+      data-results-root="true"
+      userSelect="none"
+      sx={{
+        WebkitUserSelect: 'none',
+        MozUserSelect: 'none',
+        msUserSelect: 'none',
+      }}
+      // === LM CUSTOMIZATION: NoTextSelection END ===
+    >
       {/* === v5: TitleBar + 结果计数已移入 FabToolbar 合并行，此处不再独立渲染 === */}
 
       {/* Virtualized Results with drag select */}
-      <Box position="relative" flex={1} minH={0}>
+      {/* === LM CUSTOMIZATION: DragSelect START === */}
+      {/* v3 TC-A7 性能优化：拖拽期间 data-dragging="true"，配合下方 <Global> CSS
+          全局禁用所有卡片 transition / animation / box-shadow 过渡，避免每帧重排。
+          松手后立即恢复，0 视觉副作用。 */}
+      <Box position="relative" flex={1} minH={0} data-dragging={isDragging ? 'true' : undefined}>
+      {/* === LM CUSTOMIZATION: DragSelect END === */}
         <VirtualizedResults
           items={results}
           renderItem={viewMode === "grid" ? renderGridItem : renderListItem}
           // List 视图卡片实际高度 ≈ 150（缩略图）+ 32（CardBody p=4 上下各 16）+ 2（border）≈ 184。
           // 原值 250 留了 ~66px 空白 slot，每条都多出一大块空档，资产越多越夸张。
           // 与 gap=16 组合后单 slot=200，刚好贴合卡片且行间留出微呼吸。
-          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 200 : 320) : 184}
+          // === LM CUSTOMIZATION: VirtualGridItemHeight START ===
+          // 修复 limit > 50（虚拟化分支）"卡片底部按钮被挤压 + 视口底部黑带"问题：
+          //   2026-05-25 第二轮用 Playwright 精准实测 .chakra-card 真实高度:
+          //     非虚拟化分支(limit ≤ 50): chakra-card.h = 335px (含 padding,内容紧贴底部 9px buffer)
+          //     react-window 内部 rowHeight = itemHeight + gap, top = row * rowHeight
+          //     ⇒ itemHeight 必须等于 chakra-card 自然高度,既不能少(挤压内容)也不能多(死带)
+          //   修正历史:
+          //     原值 360:每行多 25px 死带 + 内部 flex={1} 把按钮行往下撑 → 中段空白 + 底部黑带
+          //     第一轮改 320:错把 chakra-stack 内容高(317)当作卡片高,导致按钮行被挤压(用户图1反馈)
+          //     第二轮改 335:精准对齐 chakra-card 自然高度,无溢出无空白
+          //   gridSize='S' 紧凑模式: chakra-card 自然高 188,保持 188(已实测对齐)。
+          //   行间 gap=16,单行 rowHeight=351(原 376),滚动总高对应缩短,视口底部黑带消失。
+          // 合入英伟达新版时：保留本块；itemHeight 调优属于 LM 自有定制。
+          itemHeight={viewMode === "grid" ? (gridSize === "S" ? 188 : 335) : 184}
+          // === LM CUSTOMIZATION: VirtualGridItemHeight END ===
           containerHeight="100%"
           overscan={5}
           gridMode={viewMode === "grid"}
@@ -1041,22 +1270,122 @@ const VirtualizedHybridSearchResults = ({
           scrollContainerRef={scrollContainerRef}
           style={{ userSelect: isDragging ? 'none' : 'auto' }}
         />
-        {/* Drag selection rectangle overlay */}
-        {isDragging && selectionRect && (
-          <Box
-            position="fixed"
-            left={`${selectionRect.x}px`}
-            top={`${selectionRect.y}px`}
-            width={`${selectionRect.width}px`}
-            height={`${selectionRect.height}px`}
-            bg="rgba(255, 210, 48, 0.08)"
-            border="1px solid rgba(255, 210, 48, 0.4)"
-            borderRadius="4px"
-            pointerEvents="none"
-            zIndex={9999}
-          />
-        )}
+        {/* === LM CUSTOMIZATION: DragSelectMarquee START === */}
+        {/* Drag selection rectangle overlay
+            v3 修复"拖拽时仍卡顿"：
+              - 旧版 v2：始终挂载 + opacity/transform 切换，但 mousemove 期间每帧都更新
+                left/top/width/height（4 个 layout 属性），触发 layout thrashing；
+                同时 useDragSelect 内 computeSelectedByRect 每帧 querySelectorAll +
+                getBoundingClientRect 强制 reflow，与 marquee 的 layout 写互相打架。
+              - 新版 v3：
+                a) Marquee 用 transform: translate3d(x,y,0) 处理高频位置变化（GPU 合成）
+                b) width/height 保留（拖拽幅度变化时只触发本元素 layout）
+                c) contain:strict 隔离 layout/paint/style 影响范围，
+                   marquee 的 layout 不再传染到外部 cards 的 getBoundingClientRect
+                d) opacity/transform fade 仍保留 v2 的丝滑出入场
+            合入英伟达新版时：保留本块；marquee 是 LM 新增功能。 */}
+        <Box
+          position="fixed"
+          left="0"
+          top="0"
+          width={`${selectionRect?.width ?? 0}px`}
+          height={`${selectionRect?.height ?? 0}px`}
+          bg="rgba(255, 210, 48, 0.08)"
+          border="1px solid rgba(255, 210, 48, 0.4)"
+          borderRadius="4px"
+          boxShadow={isDragging ? "0 0 0 1px rgba(255, 210, 48, 0.15), 0 4px 16px rgba(255, 210, 48, 0.06)" : "none"}
+          opacity={isDragging && selectionRect ? 1 : 0}
+          transform={
+            isDragging && selectionRect
+              ? `translate3d(${selectionRect.x}px, ${selectionRect.y}px, 0) scale(1)`
+              : `translate3d(${selectionRect?.x ?? 0}px, ${selectionRect?.y ?? 0}px, 0) scale(0.98)`
+          }
+          transformOrigin="top left"
+          transition={
+            isDragging && selectionRect
+              ? "opacity 0.08s cubic-bezier(0.0, 0, 0.2, 1)"  // 仅 opacity transition；transform 跟随 mousemove 不要 transition 否则会"拖尾"
+              : "opacity 0.12s cubic-bezier(0.4, 0, 1, 1), transform 0.12s cubic-bezier(0.4, 0, 1, 1)"  // 退场时给 transform transition 实现 0.98 收回
+          }
+          willChange="opacity, transform, width, height"
+          sx={{ contain: 'strict' }}  // [PERF v3] 隔离 layout/paint，让 marquee 的尺寸变化不触发外部 reflow
+          pointerEvents="none"
+          zIndex={9999}
+          aria-hidden="true"
+        />
+        {/* === LM CUSTOMIZATION: DragSelectMarquee END === */}
       </Box>
+      {/* === LM CUSTOMIZATION: InfiniteScroll START === */}
+      {/* sentinel + 状态条件 UI（需求 D-1）：
+          — 加载中 → Spinner + "加载中..."
+          — isResultShortage 且 hasMore → ghost 小按钮"加载更多"触发后端二次搜索
+          — 错误 → 红色提示 + 重试按钮
+          — !hasMore → "已经到底了"终态文案
+          sentinel 始终渲染在最外层 VStack 末尾（不受 isLoading / isEmpty 控制），
+          函数顶部的“isLoading return null / isEmpty return EmptySearchHint”已经在上游 early return。
+          
+          2026-05-25 修复"视口底部 49px 黑带":
+            原来这个 <Box minH="32px" pt={2} pb={4}> 容器无条件渲染,即使 4 种内容
+            状态都未触发(常态)也占 32+24=56px,加上 chakra VStack spacing 把 react-window
+            滚动容器顶上去 ~49px,造成视口底部明显黑带。
+            修复:把 4 种状态展示用 isFooterVisible 聚合,只在真有内容时才渲染外层 Box。
+            合入英伟达新版时:本块是 LM 业务代码,保留。 */}
+      <Box ref={sentinelRef} h="1px" data-infinite-sentinel aria-hidden="true" />
+      {(() => {
+        const showLoadMoreBtn =
+          !isLoadingMore && !loadMoreError && hasMore && isResultShortage
+          && typeof onTriggerBackendLoadMore === 'function';
+        const showNoMore =
+          !isLoadingMore && !loadMoreError && !hasMore && results.length > 0;
+        const isFooterVisible = isLoadingMore || !!loadMoreError || showLoadMoreBtn || showNoMore;
+        if (!isFooterVisible) return null;
+        return (
+          <Box minH="32px" pt={2} pb={4} display="flex" alignItems="center" justifyContent="center">
+            {isLoadingMore && (
+              <HStack spacing={2} fontSize="xs" color="whiteAlpha.700">
+                <Spinner size="xs" color="#FFD230" thickness="2px" speed="0.6s" />
+                <Text>{t('infiniteLoading') || t('loading') || '加载中...'}</Text>
+              </HStack>
+            )}
+            {!isLoadingMore && loadMoreError && (
+              <HStack spacing={2} fontSize="xs">
+                <Text color="red.300">
+                  {t('infiniteError') || '加载失败'}
+                </Text>
+                {typeof onRetryLoadMore === 'function' && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    color="#FFD230"
+                    _hover={{ bg: 'whiteAlpha.100' }}
+                    onClick={onRetryLoadMore}
+                    aria-label={t('infiniteRetry') || '重试'}
+                  >
+                    {t('infiniteRetry') || '重试'}
+                  </Button>
+                )}
+              </HStack>
+            )}
+            {showLoadMoreBtn && (
+              <Button
+                size="xs"
+                variant="ghost"
+                color="whiteAlpha.700"
+                _hover={{ bg: 'whiteAlpha.100', color: '#FFD230' }}
+                onClick={onTriggerBackendLoadMore}
+                aria-label={t('infiniteLoadMore') || '加载更多'}
+              >
+                {t('infiniteLoadMore') || '加载更多'}
+              </Button>
+            )}
+            {showNoMore && (
+              <Text fontSize="xs" color="whiteAlpha.500" letterSpacing="0.02em">
+                {t('infiniteNoMore') || '已经到底了'}
+              </Text>
+            )}
+          </Box>
+        );
+      })()}
+      {/* === LM CUSTOMIZATION: InfiniteScroll END === */}
     </VStack>
   );
 };

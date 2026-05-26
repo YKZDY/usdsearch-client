@@ -226,6 +226,33 @@ const en = {
   exact: "Exact",
   approximate: "Approximate",
 
+  // === LM CUSTOMIZATION: SearchSettingsPopover i18n START ===
+  // Search Settings Popover (Group C: SearchSettingsPopover.jsx + TagWeightSlider.jsx)
+  // Reset / toast / customized state
+  resetToDefault: "Reset to default",
+  settingsResetTitle: "Settings reset",
+  settingsResetDesc: "All search settings restored to default",
+  settingsResetUndoHint: "Click Undo within 5s to revert",
+  settingsResetUndoneTitle: "Reset undone",
+  settingsResetUndoneDesc: "Previous search settings restored",
+  searchSettingsCustomized: "Search settings (customized)",
+  // Tag matching weight slider
+  tagWeightLabel: "Tag matching weight",
+  tagWeightOff: "Off",
+  tagWeightLoose: "Loose",
+  tagWeightDefault: "Default",
+  tagWeightTagFav: "Tag-favored",
+  tagWeightStrict: "Tag-priority",
+  tagWeightOffDesc: "Tag matching disabled — pure semantic search",
+  tagWeightLooseDesc: "Tags considered, but semantic results dominate",
+  tagWeightDefaultDesc: "Balanced — recommended for most queries",
+  tagWeightTagFavDesc: "Prefer tag matches over semantic similarity",
+  tagWeightStrictDesc: "Maximum tag boost (some non-tagged results may still appear)",
+  tagWeightCustom: "Custom",
+  tagWeightCustomDesc: "Custom configuration (edit details in advanced hybrid config)",
+  tagWeightCustomTip: "Edit details in advanced hybrid config",
+  // === LM CUSTOMIZATION: SearchSettingsPopover i18n END ===
+
   // === HybridSearchConfig.jsx ===
   advancedHybridConfig: "Advanced Hybrid Search Configuration",
   textSearchFields: "Text Search Fields",
@@ -281,6 +308,11 @@ const en = {
   clickToViewDetails: "Click to view details",
   clickToSelect: "Click to select/deselect",
   clickOrDoubleClickHint: "Click to select · Double-click for details",
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示会误导
+  // 合入英伟达新版时：保留
+  hintCheckboxToggle: "Checkbox · Ctrl+click · Shift+click range",
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
   // === V2: Batch tagging ===
   batchTag: "Batch tag",
   batchTagDialogTitle: "Tag {count} assets",
@@ -384,6 +416,41 @@ const en = {
   hideAdvancedPanels: "Hide advanced panels",
   adminMode: "Admin mode",
   // === LM CUSTOMIZATION: detail-modal-revamp END ===
+  // === LM CUSTOMIZATION: details-drawer-i18n START ===
+  // Group A 任务 4：详情抽屉骨架专用 i18n keys
+  // 合入英伟达新版时：保留本块（NVIDIA 原版无详情抽屉）
+  detailsDrawerTitle: "Asset Details",
+  detailsDrawerClose: "Close details",
+  detailsDrawerCollapse: "Collapse details",
+  detailsDrawerExpand: "Expand details",
+  detailsDrawerPreviewPlaceholder: "[Preview — task 5]",
+  detailsDrawerMetadataPlaceholder: "[Metadata — task 5]",
+  detailsDrawerTagsSlot: "[Tags slot — Group B]",
+  detailsDrawerAdvancedSlot: "[Advanced panel slot — Group B]",
+  // Task 5: 5-section layout + action button copy
+  detailsDrawerMetaSize: "Size",
+  detailsDrawerMetaFormat: "Format",
+  detailsDrawerMetaCreated: "Created",
+  detailsDrawerMetaModified: "Modified",
+  detailsDrawerMetaCreator: "Creator",
+  detailsDrawerMetaUnknown: "Unknown",
+    detailsDrawerCopyPath: "Copy path",
+    detailsDrawerCopyPathSuccess: "Path copied",
+    detailsDrawerCopyPathTooltip: "Copy this path",
+    detailsDrawerSource: "Source",
+    detailsDrawerScore: "Score",
+    detailsDrawerPath: "Path",
+    detailsDrawerOpenInOmniverse: "Open in Omniverse",
+  detailsDrawerDownload: "Download",
+  detailsDrawerEmptyHint: "Select an asset from the results",
+  detailsDrawerAdvancedTitle: "Advanced",
+  // detail-modal-revamp (Drawer advanced panels)
+  detailsDrawerLoadFailed: "Load failed",
+  detailsDrawerRetry: "Retry",
+  detailsDrawerRefreshAll: "Refresh metadata",
+  detailsDrawerNoIndexPermission: "Admin permission required",
+  detailsDrawerNoAsset: "Select an asset first",
+  // === LM CUSTOMIZATION: details-drawer-i18n END ===
   details: "Details",
   property: "Property",
   etag: "ETag",
@@ -670,6 +737,71 @@ const en = {
   ssoBridgeCopyTokenSuccess: "Token copied to clipboard",
   ssoBridgeCopyTokenEmpty: "No token to copy yet",
   // === LM CUSTOMIZATION: SSO Bridge END ===
+
+  // === Group D — Infinite scroll i18n (追加在文件末尾，与其他 group 冲突概率低) ===
+  infiniteLoading: "Loading more...",
+  infiniteNoMore: "No more results",
+  infiniteLoadMore: "Load more",
+  infiniteError: "Failed to load more",
+  infiniteRetry: "Retry",
+
+  // === LM CUSTOMIZATION: Group B i18n START ===
+  // 原因：Group B 卡片 tag 区 + 详情高级面板新增的所有文案
+  // 合入英伟达新版时：保留整段（key 走 tagBar./tagEditor./advanced. 前缀，不与 NVIDIA 冲突）
+  // CardTagBar / TagEditPopover
+  "tagBar.openEditor": "Edit tags",
+  "tagBar.addButtonAriaLabel": "Add tag",
+  "tagBar.searchOrCreate": "Search or create tag…",
+  "tagBar.inputAriaLabel": "Tag name",
+  "tagBar.errorEmpty": "Tag name cannot be empty",
+  "tagBar.errorTooLong": "Tag name max 50 chars",
+  "tagBar.errorInvalidChars": "Tag name cannot contain / \\ or newlines",
+  "tagBar.createNew": "Create new",
+  "tagBar.candidatesAriaLabel": "Tag candidates",
+  "tagBar.loading": "Loading tags…",
+  "tagBar.noMatch": "No matching tag",
+  "tagBar.empty": "No tags yet",
+  "tagBar.removeAriaLabel": "Remove {tag}",
+  "tagBar.addAriaLabel": "Add {tag}",
+  "tagBar.moreHidden": "more (refine search)",
+  "tagBar.moreCount": "+{n} more",
+  "tagBar.hint": "Click to toggle · Enter to create · Esc to close",
+  "tagBar.noLogin": "Sign in to manage tags",
+  "tagBar.noWritePermission": "No write permission",
+  // === LM CUSTOMIZATION: TagDeleteUndo START ===
+  // Reason (2026-05-25): user feedback that deleting a tag from card silently
+  // confused the user. Added a 5-second undo toast. Keys live under tagBar.*
+  // prefix so they merge cleanly when upgrading NVIDIA upstream (no conflict).
+  "tagBar.deleted.title": "Tag removed",
+  "tagBar.deleted.undo": "Undo",
+  "tagBar.deleted.undoHint": "Ctrl+Z to undo",
+  "tagBar.deleted.undoHintMac": "⌘Z to undo",
+  "tagBar.deleted.restored": "Restored \"{tag}\"",
+  "tagBar.deleted.failed": "Failed to remove \"{tag}\", restored",
+  "tagBar.deleted.closeAriaLabel": "Dismiss",
+  // === LM CUSTOMIZATION: TagDeleteUndo END ===
+  // AssetTagEditor (drawer 内完整编辑器)
+  "tagEditor.title": "Tags",
+  "tagEditor.placeholder": "Add a tag and press Enter (or paste comma-separated)…",
+  "tagEditor.batchAddedToast": "Added {n} tags",
+  "tagEditor.empty": "No tags yet \u00b7 Type below and press Enter to add",
+  "tagEditor.sourceUser": "User",
+  "tagEditor.sourceSystem": "System",
+  "tagEditor.sourceAi": "AI",
+  "tagEditor.failedRetry": "Sync failed, click to retry",
+  "tagEditor.removeAriaLabel": "Remove tag {tag}",
+  // AdvancedMatchInfo (drawer 高级面板)
+  "advanced.title": "Advanced match info",
+  "advanced.matchedFields": "Matched fields",
+  "advanced.matchedTerms": "Matched terms",
+  "advanced.score": "Score",
+  "advanced.rrfScore": "RRF score",
+  "advanced.vectorSimilarity": "Vector similarity",
+  "advanced.embeddingModel": "Embedding model",
+  "advanced.rawMetadata": "Raw metadata (JSON)",
+  "advanced.empty": "No advanced match info available",
+  "advanced.toggleRaw": "Toggle raw metadata",
+  // === LM CUSTOMIZATION: Group B i18n END ===
 };
 
 export default en;

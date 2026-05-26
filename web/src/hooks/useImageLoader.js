@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { loadImage } from '../utils/imageLoader';
 
 /**
@@ -33,41 +33,78 @@ import { loadImage } from '../utils/imageLoader';
  * @returns {Object} - { imageData, isLoading, error }
  */
 export const useImageLoader = (assetUrl, getHeaders, apiUrl, enabled = true) => {
+  // === LM CUSTOMIZATION: ImageLoaderStaleFix START ===
+  // 修复 R-C：原实现有两个核心 bug 导致 Drawer 切换卡片时缩略图 stale：
+  //   1. attemptedUrls = useState(new Set()) 永久累积，同 URL 二次访问直接 return，
+  //      不重置 imageData → UI 继续显示上次的图。
+  //   2. assetUrl 变化时未先清空 imageData → React 重渲染时 ImageWithSkeleton 看到
+  //      旧 imageData + isLoading=true 仍可能显示旧图（取决于 ImageWithSkeleton 实现）。
+  //   3. 无网络竞态保护 → 快速切换多张卡片时旧请求晚返回会覆盖新请求结果。
+  // 修复方案：
+  //   - 去掉 attemptedUrls Set，依赖 React 自带的 strict mode + AbortController 防重复
+  //   - assetUrl 变化先立即 setImageData(null) + setError(null) + setIsLoading(true)
+  //   - AbortController 在 cleanup 阶段 abort，防止旧请求异步覆盖新数据
+  //   - getHeaders / apiUrl 走 ref 不进 deps（避免父组件重渲染触发不必要重载）
+  // 合入英伟达新版时：本块替换原版整个 useImageLoader 实现。原版 bug 在快速切换场景
+  //   就会出现 stale，建议向上游提 PR 或保留本修复版。
   const [imageData, setImageData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [attemptedUrls] = useState(new Set());
+
+  // 把 getHeaders / apiUrl 装在 ref 里，避免成为 deps
+  const getHeadersRef = useRef(getHeaders);
+  const apiUrlRef = useRef(apiUrl);
+  useEffect(() => { getHeadersRef.current = getHeaders; }, [getHeaders]);
+  useEffect(() => { apiUrlRef.current = apiUrl; }, [apiUrl]);
 
   useEffect(() => {
-    // Only load if we haven't attempted this exact URL before
-    if (!assetUrl || !enabled || attemptedUrls.has(assetUrl)) {
-      return;
-    }
-    
-    if (!getHeaders) {
-      return;
+    if (!assetUrl || !enabled) {
+      // 没有 url 或被禁用：清干净状态
+      setImageData(null);
+      setIsLoading(false);
+      setError(null);
+      return undefined;
     }
 
-    // apiUrl can be empty string (uses relative URLs to current host)
-    const effectiveApiUrl = apiUrl || '';
+    const headers = getHeadersRef.current;
+    if (!headers) {
+      return undefined;
+    }
 
-    // Mark this URL as attempted immediately to prevent re-runs
-    attemptedUrls.add(assetUrl);
-    setIsLoading(true);
+    // 切换到新 URL：立即清空旧数据，进入 loading 态
+    // 这样 ImageWithSkeleton 会显示加载占位而非旧图（用户能立即感知"在切换"）
+    let cancelled = false;
+    setImageData(null);
     setError(null);
+    setIsLoading(true);
 
-    loadImage(assetUrl, getHeaders, effectiveApiUrl)
-      .then(data => {
+    const effectiveApiUrl = apiUrlRef.current || '';
+
+    loadImage(assetUrl, headers, effectiveApiUrl)
+      .then((data) => {
+        if (cancelled) return;
         setImageData(data);
+        setError(null);
       })
-      .catch(err => {
+      .catch((err) => {
+        if (cancelled) return;
         setError(err);
         setImageData(null);
       })
       .finally(() => {
+        if (cancelled) return;
         setIsLoading(false);
       });
-  }, [assetUrl, enabled]); // Removed getHeaders and apiUrl from deps to prevent re-runs
+
+    // cleanup：assetUrl 变化或卸载时 abort 旧请求结果
+    // 这里不真去 abort fetch（loadImage 没 AbortController 接口），
+    // 而是用 cancelled 标志位让旧 promise 的 then/catch 不再 setState，
+    // 避免快速切换时旧请求结果覆盖新请求结果（竞态）。
+    return () => {
+      cancelled = true;
+    };
+  }, [assetUrl, enabled]);
+  // === LM CUSTOMIZATION: ImageLoaderStaleFix END ===
 
   return {
     imageData,

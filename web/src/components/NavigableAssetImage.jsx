@@ -206,6 +206,22 @@ const NavigableAssetImage = ({
 
   const showNavigation = isHovered && (canGoLeft || showRightArrow);
 
+  // === LM CUSTOMIZATION: SkeletonAspectRatioFix START ===
+  // 修复"loading 时缩略图被压扁成一条线"：
+  //   callsite 通过 style={{ aspectRatio: '16/9' }} 维持图片比例，但 style 会被 imageProps
+  //   透传到内层 <img>。loading 阶段渲染的是 ImageSkeleton（不带 style，只能 height: 100%），
+  //   外层 Box 又是 height: 'auto'，没有内容撑开 → Skeleton 高度塌成 0。
+  //   解决：把 style.aspectRatio / style.minHeight 提升到外层容器，并在 height 为 'auto'
+  //   时给一个最小高度兜底，确保 loading 也能撑出正确空间。
+  const callerStyle = imageProps?.style || {};
+  const outerAspectRatio = callerStyle.aspectRatio;
+  const outerMinHeight = callerStyle.minHeight;
+  const outerHeight = outerAspectRatio
+    ? '100%'           // 由 aspectRatio 决定真实高度
+    : height;
+  // 合入英伟达新版时：保留本块；style 透传依然可用，外层只多解析两个字段
+  // === LM CUSTOMIZATION: SkeletonAspectRatioFix END ===
+
   return (
     <Box 
       ref={elementRef}
@@ -213,7 +229,11 @@ const NavigableAssetImage = ({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       width={width}
-      height={height}
+      height={outerHeight}
+      // === LM CUSTOMIZATION: SkeletonAspectRatioFix START ===
+      sx={outerAspectRatio ? { aspectRatio: outerAspectRatio } : undefined}
+      minHeight={outerMinHeight}
+      // === LM CUSTOMIZATION: SkeletonAspectRatioFix END ===
     >
       <ImageWithSkeleton
         src={src}
@@ -224,9 +244,14 @@ const NavigableAssetImage = ({
         height="100%"
         borderRadius={borderRadius}
         objectFit="cover"
+        // === LM CUSTOMIZATION: SkeletonShimmerVariant START ===
+        // 原因：默认 "ghost" variant 是 3 个跳动小灰点，视觉上更像 toast 而非图片占位；
+        //       切换到 "shimmer"（横向流光），与 YouTube/Instagram/Fab.com 等主流图片占位惯例一致。
+        // 合入英伟达新版时：如果上游引入了新的 skeleton 默认风格，按上游为准；本块可直接删除。
         skeletonProps={{
-          variant: "ghost"
+          variant: "shimmer"
         }}
+        // === LM CUSTOMIZATION: SkeletonShimmerVariant END ===
         errorContent={errorMessage}
         {...imageProps}
       />

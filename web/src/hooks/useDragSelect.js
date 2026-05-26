@@ -28,6 +28,18 @@ const CARD_INDEX_ATTR = 'data-card-index';
 const CARD_SELECTOR = `[${CARD_INDEX_ATTR}]`;
 const CARD_CLASS = 'chakra-card';
 const DRAG_THRESHOLD = 8; // px：>5 给抖动/双击留缓冲，避免误判为拖拽分支
+// === LM CUSTOMIZATION: InnerDragThreshold START ===
+// 根因 R2：容器内 mousedown 当帧立即 isActive=true，与 useClickOrDoubleClick 的 movedRef
+//   形成"双重消费 mousemove"。虽然 mousemove 里 mode===null && dist<DRAG_THRESHOLD 已早退
+//   保护 click 不受副作用影响，但 isActive=true 会让 mouseup 走入"已激活"分支处理逻辑，
+//   增加边界出错概率（如 onEmptyClick 误触发等）。
+// 解决：引入 innerPending 缓冲态，与 outerPending 形成对称——容器内 mousedown 仅记录起点，
+//   等 mousemove 真正越过 INNER_DRAG_THRESHOLD 才正式 isActive=true，进入框选/刷选模式。
+//   位移不足时 mouseup 直接干净退出，让原生 click 正常派发到卡片。
+// 与 OUTER_DRAG_THRESHOLD=20 形成"内紧外松"梯度：内部已确定意图（用户在结果区），8px 即激活。
+// 合入英伟达新版时：保留本块；本 hook 由 LM 自有维护，无 NVIDIA 上游版本。
+const INNER_DRAG_THRESHOLD = 8; // px：容器内起点的拖拽激活阈值（与 DRAG_THRESHOLD 等值，仅语义解耦）
+// === LM CUSTOMIZATION: InnerDragThreshold END ===
 const OUTER_DRAG_THRESHOLD = 20; // px：容器外起点需要更大位移才启动框选，避免与"单击退出多选"冲突
 
 /**
@@ -106,10 +118,14 @@ export function useDragSelect({
     startX: 0,
     startY: 0,
     isActive: false,
+    // [LM ClickRobustness] innerPending：容器内 mousedown 后达到 INNER_DRAG_THRESHOLD 前的缓冲态
+    innerPending: false,
     mode: null,           // 'rect' | 'paint' | null
     startedInsideCard: false,
     baseSet: new Set(),
     paintedIds: new Set(),
+    // [PERF v4] rect 模式最近一次选区矩形（视口坐标），供 autoScroll loop 每帧重算选中集
+    lastRectVp: null,
     // paint 模式的子模式：根据起点卡片是否已在 baseSet 中决定
     //   起点已选中 → 'remove'（拖过即取消，类似橡皮擦）
     //   起点未选中 → 'add'   （拖过即加入，类似画笔）
@@ -122,12 +138,25 @@ export function useDragSelect({
   const getItemIdRef = useRef(getItemId);
   const onChangeRef = useRef(onSelectionChange);
   const onEmptyClickRef = useRef(onEmptyClick);
+  // [PERF v4] tickAutoScroll 在 computeSelectedByRect/emitIfChanged 声明之前使用，
+  // 通过 ref 间接访问避免 TDZ（const useCallback 联合严格检查会报 “使用前未初始化”）。
+  const computeSelectedByRectRef = useRef(null);
+  const emitIfChangedRef = useRef(null);
+  // [PERF v4 — 2026-05-22 trace 驱动] 镜像 baseSelection 到 ref
+  // 背景：Playwright + cancelAnimationFrame stack trace 证实，拖拽期间 useEffect 被销毁重建 5+ 次，
+  //   导致 cleanup 中 cancelAnimationFrame(autoScrollRef.current) 反复中断 autoScroll loop。
+  //   原因：handleMouseDown deps 含 baseSelection，拖拽 emit 新选中集 → 父级 setSelectedItems →
+  //   baseSelection 引用变 → handleMouseDown 重建 → 主 useEffect deps 变 → effect 销毁重建。
+  //   结果 autoScroll loop 仅跑三四帧就被 cancel，拖到边缘区【有效但极慢】。
+  // 修复：镜像 baseSelection 到 ref，handleMouseDown 仅读 ref 不依赖 deps，使主 useEffect 稳定。
+  const baseSelectionRef = useRef(baseSelection);
 
   // 同步最新 props 到 ref，避免 listener 闭包过期
   useEffect(() => { itemsRef.current = items; }, [items]);
   useEffect(() => { getItemIdRef.current = getItemId; }, [getItemId]);
   useEffect(() => { onChangeRef.current = onSelectionChange; }, [onSelectionChange]);
   useEffect(() => { onEmptyClickRef.current = onEmptyClick; }, [onEmptyClick]);
+  useEffect(() => { baseSelectionRef.current = baseSelection; }, [baseSelection]);
 
   // 判断 target 是否落在卡片内部
   const isInsideCard = useCallback((target) => {
@@ -187,6 +216,17 @@ export function useDragSelect({
           return;
         }
         containerRef.current.scrollTop += speed;
+        // [PERF v4 — 2026-05-22] autoScroll 期间同步扩展选区
+        // 场景：鼠标静止在 edge 区不动，容器下滚后新滚出的卡片会进入选区矩形。
+        // 之前 loop 只改 scrollTop、不重算选中集，造成"滚是滚了 但卡没被选"的倒退体验。
+        // 在 stateRef.lastRectVp 里存上一次 mousemove 计算的选区矩形（视口坐标，不变），
+        // 每帧调 computeSelectedByRect 重算后 emit。不会重复触发（emitIfChanged 有 Set 等值短路）。
+        // 通过 ref 间接调用避免 const TDZ。
+        const lastRect = stateRef.current.lastRectVp;
+        if (lastRect && computeSelectedByRectRef.current && emitIfChangedRef.current) {
+          const next = computeSelectedByRectRef.current(lastRect);
+          emitIfChangedRef.current(next);
+        }
         autoScrollRef.current = requestAnimationFrame(loop);
       };
       autoScrollRef.current = requestAnimationFrame(loop);
@@ -223,6 +263,93 @@ export function useDragSelect({
     return result;
   }, [containerRef]);
 
+  // [PERF v2] Set 等值比较：避免向上层抛出"内容相同"的新 Set 引用
+  //   性能根因：mousemove 期间每帧都会重新计算 next Set 并 onChangeRef.current?.(next)；
+  //   父级 setSelectedItems(next) 即便内容未变也会触发整棵搜索结果重渲染（renderItem
+  //   依赖 selectedItems 引用→重建→VirtualizedResults 内每张可视卡 reconciliation）。
+  //   通过 lastEmittedRef 做 size+ID 等值比较，命中卡片未变化时直接 return，60Hz 下从
+  //   "每帧都重渲"降到"仅在选区跨边界时重渲"，是拖拽丝滑度的关键。
+  const lastEmittedRef = useRef(null);
+  const setEquals = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.size !== b.size) return false;
+    for (const v of a) if (!b.has(v)) return false;
+    return true;
+  };
+  const emitIfChanged = useCallback((next) => {
+    if (setEquals(lastEmittedRef.current, next)) return;
+    lastEmittedRef.current = next;
+    onChangeRef.current?.(next);
+  }, []);
+
+  // [PERF v4] \u540c\u6b65 computeSelectedByRect / emitIfChanged \u5230 ref\uff0c\u4f9b autoScroll loop \u8c03\u7528\n  // \u539f\u56e0\uff1atickAutoScroll \u5728\u8fd9\u4e24\u8005\u4e4b\u524d\u58f0\u660e\uff0c\u76f4\u63a5\u5728 useCallback deps \u4e2d\u5f15\u7528\u4f1a\u89e6\u53d1 TDZ\u3002\n  const computeSelectedByRectRefSync = computeSelectedByRect;\n  const emitIfChangedRefSync = emitIfChanged;\n  computeSelectedByRectRef.current = computeSelectedByRectRefSync;\n  emitIfChangedRef.current = emitIfChangedRefSync;
+
+  // [PERF v2] 拖拽起点重置 lastEmitted，使下一次 mousedown 不被旧值短路
+  // 必须在 handleMouseDown 之前声明（const TDZ：handleMouseDown 的 useCallback
+  // 在 capture 函数体里引用 resetEmitted，模块求值阶段 TDZ 检查不会真正访问，
+  // 但热更新 / 严格模式下 React 的 deps 数组校验会触发 ReferenceError）。
+  const resetEmitted = useCallback(() => {
+    lastEmittedRef.current = null;
+  }, []);
+
+  // === LM CUSTOMIZATION: DragSelectBodyStyles START ===
+  // [PERF v3 — 2026-05-22 trace 驱动] 合并拖拽期间的 body 样式写入
+  // 背景：Chrome DevTools trace 表明，"首次激活 rect mode" 会产生 ≈196ms 的巨任务。
+  //   调用链：setIsDragging(true) → useEffect onDragStateChange(true) → 父级 setIsDraggingForPolyfill
+  //   → HybridDeepSearchUI (3812 行) 整棵重渲 → usePolyfillNoSelectPrefixes 写 body.style。
+  // 优化思路：polyfill 只是写 body.style.MozUserSelect / msUserSelect / cursor（纯 DOM），
+  //   完全不需要 React state。我们在进入 / 退出拖拽时一同写入，释放 onDragStateChange 上抛，
+  //   避免父级巨树重渲。
+  // 退出拖拽时需以原值还原，使用 prevBodyStylesRef 保存进入前的 body.style 原值。
+  const prevBodyStylesRef = useRef(null);
+  const applyDragBodyStyles = useCallback((entering) => {
+    const body = document.body;
+    if (!body) return;
+    if (entering) {
+      if (!prevBodyStylesRef.current) {
+        prevBodyStylesRef.current = {
+          userSelect: body.style.userSelect,
+          webkitUserSelect: body.style.webkitUserSelect,
+          MozUserSelect: body.style.MozUserSelect,
+          msUserSelect: body.style.msUserSelect,
+          cursor: body.style.cursor,
+        };
+      }
+      body.style.userSelect = 'none';
+      body.style.webkitUserSelect = 'none';
+      body.style.MozUserSelect = 'none';
+      body.style.msUserSelect = 'none';
+      body.style.cursor = 'crosshair';
+    } else {
+      const prev = prevBodyStylesRef.current;
+      if (prev) {
+        body.style.userSelect = prev.userSelect || '';
+        body.style.webkitUserSelect = prev.webkitUserSelect || '';
+        body.style.MozUserSelect = prev.MozUserSelect || '';
+        body.style.msUserSelect = prev.msUserSelect || '';
+        body.style.cursor = prev.cursor || '';
+        prevBodyStylesRef.current = null;
+      } else {
+        // 底底则未进入拖拽但被调退出（例如项顶初始化）：直接清空。
+        body.style.userSelect = '';
+        body.style.webkitUserSelect = '';
+        body.style.MozUserSelect = '';
+        body.style.msUserSelect = '';
+        body.style.cursor = '';
+      }
+    }
+  }, []);
+  // unmount 兼底：组件卸载时如果还在拖拽，强制还原 body 样式
+  useEffect(() => {
+    return () => {
+      if (prevBodyStylesRef.current) {
+        applyDragBodyStyles(false);
+      }
+    };
+  }, [applyDragBodyStyles]);
+  // === LM CUSTOMIZATION: DragSelectBodyStyles END ===
+
   // 把 paintedIds 应用到 baseSet：根据 paintMode 决定是 ∪ 还是 \
   const applyPaint = useCallback(() => {
     const st = stateRef.current;
@@ -232,8 +359,8 @@ export function useDragSelect({
     } else {
       st.paintedIds.forEach((id) => next.add(id));
     }
-    onChangeRef.current?.(next);
-  }, []);
+    emitIfChanged(next);
+  }, [emitIfChanged]);
 
   const handleMouseDown = useCallback((e) => {
     if (!enabled || e.button !== 0) return;
@@ -285,7 +412,7 @@ export function useDragSelect({
     if (isContainerInnerSkip(e.target)) return;
 
     const insideCard = isInsideCard(e.target);
-    const baseSet = new Set(baseSelection || []);
+    const baseSet = new Set(baseSelectionRef.current || []);
     let paintMode = 'add';
     if (insideCard) {
       const startCard = findCardFromEl(e.target);
@@ -297,7 +424,12 @@ export function useDragSelect({
     stateRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      isActive: true,
+      // === LM CUSTOMIZATION: InnerDragThreshold START ===
+      // 根因 R2：不再当帧 isActive=true，改为 innerPending，等 mousemove 越过 INNER_DRAG_THRESHOLD 才激活。
+      // 位移不足时 mouseup 干净退出，让原生 click 正常派发到卡片 onClick → useDrawerOrSelect 真值表。
+      isActive: false,
+      innerPending: true,
+      // === LM CUSTOMIZATION: InnerDragThreshold END ===
       outerPending: false,
       mode: null,
       startedInsideCard: insideCard,
@@ -305,12 +437,13 @@ export function useDragSelect({
       paintedIds: new Set(),
       paintMode,
     };
+    resetEmitted(); // [PERF v2] 新一轮拖拽重置等值比较记忆
 
     // 容器内非卡片区域 preventDefault 阻止文本选区
     if (!insideCard) {
       e.preventDefault();
     }
-  }, [enabled, isInsideCard, containerRef, baseSelection, findCardFromEl]);
+  }, [enabled, isInsideCard, containerRef, findCardFromEl, resetEmitted]);
 
   const handleMouseMove = useCallback((e) => {
     const st = stateRef.current;
@@ -320,15 +453,15 @@ export function useDragSelect({
     //   导致 outerPending=true 残留 → 下次纯移动鼠标累积位移误激活 rect。
     // 防御：只要鼠标无任何按键按下，强制清理状态并退出。
     // 仅在我们处于"有状态"时干预，避免误伤完全空闲的 mousemove。
-    if (e.buttons === 0 && (st.outerPending || st.isActive)) {
+    if (e.buttons === 0 && (st.outerPending || st.innerPending || st.isActive)) {
       st.outerPending = false;
+      st.innerPending = false;
       st.isActive = false;
       st.mode = null;
       st.paintedIds = new Set();
       setIsDragging(false);
       setSelectionRect(null);
-      document.body.style.userSelect = '';
-      document.body.style.webkitUserSelect = '';
+      applyDragBodyStyles(false);
       if (autoScrollRef.current) {
         cancelAnimationFrame(autoScrollRef.current);
         autoScrollRef.current = null;
@@ -352,12 +485,28 @@ export function useDragSelect({
         st.mode = 'rect';
         st.baseSet = new Set(); // 从容器外发起 = 全新选择
         setIsDragging(true);
-        document.body.style.userSelect = 'none';
-        document.body.style.webkitUserSelect = 'none';
+        applyDragBodyStyles(true);
       }
       // 未超阈值则什么都不做（让其他 hook 正常工作）
       if (!st.isActive) return;
     }
+
+    // === LM CUSTOMIZATION: InnerDragThreshold START ===
+    // 容器内待激活：达到 INNER_DRAG_THRESHOLD 才正式 isActive，之前不动
+    // 避免与 useClickOrDoubleClick.movedRef 双重消费 mousemove。
+    if (st.innerPending && !st.isActive) {
+      const dx = e.clientX - st.startX;
+      const dy = e.clientY - st.startY;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= INNER_DRAG_THRESHOLD) {
+        st.isActive = true;
+        st.innerPending = false;
+        // mode 仍由下面原逻辑决定（insideCard → 'paint'，否则 'rect'）
+      } else {
+        return; // 未足阈值：保持静默，click 会正常派发
+      }
+    }
+    // === LM CUSTOMIZATION: InnerDragThreshold END ===
 
     if (!st.isActive) return;
 
@@ -372,8 +521,7 @@ export function useDragSelect({
     if (st.mode === null) {
       st.mode = st.startedInsideCard ? 'paint' : 'rect';
       setIsDragging(true);
-      document.body.style.userSelect = 'none';
-      document.body.style.webkitUserSelect = 'none';
+      applyDragBodyStyles(true);
 
       // paint 模式：把"起始卡片"立刻应用（确保用户拖过即选/即取消）
       if (st.mode === 'paint') {
@@ -391,6 +539,8 @@ export function useDragSelect({
       const w = Math.abs(dx);
       const h = Math.abs(dy);
       const rectVp = { left: x, top: y, right: x + w, bottom: y + h };
+      // [PERF v4] 存最后选区矩形，供 autoScroll loop 每帧重算选中集。
+      st.lastRectVp = rectVp;
 
       setSelectionRect({ x, y, width: w, height: h });
       tickAutoScroll(e.clientY);
@@ -398,7 +548,7 @@ export function useDragSelect({
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = requestAnimationFrame(() => {
         const next = computeSelectedByRect(rectVp);
-        onChangeRef.current?.(next);
+        emitIfChanged(next);
       });
     } else if (st.mode === 'paint') {
       // 卡片刷选：用 elementFromPoint 找当前指针下卡片，加入 paintedIds
@@ -413,7 +563,7 @@ export function useDragSelect({
         }
       });
     }
-  }, [tickAutoScroll, computeSelectedByRect, findCardFromEl, applyPaint]);
+  }, [tickAutoScroll, computeSelectedByRect, findCardFromEl, applyPaint, applyDragBodyStyles]);
 
   const handleMouseUp = useCallback((e) => {
     const st = stateRef.current;
@@ -426,6 +576,17 @@ export function useDragSelect({
       return;
     }
 
+    // === LM CUSTOMIZATION: InnerDragThreshold START ===
+    // 容器内待激活状态（没超过阈值的单击）→ 静默清理，不调 onEmptyClick
+    // 这里同时不阻止 click 派发，让卡片 onClick / 容器空白区 click 正常走原路径。
+    if (st.innerPending) {
+      st.innerPending = false;
+      st.isActive = false;
+      st.mode = null;
+      return;
+    }
+    // === LM CUSTOMIZATION: InnerDragThreshold END ===
+
     if (!st.isActive) return;
 
     const wasDragging = st.mode !== null;
@@ -434,8 +595,7 @@ export function useDragSelect({
     st.isActive = false;
     st.mode = null;
     setIsDragging(false);
-    document.body.style.userSelect = '';
-    document.body.style.webkitUserSelect = '';
+    applyDragBodyStyles(false);
     setSelectionRect(null);
 
     if (autoScrollRef.current) {
@@ -462,12 +622,31 @@ export function useDragSelect({
         }
       }
     }
-  }, [containerRef, isInsideCard]);
+  }, [containerRef, isInsideCard, applyDragBodyStyles]);
 
   // 全局监听 mousedown/mousemove/mouseup/dragstart
   useEffect(() => {
     if (!enabled) return;
-    const onDown = (e) => handleMouseDown(e);
+    // === LM CUSTOMIZATION: NoSelectInResults START ===
+    // [Round 8 修复 — 2026-05-21] Shift+click 跨卡片产生大面积金色文本选区
+    // 真因：浏览器对 Shift+click "扩展已有 Selection" 走 Selection.extend() 路径，
+    //   该路径在 Chromium 实现里**不派发 selectstart 事件**（W3C 规范允许的实现差异），
+    //   因此 Round 6 的 document selectstart preventDefault 拦不到这条路径。
+    //   现象：用户先单击某张卡片文字（caret 落点），再 Shift+click 另一张卡片文字，
+    //   会产生跨 3+ 卡片的 Range；卡片之间的容器节点不在 [data-card-index] 子树内，
+    //   命中全局 ::selection { rgba(255,210,48,0.3) }，视觉上整片金色。
+    // 策略：在 mousedown 阶段（capture 早期），如果检测到 e.shiftKey && 目标在卡片树内，
+    //   主动 removeAllRanges()——浏览器没有起点可"扩展"，跨卡片 Range 创建不出来。
+    //   不调用 preventDefault（保留 click 事件正常派发），只清理 Selection 状态。
+    // 注：Ctrl/Meta+click 用户实测不出现该问题（可能因为 Chromium 对 Add to Selection
+    //   路径行为与 extend 不同），故仅处理 shiftKey，避免过度工程。
+    const onDown = (e) => {
+      if (e.shiftKey && e.target instanceof Element && e.target.closest('[data-card-index]')) {
+        try { window.getSelection()?.removeAllRanges(); } catch (_) { /* ignore */ }
+      }
+      handleMouseDown(e);
+    };
+    // === LM CUSTOMIZATION: NoSelectInResults END ===
     const onMove = (e) => handleMouseMove(e);
     const onUp = (e) => handleMouseUp(e);
     // 兜底阻断浏览器原生 dragstart：当我们处于 outerPending 或 isActive 时，
@@ -475,9 +654,35 @@ export function useDragSelect({
     // 仅在 hook 状态为"待激活/已激活"时干预，避免误伤其它正常拖拽（如外部文件拖入）。
     const onDragStart = (e) => {
       const st = stateRef.current;
-      if (st && (st.outerPending || st.isActive)) {
+      if (st && (st.outerPending || st.innerPending || st.isActive)) {
         e.preventDefault();
       }
+    };
+
+    // [Round 5 修复 — 2026-05-15] Shift+click 跨范围选中 / 卡片文字单击导致黄色文本选区
+    // 真因：浏览器原生 Range Selection 由 selectstart 事件触发，不经过 mousedown→drag 路径。
+    //   即使在结果容器内永久 user-select:none，CSS 规范规定它"只阻止起点在该元素内的选择"——
+    //   用户先点 toolbar（默认 user-select:text）、再 Shift+click 卡片，浏览器跨边界 Range
+    //   会把 toolbar→结果卡片之间所有 DOM 都标黄。
+    //   v1 仅在 containerRef 内拦截 selectstart：当 target 在 toolbar / sidebar / 卡片文字
+    //   等容器外节点上时，Range 仍会被创建并跨入容器内。
+    // [Round 6 修复 — 2026-05-15] 进一步扩大阻断范围
+    //   产品形态：本应用是资源浏览器，UX 上用户不需要选中卡片文字（要复制 URL 有专门按钮）。
+    //   策略改为：document 上无条件阻断 selectstart，仅放行输入控件白名单。
+    //   等同 Fab.com / Pinterest / Google Photos 的通用做法。
+    // 白名单：input / textarea / contenteditable / [data-allow-select] —— 保留输入选中能力。
+    const onSelectStart = (e) => {
+      const target = e.target;
+      if (!target || !(target instanceof Element)) return;
+      // 白名单：可编辑控件、显式标记可选区域不拦截
+      if (
+        target.closest(
+          'input, textarea, [contenteditable="true"], [contenteditable=""], [data-allow-select="true"]'
+        )
+      ) {
+        return;
+      }
+      e.preventDefault();
     };
 
     // [Round 4 修复 C] 异常路径兜底重置
@@ -486,15 +691,15 @@ export function useDragSelect({
     //   只要 hook 处于"有状态"就强制重置。
     const safetyReset = () => {
       const st = stateRef.current;
-      if (!st || (!st.outerPending && !st.isActive)) return;
+      if (!st || (!st.outerPending && !st.innerPending && !st.isActive)) return;
       st.outerPending = false;
+      st.innerPending = false;
       st.isActive = false;
       st.mode = null;
       st.paintedIds = new Set();
       setIsDragging(false);
       setSelectionRect(null);
-      document.body.style.userSelect = '';
-      document.body.style.webkitUserSelect = '';
+      applyDragBodyStyles(false);
       if (autoScrollRef.current) {
         cancelAnimationFrame(autoScrollRef.current);
         autoScrollRef.current = null;
@@ -519,6 +724,7 @@ export function useDragSelect({
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
     document.addEventListener('dragstart', onDragStart, true);
+    document.addEventListener('selectstart', onSelectStart, true); // Shift+click range select 阻断
     document.addEventListener('pointercancel', onPointerCancel, true);
     window.addEventListener('blur', onWindowBlur);
     document.addEventListener('mouseleave', onDocMouseLeave);
@@ -528,6 +734,7 @@ export function useDragSelect({
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.removeEventListener('dragstart', onDragStart, true);
+      document.removeEventListener('selectstart', onSelectStart, true);
       document.removeEventListener('pointercancel', onPointerCancel, true);
       window.removeEventListener('blur', onWindowBlur);
       document.removeEventListener('mouseleave', onDocMouseLeave);
@@ -535,7 +742,7 @@ export function useDragSelect({
       if (autoScrollRef.current) cancelAnimationFrame(autoScrollRef.current);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
-  }, [enabled, handleMouseDown, handleMouseMove, handleMouseUp]);
+  }, [enabled, containerRef, handleMouseDown, handleMouseMove, handleMouseUp]);
 
   return {
     isDragging,

@@ -190,7 +190,9 @@ const VirtualizedResults = ({
     <Box
       ref={scrollElementRef}
       height={containerHeight}
+      overflowX="hidden"
       overflowY="auto"
+      sx={{ scrollbarGutter: 'stable' }}
       onScroll={handleScroll}
       position="relative"
       {...props}

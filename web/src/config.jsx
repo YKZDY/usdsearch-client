@@ -146,6 +146,22 @@ export const FEATURE_FLAGS = {
   // V2 批量打标签入口开关（临时隐藏，演示就绪后再开）
   // 设 true 恢复显示 SelectionModeBar 的"批量打标签"按钮
   BATCH_TAGGING: false,
+  // === LM CUSTOMIZATION: SingleClickDrawerFlag START ===
+  // Group A 选择交互重构（方案 B：完整对齐 Windows 资源管理器复选框模式）
+  // true（默认）：
+  //   - 单击卡片本体 → 打开右侧详情 Drawer，不动选中
+  //   - 单击复选框 → toggle 该项 + 设 anchor
+  //   - Shift + 复选框 → 追加 anchor→target 区间到选中
+  //   - Shift + 本体    → 仅保留 anchor→target 区间（覆盖式）
+  //   - Ctrl/Cmd + 任意 → toggle 该项 + 设新 anchor
+  //   - 修饰键路径一律不打开 Drawer
+  // false：
+  //   - 完整退回到旧版交互（单击=单选覆盖、双击=打开 Modal）
+  //   - 用于线上紧急回滚，无需 revert 代码
+  // 详见：.codebuddy/plan/group-a-selection-and-detail/SELECTION-SPEC.md
+  // 合入英伟达新版时：保留本旗标，与 NEW_CARD_INTERACTION 共存。
+  SINGLE_CLICK_DRAWER: true,
+  // === LM CUSTOMIZATION: SingleClickDrawerFlag END ===
 };
 
 // Authentication configuration

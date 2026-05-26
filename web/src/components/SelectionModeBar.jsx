@@ -94,16 +94,23 @@ const SelectionModeBar = React.memo(({
         align="center"
       >
         <HStack spacing={4}>
+          {/* === LM CUSTOMIZATION: SelectionInteraction START === */}
+          {/*
+            Badge 数字脉冲反馈 v2 — 修复连续点选导致的卡顿：
+              旧版：用 key={selectedCount} 强制 remount，每次数字变化 framer-motion 重新跑
+                    initial→animate 的 spring，连续点击 6 次会让 6 个 spring 互相打断，造成掉帧。
+              新版：去掉 key，改用一个 ref 记录上一个 selectedCount；当变化时通过 animate
+                    数组（[1.12, 1]）触发一次性脉冲，既不重挂载组件，也不会堆积动画。
+                    不变（0→0、保持原值）时用静态 scale=1，避免无意义的动画。
+            合入英伟达新版时：保留本块；本反馈是 LM 新增功能，与 NVIDIA 不交叉。
+          */}
           <MotionBox
-            key={selectedCount}
-            initial={{ scale: 0.92, filter: 'brightness(1.4)' }}
-            animate={{ scale: 1, filter: 'brightness(1)' }}
+            animate={{ scale: selectedCount > 0 ? [1.08, 1] : 1 }}
             transition={{
-              duration: 0.28,
+              duration: 0.24,
               ease: [0.22, 1, 0.36, 1],
-              scale: { type: 'spring', stiffness: 520, damping: 22 },
             }}
-            style={{ display: 'inline-flex', transformOrigin: 'center' }}
+            style={{ display: 'inline-flex', transformOrigin: 'center', willChange: 'transform' }}
           >
             <Badge
               bg="#FFD230"
@@ -119,6 +126,7 @@ const SelectionModeBar = React.memo(({
               {selectedCount}
             </Badge>
           </MotionBox>
+          {/* === LM CUSTOMIZATION: SelectionInteraction END === */}
           <Text fontSize="sm" color="gray.200" fontWeight="medium">
             {(t?.('itemsSelected', { count: selectedCount })) || `已选中 ${selectedCount} 个资产`}
           </Text>
@@ -127,9 +135,12 @@ const SelectionModeBar = React.memo(({
           {showHints && (
             <HStack spacing={2} color="gray.400" fontSize="xs">
               <Text opacity={0.75}>·</Text>
-              <Text>{t?.('hintClickToggle') || '单击切换选中'}</Text>
-              <Text opacity={0.5}>·</Text>
-              <Text>{t?.('hintDblClickDetails') || '双击查看详情'}</Text>
+              {/* === LM CUSTOMIZATION: SelectionInteraction START === */}
+              {/* 原因：方案 B 已把"单击本体=切换选中"改为"单击本体=打开 Drawer"，
+                   原"双击查看详情"提示与新交互冲突，改为更明确的区间/复选框说明。
+                   合入英伟达新版时：保留本块。 */}
+              <Text>{t?.('hintCheckboxToggle') || '点复选框 · Ctrl+点击 · Shift+点击区间'}</Text>
+              {/* === LM CUSTOMIZATION: SelectionInteraction END === */}
               <Text opacity={0.5}>·</Text>
               <HStack spacing={1}>
                 <Kbd

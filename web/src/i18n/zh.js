@@ -226,6 +226,33 @@ const zh = {
   exact: "精确",
   approximate: "近似",
 
+  // === LM CUSTOMIZATION: SearchSettingsPopover i18n START ===
+  // 搜索设置 Popover（C 组：SearchSettingsPopover.jsx + TagWeightSlider.jsx）
+  // 重置 / toast / 已自定义状态
+  resetToDefault: "重置为默认",
+  settingsResetTitle: "设置已重置",
+  settingsResetDesc: "所有搜索设置已恢复为默认值",
+  settingsResetUndoHint: "5 秒内点击撤销可还原",
+  settingsResetUndoneTitle: "已撤销重置",
+  settingsResetUndoneDesc: "已还原到重置前的搜索设置",
+  searchSettingsCustomized: "搜索设置（已自定义）",
+  // Tag 匹配权重滑动条
+  tagWeightLabel: "Tag 匹配权重",
+  tagWeightOff: "关闭",
+  tagWeightLoose: "宽松",
+  tagWeightDefault: "默认",
+  tagWeightTagFav: "偏向 Tag",
+  tagWeightStrict: "Tag 优先",
+  tagWeightOffDesc: "完全关闭 tag 匹配 —— 仅做语义搜索",
+  tagWeightLooseDesc: "考虑 tag，但语义结果占主导",
+  tagWeightDefaultDesc: "均衡 —— 推荐大多数查询使用",
+  tagWeightTagFavDesc: "优先匹配 tag，弱化语义相似度",
+  tagWeightStrictDesc: "大幅提升 tag 命中权重（启用后后端仍会返回部分无 tag 资产）",
+  tagWeightCustom: "自定义",
+  tagWeightCustomDesc: "自定义配置（详情请到高级混合搜索配置编辑）",
+  tagWeightCustomTip: "详情请到高级混合搜索配置编辑",
+  // === LM CUSTOMIZATION: SearchSettingsPopover i18n END ===
+
   // === HybridSearchConfig.jsx ===
   advancedHybridConfig: "高级混合搜索配置",
   textSearchFields: "文本搜索字段",
@@ -280,6 +307,11 @@ const zh = {
   selectAll: "全选",
   clickToViewDetails: "点击查看详情",
   clickOrDoubleClickHint: "单击选中 · 双击查看详情",
+  // === LM CUSTOMIZATION: SelectionInteraction START ===
+  // 原因：方案 B 单击本体 = 打开 Drawer，原提示会误导
+  // 合入英伟达新版时：保留
+  hintCheckboxToggle: "点复选框 · Ctrl+点击 · Shift+点击区间",
+  // === LM CUSTOMIZATION: SelectionInteraction END ===
   // === V2: 批量打标签 ===
   batchTag: "批量打标签",
   batchTagDialogTitle: "给 {count} 个资产添加标签",
@@ -384,6 +416,41 @@ const zh = {
   hideAdvancedPanels: "隐藏高级面板",
   adminMode: "管理员模式",
   // === LM CUSTOMIZATION: detail-modal-revamp END ===
+  // === LM CUSTOMIZATION: details-drawer-i18n START ===
+  // Group A 任务 4：详情抽屉骨架专用 i18n keys
+  // 合入英伟达新版时：保留本块（NVIDIA 原版无详情抽屉）
+  detailsDrawerTitle: "资产详情",
+  detailsDrawerClose: "关闭详情",
+  detailsDrawerCollapse: "折叠详情",
+  detailsDrawerExpand: "展开详情",
+  detailsDrawerPreviewPlaceholder: "[预览 — 任务 5 填充]",
+  detailsDrawerMetadataPlaceholder: "[元数据 — 任务 5 填充]",
+  detailsDrawerTagsSlot: "[标签插槽 — B 组]",
+  detailsDrawerAdvancedSlot: "[高级面板插槽 — B 组]",
+  // 任务 5：5 区块布局 + 操作按钮文案
+  detailsDrawerMetaSize: "大小",
+  detailsDrawerMetaFormat: "格式",
+  detailsDrawerMetaCreated: "创建时间",
+  detailsDrawerMetaModified: "修改时间",
+  detailsDrawerMetaCreator: "创建者",
+  detailsDrawerMetaUnknown: "未知",
+    detailsDrawerCopyPath: "复制路径",
+    detailsDrawerCopyPathSuccess: "路径已复制",
+    detailsDrawerCopyPathTooltip: "复制此路径",
+    detailsDrawerSource: "来源",
+    detailsDrawerScore: "评分",
+    detailsDrawerPath: "路径",
+  detailsDrawerOpenInOmniverse: "在 Omniverse 打开",
+  detailsDrawerDownload: "下载",
+  detailsDrawerEmptyHint: "请在结果列表中选择一个资产",
+  detailsDrawerAdvancedTitle: "高级",
+  // detail-modal-revamp（资产详情 Drawer 高级面板增强）
+  detailsDrawerLoadFailed: "加载失败",
+  detailsDrawerRetry: "重试",
+  detailsDrawerRefreshAll: "刷新元数据",
+  detailsDrawerNoIndexPermission: "需要管理员权限",
+  detailsDrawerNoAsset: "请先选择资产",
+  // === LM CUSTOMIZATION: details-drawer-i18n END ===
   details: "详情",
   property: "属性",
   etag: "ETag",
@@ -666,6 +733,71 @@ const zh = {
   ssoBridgeCopyTokenSuccess: "Token 已复制到剪贴板",
   ssoBridgeCopyTokenEmpty: "暂无可复制的 Token",
   // === LM CUSTOMIZATION: SSO Bridge END ===
+
+  // === Group D — 无限滚动 i18n（追加在文件末尾，与其他 group 冲突概率低） ===
+  infiniteLoading: "加载中...",
+  infiniteNoMore: "已经到底了",
+  infiniteLoadMore: "加载更多",
+  infiniteError: "加载失败",
+  infiniteRetry: "重试",
+
+  // === LM CUSTOMIZATION: Group B i18n START ===
+  // 原因：Group B 卡片 tag 区 + 详情高级面板新增的所有文案
+  // 合入英伟达新版时：保留整段（key 走 tagBar./tagEditor./advanced. 前缀，不与 NVIDIA 冲突）
+  // CardTagBar / TagEditPopover
+  "tagBar.openEditor": "编辑标签",
+  "tagBar.addButtonAriaLabel": "添加标签",
+  "tagBar.searchOrCreate": "搜索或创建标签…",
+  "tagBar.inputAriaLabel": "标签名",
+  "tagBar.errorEmpty": "标签名不能为空",
+  "tagBar.errorTooLong": "标签名最长 50 字符",
+  "tagBar.errorInvalidChars": "标签名不能含 / \\ 或换行符",
+  "tagBar.createNew": "创建新标签",
+  "tagBar.candidatesAriaLabel": "标签候选",
+  "tagBar.loading": "加载标签…",
+  "tagBar.noMatch": "无匹配标签",
+  "tagBar.empty": "还没有标签",
+  "tagBar.removeAriaLabel": "移除 {tag}",
+  "tagBar.addAriaLabel": "添加 {tag}",
+  "tagBar.moreHidden": "个（请细化搜索）",
+  "tagBar.moreCount": "还有 {n} 个",
+  "tagBar.hint": "点击切换 · Enter 创建 · Esc 关闭",
+  "tagBar.noLogin": "登录后可管理标签",
+  "tagBar.noWritePermission": "无写入权限",
+  // === LM CUSTOMIZATION: TagDeleteUndo START ===
+  // 原因（2026-05-25）：用户反馈卡片删 tag 无任何提示就直接删除，缺乏撤销机制。
+  // 新增"5 秒撤销窗口 toast"所需文案；与上方 tagBar.* 同前缀，便于集中维护。
+  // 合入英伟达新版时：保留本块（NVIDIA 原版无 tag 概念，零冲突风险）。
+  "tagBar.deleted.title": "已删除标签",
+  "tagBar.deleted.undo": "撤销",
+  "tagBar.deleted.undoHint": "Ctrl+Z 撤销",
+  "tagBar.deleted.undoHintMac": "⌘Z 撤销",
+  "tagBar.deleted.restored": "已恢复 \"{tag}\"",
+  "tagBar.deleted.failed": "删除 \"{tag}\" 失败，已恢复",
+  "tagBar.deleted.closeAriaLabel": "关闭提示",
+  // === LM CUSTOMIZATION: TagDeleteUndo END ===
+  // AssetTagEditor（抽屉内完整编辑器）
+  "tagEditor.title": "标签",
+  "tagEditor.placeholder": "输入后按 Enter 添加（或粘贴逗号分隔批量添加）…",
+  "tagEditor.batchAddedToast": "已添加 {n} 个标签",
+  "tagEditor.empty": "暂无标签 · 在下方输入框输入后按 Enter 添加",
+  "tagEditor.sourceUser": "用户",
+  "tagEditor.sourceSystem": "系统",
+  "tagEditor.sourceAi": "AI",
+  "tagEditor.failedRetry": "同步失败，点击重试",
+  "tagEditor.removeAriaLabel": "移除标签 {tag}",
+  // AdvancedMatchInfo（抽屉高级面板）
+  "advanced.title": "高级匹配信息",
+  "advanced.matchedFields": "匹配字段",
+  "advanced.matchedTerms": "匹配词",
+  "advanced.score": "得分",
+  "advanced.rrfScore": "RRF 分数",
+  "advanced.vectorSimilarity": "向量相似度",
+  "advanced.embeddingModel": "Embedding 模型",
+  "advanced.rawMetadata": "原始元数据（JSON）",
+  "advanced.empty": "无高级匹配信息",
+  "advanced.toggleRaw": "切换原始元数据",
+  // === LM CUSTOMIZATION: Group B i18n END ===
 };
 
 export default zh;

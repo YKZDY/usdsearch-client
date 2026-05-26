@@ -44,7 +44,15 @@ import {
     PopoverTrigger, PopoverContent, PopoverArrow, PopoverCloseButton,
     PopoverHeader, PopoverBody, Divider, Select, Link, Tooltip
 } from '@chakra-ui/react';
+// === LM CUSTOMIZATION: SearchSettingsTrigger START ===
+// 原因：在顶栏搜索框右侧加一个齿轮 IconButton 作为"搜索设置" Popover 的触发器
+//        （Popover 主体在 components/SearchSettingsPopover.jsx，挂在 HybridDeepSearchUI 内）；
+//        触发器与 Popover 通过 CustomEvent('open-search-settings') 解耦。
+// 合入英伟达新版时：原本就存在的 @chakra-ui/icons 解构 import 不动；
+//   "搜索设置" 改用 TuneIcon（来自 components/icons/MaterialIcons.jsx 公共模块）。
 import { LockIcon, UnlockIcon, InfoIcon, ExternalLinkIcon, ChevronDownIcon, LinkIcon } from '@chakra-ui/icons';
+import { TuneIcon } from './components/icons/MaterialIcons';
+// === LM CUSTOMIZATION: SearchSettingsTrigger END ===
 import { motion } from 'framer-motion';
 // === LM CUSTOMIZATION: i18n START ===
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
@@ -1869,6 +1877,130 @@ const LanguageSwitcher = () => {
     );
 };
 
+// === LM CUSTOMIZATION: SearchSettingsTrigger START ===
+// 顶栏"搜索设置"齿轮按钮抽出来作为独立内部组件，让 useTranslation() 能在 LanguageProvider 子树内合法调用
+// （App 组件本身没有调 useTranslation，无法直接在其 JSX 里使用 t）。
+// 点击后派发 CustomEvent('open-search-settings')，由 SearchSettingsPopover 监听并打开。
+// 4.6 增强：订阅 'hybrid-config-customized' 事件，在 hybridConfig 偏离默认时显示金色小圆点 Badge，
+//          状态可见性 / Badge 配色与 FilterPopoverButton 等其它筛选 badge 风格保持一致。
+// 4.7 增强（UX 修复）：
+//   1) 图标从 SettingsIcon（齿轮）替换成 TuneIcon（滑块 / Material Design "tune"），
+//      与 FabToolbar 的“视图设置”齿轮做强视觉区分，避免顶栏出现两个长得一样的齿轮。
+//   2) 点击时派发事件携带触发按钮的 getBoundingClientRect()，让 SearchSettingsPopover
+//      可以基于齿轮真实 DOM 位置做 fixed 定位（top = rect.bottom+8, right = innerWidth-rect.right），
+//      消除 “弹窗飘到屏幕最右边、与触发按钮无视觉联动” 的问题。
+// 4.7+ 优化：
+//   3) TuneIcon 抽到 components/icons/MaterialIcons.jsx 公共模块，避免后续重复定义。
+//   4) IconButton 上加 data-search-settings-trigger="true" 显式标识，让 Popover 端不靠
+//      aria-label 模糊匹配找齿轮，能避免未来同名 aria-label 冲突。
+// 合入英伟达新版时：整个组件 + JSX 调用都包在 LM 块里，删除时只需删本块和 JSX 调用处即可。
+
+const SearchSettingsTriggerButton = () => {
+    const { t } = useTranslation();
+    const [hasCustom, setHasCustom] = useState(false);
+    // 4.8 UX：订阅 Popover 端 isOpen 变化（事件名 search-settings-state-changed），
+    // 让齿轮按钮在 Popover 打开期间呈现金色激活态背景 + aria-expanded，
+    // 满足 UX Checklist #6 状态可见性。即使鼠标移开按钮，也能直观判断 Popover 状态。
+    const [isOpen, setIsOpen] = useState(false);
+    // 4.7：用 ref 拿齿轮按钮的 DOM 节点，点击时把 rect 附在事件上传给 Popover
+    const triggerRef = useRef(null);
+
+    useEffect(() => {
+        const handleCustom = (e) => {
+            const next = !!(e.detail && e.detail.isCustom);
+            setHasCustom((prev) => (prev === next ? prev : next));
+        };
+        window.addEventListener('hybrid-config-customized', handleCustom);
+        return () => window.removeEventListener('hybrid-config-customized', handleCustom);
+    }, []);
+
+    // 4.8 UX：订阅 Popover 状态广播事件，与 SearchSettingsPopover 内常量
+    // SEARCH_SETTINGS_STATE_EVENT 同名（保留字符串字面量避免循环导入风险）
+    useEffect(() => {
+        const handleState = (e) => {
+            const next = !!(e.detail && e.detail.isOpen);
+            setIsOpen((prev) => (prev === next ? prev : next));
+        };
+        window.addEventListener('search-settings-state-changed', handleState);
+        return () => window.removeEventListener('search-settings-state-changed', handleState);
+    }, []);
+
+    const labelBase = t('searchSettings') || 'Search settings';
+    const labelCustomized = t('searchSettingsCustomized') || 'Search settings (customized)';
+    const label = hasCustom ? labelCustomized : labelBase;
+
+    // 4.7：派发 open-search-settings 时附带触发按钮 rect，用于 Popover 锚定
+    const handleOpen = () => {
+        const rect = triggerRef.current?.getBoundingClientRect?.();
+        window.dispatchEvent(
+            new CustomEvent('open-search-settings', {
+                detail: rect
+                    ? {
+                          rect: {
+                              top: rect.top,
+                              left: rect.left,
+                              right: rect.right,
+                              bottom: rect.bottom,
+                              width: rect.width,
+                              height: rect.height,
+                          },
+                      }
+                    : undefined,
+            }),
+        );
+    };
+
+    return (
+        // 与 HeaderIcons 其它按钮（语言切换 / 服务器选择 / Info / Share）保持一致的风格：
+                        // size="sm" 幽灵态 + 浅灰色图标，避免在同一顶栏中出现 "一个 40px 金色圆环 + 一堆 sm幽灵" 的风格断层。
+                        // hasCustom 状态下颜色提升为金色 + 右上角金色小圆点，保持“状态可见性” UX checklist。
+        <Tooltip label={label} placement="bottom" hasArrow>
+            <Box position="relative" display="inline-flex" flexShrink={0}>
+                <IconButton
+                    ref={triggerRef}
+                    data-search-settings-trigger="true"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={label}
+                    aria-haspopup="dialog"
+                    aria-expanded={isOpen}
+                    icon={<TuneIcon boxSize={4} />}
+                    // 4.8 UX：isOpen 时金色 12% 透明背景 + 金色图标，呈现激活态；
+                    // 优先级 isOpen > hasCustom > 默认（打开时直接以"金色填充"压过定制态金色，
+                    // 让用户能从颜色饱和度区分"Popover 是否展开"与"已有自定义"两层信息）。
+                    color={isOpen ? '#FFD230' : hasCustom ? '#FFD230' : '#ABABAB'}
+                    bg={isOpen ? 'rgba(255,210,48,0.12)' : 'transparent'}
+                    _hover={{
+                        color: isOpen || hasCustom ? '#FFD230' : 'white',
+                        bg: isOpen ? 'rgba(255,210,48,0.18)' : 'rgba(255,255,255,0.06)',
+                    }}
+                    _active={{ bg: 'rgba(255,210,48,0.22)' }}
+                    _focusVisible={{ boxShadow: '0 0 0 2px #FFD230' }}
+                    transition="color 200ms ease, background 200ms ease"
+                    onClick={handleOpen}
+                />
+                {hasCustom && (
+                    // 金色小圆点 Badge — 7×7 px，按钮右上角；
+                    // 不靠颜色单独传达信息（Tooltip 文案已说明 customized），可达性达标。
+                    <Box
+                        position="absolute"
+                        top="2px"
+                        right="2px"
+                        w="7px"
+                        h="7px"
+                        borderRadius="999px"
+                        bg="#FFD230"
+                        boxShadow="0 0 0 2px #1A1A1A, 0 0 4px rgba(255,210,48,0.6)"
+                        pointerEvents="none"
+                        aria-hidden
+                    />
+                )}
+            </Box>
+        </Tooltip>
+    );
+};
+// === LM CUSTOMIZATION: SearchSettingsTrigger END ===
+
 // App wrapper to initialize persistent cache
 const App = () => {
     // === LM CUSTOMIZATION: Sidebar state START ===
@@ -1904,10 +2036,32 @@ const App = () => {
                 <Flex h="100%" alignItems="center" px={6} gap={4}>
                     {/* 左侧：仅 Logo（移除标题文字和版本号，Fab 风格） */}
                     <Image src={logo} alt="LIGHT MARKET" h="42px" filter="brightness(1.1)" flexShrink={0} cursor="pointer" onClick={() => window.location.href = '/'} />
-                    
-                    {/* 中间：胶囊搜索框（Fab 风格 radius 9999px） */}
-                    <TopSearchBar style={{ margin: '0 auto' }} />
-                    
+
+                    {/* 中间：胶囊搜索框 + 紧贴右侧的“搜索设置”齿轮（整组居中且搜索框拉满）
+                       === LM CUSTOMIZATION: SearchSettingsTrigger START ===
+                         布局策略：
+                          - 外层 HStack 用 flex={1} 占满 logo 与 HeaderIcons 之间的空间，并 mx="auto" 视觉居中
+                          - maxW 720px = TopSearchBar 自身 max-width 680px + 齿轮 36px + spacing 8px，
+                            避免搜索框被无限拉伸（与 Fab.com / NVIDIA 原版"中间一段胶囊框"风格一致）
+                          - TopSearchBar 用 flex={1} 撑满 HStack 剩余空间（直到自身 680px 上限）
+                          - 齿轮 flexShrink={0} 紧贴搜索框右侧 8px
+                         之前问题：原写法 `mx="auto" flexShrink={1}` 让 HStack 按内容收缩，
+                                  导致搜索框只用"自然宽度"（远小于 680px），两侧大量留白。
+                         合入英伟达新版时：仅保留 LM 标记块；原版 TopSearchBar 独立居中只需干掉 HStack 包裹即可。 */}
+                    <HStack
+                        flex={1}
+                        mx="auto"
+                        maxW="720px"
+                        spacing={2}
+                        minW={0}
+                    >
+                        <Box flex={1} minW={0}>
+                            <TopSearchBar style={{ margin: 0, width: '100%', maxWidth: '680px' }} />
+                        </Box>
+                        <SearchSettingsTriggerButton />
+                    </HStack>
+                    {/* === LM CUSTOMIZATION: SearchSettingsTrigger END === */}
+
                     {/* 右侧：功能图标（保持不变） */}
                     <HeaderIcons handleSearch={() => window.dispatchEvent(new Event('trigger-search'))} />
                 </Flex>

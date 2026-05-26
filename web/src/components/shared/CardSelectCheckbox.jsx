@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box } from '@chakra-ui/react';
 import './CardSelectCheckbox.css';
+// === LM CUSTOMIZATION: SelectionInteraction START ===
+// Group A 任务 5：方案 B 新交互需要识别"复选框命中"，
+// 通过 data-role 属性 + FEATURE_FLAGS.SINGLE_CLICK_DRAWER 控制事件冒泡策略。
+import { FEATURE_FLAGS } from '../../config';
+// === LM CUSTOMIZATION: SelectionInteraction END ===
 
 const FIRST_REVEAL_KEY = 'usdsearch.multiSelect.firstShown';
 
@@ -33,8 +38,21 @@ const CardSelectCheckbox = React.memo(({ isSelected, isMultiSelectMode, onToggle
   }, [isMultiSelectMode, isSelected]);
 
   const handleClick = (e) => {
+    // === LM CUSTOMIZATION: SelectionInteraction START ===
+    // 方案 B 双轨：
+    //   - SINGLE_CLICK_DRAWER=true（新交互）：不阻止冒泡，让事件冒泡到 Card，
+    //     由 useDrawerOrSelect 通过 [data-role="card-checkbox"] 识别为复选框命中
+    //     后统一处理（行 1/3/5 = toggle/区间追加/Ctrl-toggle）。本地不再调 onToggle，
+    //     避免双重触发。
+    //   - SINGLE_CLICK_DRAWER=false（旧交互回退）：保留原行为，
+    //     stopPropagation + onToggle，避免双 toggle 抵消。
+    if (FEATURE_FLAGS && FEATURE_FLAGS.SINGLE_CLICK_DRAWER) {
+      // 不 stopPropagation，不调 onToggle —— 交给上层 hook
+      return;
+    }
     e.stopPropagation();
     onToggle?.();
+    // === LM CUSTOMIZATION: SelectionInteraction END ===
   };
 
   const cls = [
@@ -47,11 +65,18 @@ const CardSelectCheckbox = React.memo(({ isSelected, isMultiSelectMode, onToggle
   return (
     <Box
       className={cls}
+      // === LM CUSTOMIZATION: SelectionInteraction START ===
+      // data-role 用于 useDrawerOrSelect hook 识别"复选框命中区"（方案 B 行 1/3/5）。
+      // 命中时事件冒泡到 Card.onClick，由 hook 通过 e.target.closest('[data-role="card-checkbox"]') 判定。
+      data-role="card-checkbox"
+      // === LM CUSTOMIZATION: SelectionInteraction END ===
       position="absolute"
       top={2}
       left={2}
       zIndex={10}
-      boxSize={isSelected ? "24px" : "22px"}
+      // R-1.1: 命中区统一 24×24px（原未选中 22px → 24px，对齐可达性最小触摸目标，
+      // 视觉差异 2px 几乎不可见，命中容差提升 ~20%。Group A 任务 2）
+      boxSize="24px"
       borderRadius="full"
       display="flex"
       alignItems="center"
