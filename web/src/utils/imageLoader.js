@@ -233,13 +233,19 @@ const fetchImageFromAPI = async (url, getHeaders) => {
   });
 
   if (!response.ok) {
-    // Mark this URL as failed to prevent future retries in this session
-    failedUrls.add(url);
-    // Prevent failedUrls from growing unbounded
-    if (failedUrls.size > MAX_FAILED_URLS_SIZE) {
-      const oldest = failedUrls.values().next().value;
-      failedUrls.delete(oldest);
+    // === LM CUSTOMIZATION: FailedUrlsOnlyFor404 START ===
+    // 原因：只对 404 错误加入永久失败列表；临时性服务器错误（500/503 等）不应阻止后续重试，
+    //       否则会导致多图资产偶发只显示部分预览图（如 11 张只显示 6 张）。
+    // 合入英伟达新版时：保留本块
+    if (response.status === 404) {
+      failedUrls.add(url);
+      // Prevent failedUrls from growing unbounded
+      if (failedUrls.size > MAX_FAILED_URLS_SIZE) {
+        const oldest = failedUrls.values().next().value;
+        failedUrls.delete(oldest);
+      }
     }
+    // === LM CUSTOMIZATION: FailedUrlsOnlyFor404 END ===
     
     const error = new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
     error.status = response.status;
@@ -395,6 +401,18 @@ export const preloadImages = async (assetUrls, getHeaders, apiUrl, onProgress = 
 export const loadProgressiveImages = async (assetUrl, getHeaders, apiUrl, startOffset = 1, maxParallel = MAX_CONCURRENT_DOWNLOADS, result = null) => {
   const images = new Map();
   
+  // === LM CUSTOMIZATION: ClearStaleFailedUrls START ===
+  // 原因：failedUrls 可能缓存了之前因 500 错误（已修复为只缓存 404）而被错误标记的 URL，
+  //       在 progressive loading 开始时清除与当前资产相关的所有条目，确保重新尝试。
+  // 合入英伟达新版时：保留本块
+  const assetUrlEncoded = encodeURIComponent(assetUrl);
+  for (const url of failedUrls) {
+    if (url.includes(assetUrlEncoded) || url.includes(assetUrl)) {
+      failedUrls.delete(url);
+    }
+  }
+  // === LM CUSTOMIZATION: ClearStaleFailedUrls END ===
+  
   // Always fetch offset 0 first (this will replace any existing cache entry with vector image if available)
   try {
     const offset0Image = await loadImage(assetUrl, getHeaders, apiUrl, false, 0, result);
@@ -403,68 +421,28 @@ export const loadProgressiveImages = async (assetUrl, getHeaders, apiUrl, startO
     // Offset 0 failed, but continue with other offsets
   }
   
-  // Track active downloads and results
-  const activeDownloads = new Map(); // offset -> Promise
-  const completedOffsets = new Set();
-  let nextOffsetToTry = startOffset;
-  let foundEndOfImages = false;
-  let consecutiveFailures = 0;
+  // === LM CUSTOMIZATION: ProgressiveLoadRobust START ===
+  // 原因：并行探测会产生大量 404 报错（浏览器层面无法 suppress），严重污染控制台。
+  //       改为顺序探测：逐个 offset 尝试，遇到第一个 404 立即停止。
+  //       对单图资产：只产生 1 个 404；对多图资产（如 house.usd 11 张）：也只产生 1 个 404。
+  //       虽然顺序加载稍慢，但本地代理延迟极低（<50ms/张），11 张约 500ms，用户体验可接受。
+  // 合入英伟达新版时：保留本块
   
-  const startDownload = (offset) => {
-    const promise = loadImage(assetUrl, getHeaders, apiUrl, false, offset)
-      .then(imageData => {
-        images.set(offset, imageData);
-        completedOffsets.add(offset);
-        consecutiveFailures = 0; // Reset failure count on success
-        return { offset, success: true, imageData };
-      })
-      .catch(error => {
-        completedOffsets.add(offset);
-        if (error.status === 404) {
-          // Found end of images
-          foundEndOfImages = true;
-        } else {
-          consecutiveFailures++;
-        }
-        return { offset, success: false, error };
-      })
-      .finally(() => {
-        activeDownloads.delete(offset);
-      });
-    
-    activeDownloads.set(offset, promise);
-    return promise;
-  };
+  // 顺序探测：逐个 offset 加载，遇到 404 立即停止
+  let currentOffset = startOffset;
+  const MAX_OFFSET_LIMIT = startOffset + 50; // 安全上限，防止无限循环
   
-  // Keep downloads running until we find the end or hit limits
-  while (!foundEndOfImages && nextOffsetToTry < startOffset + 200) {
-    // Fill up to maxParallel concurrent downloads
-    while (activeDownloads.size < maxParallel && !foundEndOfImages && nextOffsetToTry < startOffset + 200) {
-      startDownload(nextOffsetToTry);
-      nextOffsetToTry++;
-      
-      // Stop if we have too many consecutive failures (likely no more images)
-      if (consecutiveFailures >= 5) {
-        foundEndOfImages = true;
-        break;
-      }
-    }
-    
-    // Wait for at least one download to complete before continuing
-    if (activeDownloads.size > 0) {
-      await Promise.race(activeDownloads.values());
-    }
-    
-    // If no active downloads and we haven't found end, we're done
-    if (activeDownloads.size === 0 && !foundEndOfImages) {
+  while (currentOffset < MAX_OFFSET_LIMIT) {
+    try {
+      const imageData = await loadImage(assetUrl, getHeaders, apiUrl, false, currentOffset);
+      images.set(currentOffset, imageData);
+      currentOffset++;
+    } catch (error) {
+      // 遇到任何错误（404 或其他）都停止探测
       break;
     }
   }
-  
-  // Wait for all remaining downloads to complete
-  if (activeDownloads.size > 0) {
-    await Promise.allSettled(activeDownloads.values());
-  }
+  // === LM CUSTOMIZATION: ProgressiveLoadRobust END ===
   
   // Find the actual max offset from loaded images
   const loadedOffsets = Array.from(images.keys()).sort((a, b) => a - b);
