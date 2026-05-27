@@ -162,6 +162,20 @@ export const FEATURE_FLAGS = {
   // 合入英伟达新版时：保留本旗标，与 NEW_CARD_INTERACTION 共存。
   SINGLE_CLICK_DRAWER: true,
   // === LM CUSTOMIZATION: SingleClickDrawerFlag END ===
+  // === LM CUSTOMIZATION: CardTagBarBubble START ===
+  // CardTagBar 容器层事件透传开关（修复非缩略图区域偶发单击失灵）
+  // true（默认）：
+  //   - CardTagBar 容器层不再无条件 stopPropagation
+  //   - 标签 chip 之间间隙、加号按钮 padding、空标签占位区的点击会冒泡到 <Card> 根
+  //   - 卡片下半部 1/3 区域的点击灵敏度从"偶发失灵"提升至 100%
+  //   - chip / 加号按钮 / +N 折叠 chip 自身仍在元素层级阻断冒泡，不会因点 chip 误开 Drawer
+  // false：
+  //   - 退回容器层全阻断（onClick / onMouseDown / onDoubleClick 全 stopPropagation）
+  //   - 用于线上紧急回滚，无需 revert 代码
+  // 详见：.codebuddy/plan/click-and-layout-fixes/requirements.md
+  // 合入英伟达新版时：本旗标只影响 CardTagBar（LM 新增组件），与英伟达原版无冲突，可保留。
+  CARD_TAGBAR_BUBBLE: true,
+  // === LM CUSTOMIZATION: CardTagBarBubble END ===
 };
 
 // Authentication configuration
@@ -198,7 +212,10 @@ export const DEFAULT_SEARCH_PARAMS = {
   file_name: "",
   exclude_file_name: "",
   file_extension_include: "",
-  file_extension_exclude: "usd,usda,usdc,usdz,jpg,png",
+  // [LM 2026-05-26] 默认排除列表移除 USD 系列：
+  //   业务侧已正式将 .usd/.usda/.usdc/.usdz 纳入主资产，不应默认隐藏。
+  //   保留 jpg,png 是为了避免浏览模式下被纹理图刷屏，符合 R1 选项 B。
+  file_extension_exclude: "jpg,png",
 
   // Path & Location Filters
   search_path: "",

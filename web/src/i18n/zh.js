@@ -146,9 +146,9 @@ const zh = {
   excludeFileNames: "排除文件名",
   excludePatternsPlaceholder: "排除模式",
   includeExtensions: "包含扩展名",
-  includeExtensionsPlaceholder: "例如：usd*,jpg,png",
+  includeExtensionsPlaceholder: "例如：.uasset, .fbx, .usd",
   excludeExtensions: "排除扩展名",
-  excludeExtensionsPlaceholder: "例如：tmp,bak",
+  excludeExtensionsPlaceholder: "例如：jpg, png, tmp",
   pathLocationFilters: "路径和位置筛选",
   searchPath: "搜索路径",
   searchPathPlaceholder: "包含路径（例如 /Projects）",
@@ -747,6 +747,14 @@ const zh = {
   "advanced.empty": "无高级匹配信息",
   "advanced.toggleRaw": "切换原始元数据",
   // === LM CUSTOMIZATION: Group B i18n END ===
+  // === LM CUSTOMIZATION: MultiImagePreview i18n START ===
+  // 原因：USD 多图预览体验优化新增文案
+  // 合入英伟达新版时：保留本块（NVIDIA 原版无此功能）
+  autoSelectedBestPreview: "已自动选择最佳预览图进行搜索",
+  noValidPreviewForSimilar: "该资产无有效预览图，无法进行相似搜索",
+  similarSearchImageError: "该预览图无法用于相似搜索，请尝试切换到其他预览图后重试",
+  previewCount: "{current}/{total}",
+  // === LM CUSTOMIZATION: MultiImagePreview i18n END ===
 };
 
 export default zh;

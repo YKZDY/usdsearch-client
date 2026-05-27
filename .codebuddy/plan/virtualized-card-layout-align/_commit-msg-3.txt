@@ -1,0 +1,18 @@
+fix(virtualized): 视口底部 49px 黑带消除(InfiniteScroll 空容器条件渲染)
+
+真因(第三轮精准侦察):
+- 用户图1红框黑带不是 itemHeight 引起的,与之前的 360→320→335 调整无关
+- 真凶是 InfiniteScroll footer 容器无条件渲染:
+  <Box minH="32px" pt={2} pb={4}> 即使 4 种内容状态都未触发(常态)
+  仍占 32+24=56px,加上 chakra VStack spacing 把 react-window 滚动容器
+  顶上去 ~49px,造成视口底部明显黑带
+
+修复:
+- 把 4 种状态(loading/error/loadMoreBtn/noMore)聚合为 isFooterVisible
+- 只有 isFooterVisible=true 时才渲染外层 Box,常态不占空间
+
+Playwright 实测(limit=100, viewport 1456x945):
+- BEFORE: scrollContainer.h=667, .bottom=880(底部 65px 黑带)
+- AFTER:  scrollContainer.h=707, .bottom=920(底部 25px,正常 padding)
+
+完全在 LM CUSTOMIZATION: InfiniteScroll 标记块内,合入英伟达新版无影响。

@@ -146,9 +146,9 @@ const en = {
   excludeFileNames: "Exclude File Names",
   excludePatternsPlaceholder: "Exclude patterns",
   includeExtensions: "Include Extensions",
-  includeExtensionsPlaceholder: "e.g., usd*,jpg,png",
+  includeExtensionsPlaceholder: "e.g., .uasset, .fbx, .usd",
   excludeExtensions: "Exclude Extensions",
-  excludeExtensionsPlaceholder: "e.g., tmp,bak",
+  excludeExtensionsPlaceholder: "e.g., jpg, png, tmp",
   pathLocationFilters: "Path & Location Filters",
   searchPath: "Search Path",
   searchPathPlaceholder: "Include path (e.g., /Projects)",
@@ -751,6 +751,14 @@ const en = {
   "advanced.empty": "No advanced match info available",
   "advanced.toggleRaw": "Toggle raw metadata",
   // === LM CUSTOMIZATION: Group B i18n END ===
+
+  // === LM CUSTOMIZATION: MultiImagePreview i18n START ===
+  // USD multi-image preview UX optimization
+  autoSelectedBestPreview: "Automatically selected the best preview for search",
+  noValidPreviewForSimilar: "No valid preview available for similarity search",
+  similarSearchImageError: "This preview cannot be used for similarity search. Try switching to another preview.",
+  previewCount: "{current}/{total}",
+  // === LM CUSTOMIZATION: MultiImagePreview i18n END ===
 };
 
 export default en;
