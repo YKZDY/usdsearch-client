@@ -35,7 +35,7 @@ import {
   useToast,
 } from '@chakra-ui/react';
 import { AddIcon, RepeatIcon, CheckIcon } from '@chakra-ui/icons';
-import { brandColors, fabColors, fabPalette, fabRadius, fabSpacing } from '../theme/fabTokens';
+import { brandColors, fabColors, fabRadius, fabSpacing, fabTypo } from '../theme/fabTokens';
 import useAssetTags from '../hooks/useAssetTags';
 import { useTranslation } from '../i18n/LanguageContext';
 import TagPill from './TagPill';
@@ -58,7 +58,10 @@ function validateTagName(name) {
 }
 
 /**
- * 解析 tag 来源 icon（数据缺失时返回 'user'）
+ * 解析 tag 来源（数据缺失时返回 'user'）
+ *
+ * v1.1 调整：来源信息不再在每个 chip 后面提示为独立描边标签（那个样式被评价为“调试信息感”），
+ * 但仍保留推断逻辑以供 hover Tooltip 或未来扩展使用。
  */
 function inferTagSource(tagWithStatus) {
   if (!tagWithStatus || typeof tagWithStatus !== 'object') return 'user';
@@ -69,32 +72,8 @@ function inferTagSource(tagWithStatus) {
   return 'user';
 }
 
-const SourceBadge = memo(function SourceBadge({ source, t }) {
-  const labels = {
-    user: t('tagEditor.sourceUser'),
-    system: t('tagEditor.sourceSystem'),
-    ai: t('tagEditor.sourceAi'),
-  };
-  const colors = {
-    user: fabColors.textSecondary,
-    system: fabPalette.blue[200],
-    ai: fabPalette.purple[200],
-  };
-  return (
-    <Box
-      fontSize="2xs"
-      color={colors[source]}
-      px={1}
-      borderRadius={fabRadius['0.5']}
-      borderWidth="1px"
-      borderColor={colors[source]}
-      lineHeight="14px"
-      h="14px"
-    >
-      {labels[source]}
-    </Box>
-  );
-});
+// v1.1：<SourceBadge> 已下线。原为每个 chip 后跟随一个“用户/系统/AI”描边标签，
+// 占据视觉密度且抢夺主 chip 注意力。如需查来源请看 chip 本身的 Tooltip。
 
 const AssetTagEditor = memo(function AssetTagEditor({ asset, serverUrl, getHeaders, apiUrl }) {
   const { t } = useTranslation();
@@ -237,51 +216,71 @@ const AssetTagEditor = memo(function AssetTagEditor({ asset, serverUrl, getHeade
     >
       <HStack justify="space-between" align="center">
         <Text
-          fontSize="xs"
+          // v1.1：改用设计令牌 eyebrow.sm（10px / 700 / uppercase / 字距 1px）
+          fontSize={fabTypo.eyebrow.sm.size}
+          lineHeight={fabTypo.eyebrow.sm.lineHeight}
+          letterSpacing={fabTypo.eyebrow.sm.letterSpacing}
+          fontWeight={fabTypo.eyebrow.sm.weight}
           color={fabColors.textSecondary}
           textTransform="uppercase"
-          letterSpacing="0.6px"
-          fontWeight="700"
         >
           {t('tagEditor.title')}
         </Text>
         {isLoading && <Spinner size="xs" color={brandColors.primary} />}
       </HStack>
 
-      {/* ── tag 列表 ──────────────────────────────────────────── */}
+      {/* ── tag 列表 ─────────────────────────────────── */}
       {viewItems.length === 0 ? (
-        <Text fontSize="xs" color={fabColors.textSecondary} py={fabSpacing['1']}>
-          {t('tagEditor.empty')}
-        </Text>
+        <HStack
+          spacing={fabSpacing['1.5']}
+          py={fabSpacing['1']}
+          px={fabSpacing['2']}
+          bg={fabColors.bgElevatedHigh}
+          borderRadius={fabRadius['1.5']}
+        >
+          <Text fontSize="xs" color={fabColors.textSecondary}>
+            {t('tagEditor.empty')}
+          </Text>
+        </HStack>
       ) : (
         <Wrap spacing={fabSpacing['1']}>
           {viewItems.map((item) => (
             <WrapItem key={item.name}>
-              <HStack spacing={1}>
-                <TagPill
-                  label={item.name}
-                  active={item.status !== 'failed'}
-                  status={item.status === 'pending' ? 'pending' : item.status === 'failed' ? 'failed' : 'normal'}
-                  removable={canEdit}
-                  size="sm"
-                  onRemove={canEdit ? () => removeTag(item.name) : undefined}
-                  onClick={item.status === 'failed' && canEdit ? () => retryFailedTag(item.name) : undefined}
-                  ariaLabel={
-                    item.status === 'failed'
-                      ? t('tagEditor.failedRetry')
-                      : t('tagEditor.removeAriaLabel', { tag: item.name })
-                  }
-                />
-                <SourceBadge source={item.source} t={t} />
-              </HStack>
+              {/* v1.1：移除后跟的 <SourceBadge>。来源信息迁移到 chip 本身的 title/Tooltip，
+                  hover 才显示，不再占静态空间。 */}
+              <Tooltip
+                label={t(`tagEditor.source${item.source.charAt(0).toUpperCase() + item.source.slice(1)}`)}
+                placement="top"
+                openDelay={500}
+                hasArrow
+              >
+                <Box>
+                  <TagPill
+                    label={item.name}
+                    active={item.status !== 'failed'}
+                    status={item.status === 'pending' ? 'pending' : item.status === 'failed' ? 'failed' : 'normal'}
+                    removable={canEdit}
+                    // v1.1\uff1a\u62bd\u5c49\u573a\u666f\u7528\u66f4\u7d27\u51d1\u7684 xs\uff0820px\uff09\uff0c\u5361\u7247\u573a\u666f\u4ecd\u4f7f\u7528 sm\uff0822px\uff09
+                    size="xs"
+                    onRemove={canEdit ? () => removeTag(item.name) : undefined}
+                    onClick={item.status === 'failed' && canEdit ? () => retryFailedTag(item.name) : undefined}
+                    ariaLabel={
+                      item.status === 'failed'
+                        ? t('tagEditor.failedRetry')
+                        : t('tagEditor.removeAriaLabel', { tag: item.name })
+                    }
+                  />
+                </Box>
+              </Tooltip>
             </WrapItem>
           ))}
         </Wrap>
       )}
-
-      {/* ── 输入框 ────────────────────────────────────────────── */}
+      {/* ── 输入框 + 提交按钮一体化 ─────────────────────── */}
+      {/* v1.1：输入框 + 右侧 + 按钮加 spacing 0、连接处去圆角、同高同圆角，形成外观上的一体感。
+          input 右边背面的圆角设为 0，按钮左边背面的圆角设为 0，整体看似 InputGroup。 */}
       {canEdit && (
-        <HStack spacing={fabSpacing['1']}>
+        <HStack spacing={0} h="32px">
           <Input
             ref={inputRef}
             value={input}
@@ -292,14 +291,20 @@ const AssetTagEditor = memo(function AssetTagEditor({ asset, serverUrl, getHeade
             placeholder={t('tagEditor.placeholder')}
             aria-label={t('tagBar.inputAriaLabel')}
             size="sm"
+            h="32px"
             bg={fabColors.bgInput}
             borderColor={errorKey ? fabColors.critical : fabColors.borderSubdued}
-            borderRadius={fabRadius['1.5']}
+            borderRightWidth="0"
+            borderTopLeftRadius={fabRadius['1.5']}
+            borderBottomLeftRadius={fabRadius['1.5']}
+            borderTopRightRadius="0"
+            borderBottomRightRadius="0"
             color={fabColors.textPrimary}
             _placeholder={{ color: fabColors.textSecondary }}
             _focus={{
               borderColor: brandColors.primary,
               boxShadow: `0 0 0 1px ${brandColors.primary}`,
+              zIndex: 1,
             }}
           />
           <Tooltip label={t('tagBar.addButtonAriaLabel')} placement="top" hasArrow openDelay={400}>
@@ -307,13 +312,18 @@ const AssetTagEditor = memo(function AssetTagEditor({ asset, serverUrl, getHeade
               aria-label={t('tagBar.addButtonAriaLabel')}
               icon={input ? <CheckIcon /> : <AddIcon />}
               size="sm"
+              h="32px"
+              minW="36px"
               onClick={handleAddClick}
               isDisabled={!input.trim()}
-              bg={input.trim() ? brandColors.primary : 'transparent'}
+              bg={input.trim() ? brandColors.primary : fabColors.bgElevatedHigh}
               color={input.trim() ? brandColors.onPrimary : fabColors.textSecondary}
               borderWidth="1px"
               borderColor={input.trim() ? brandColors.primary : fabColors.borderSubdued}
-              borderRadius={fabRadius['1.5']}
+              borderTopRightRadius={fabRadius['1.5']}
+              borderBottomRightRadius={fabRadius['1.5']}
+              borderTopLeftRadius="0"
+              borderBottomLeftRadius="0"
               _hover={{
                 bg: input.trim() ? brandColors.primary : fabColors.fillTertiaryHover,
                 opacity: input.trim() ? 0.85 : 1,
@@ -326,7 +336,6 @@ const AssetTagEditor = memo(function AssetTagEditor({ asset, serverUrl, getHeade
           </Tooltip>
         </HStack>
       )}
-
       {/* ── 错误提示行 ────────────────────────────────────────── */}
       {errorKey && (
         <Text fontSize="2xs" color={fabColors.critical}>

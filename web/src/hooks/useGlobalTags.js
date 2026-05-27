@@ -24,6 +24,16 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 分钟缓存
 // 模块级缓存（跨组件共享，避免重复 wss 调用）
 let _cache = { host: '', tags: [], time: 0 };
 
+// [GlobalTagSync] 模块级订阅者集合：任一 hook 实例改 _cache 时，
+// 通知所有挂载中的 useGlobalTags 实例同步 React state，
+// 保证 A 卡新建 tag 后 B 卡 popover 立刻能看到。
+const _listeners = new Set();
+function _notify() {
+  _listeners.forEach(fn => {
+    try { fn(_cache.tags); } catch (_) { /* ignore */ }
+  });
+}
+
 export default function useGlobalTags({ serverUrl, getHeaders }) {
   const [globalTags, setGlobalTags] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -32,6 +42,15 @@ export default function useGlobalTags({ serverUrl, getHeaders }) {
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
+  }, []);
+
+  // [GlobalTagSync] 订阅模块级 cache 变更
+  useEffect(() => {
+    const handler = (nextTags) => {
+      if (mountedRef.current) setGlobalTags(nextTags);
+    };
+    _listeners.add(handler);
+    return () => { _listeners.delete(handler); };
   }, []);
 
   // 稳定化 effectiveHost
@@ -84,28 +103,33 @@ export default function useGlobalTags({ serverUrl, getHeaders }) {
   const refresh = useCallback(() => {
     _cache = { host: '', tags: [], time: 0 };
     setGlobalTags([]);
+    _notify();
   }, []);
 
   // [TagDeleteSync] 乐观移除指定 tag（用户删除 tag 后立即从候选列表消失）
   const removeTag = useCallback((tagName) => {
     if (!tagName) return;
-    setGlobalTags(prev => prev.filter(t => t !== tagName));
-    // 同步更新模块级缓存
-    if (_cache.tags.length > 0) {
+    // 同步更新模块级缓存（作为唯一真相）
+    if (_cache.tags.includes(tagName)) {
       _cache = { ..._cache, tags: _cache.tags.filter(t => t !== tagName) };
     }
+    // [GlobalTagSync] 广播给所有订阅者（含本实例自身）
+    _notify();
   }, []);
 
   // [TagDeleteSync] 乐观添加新 tag（用户添加 tag 后立即出现在候选列表）
   const addTag = useCallback((tagName) => {
     if (!tagName) return;
-    setGlobalTags(prev => {
-      if (prev.includes(tagName)) return prev;
-      return [...prev, tagName];
-    });
-    if (_cache.tags.length > 0 && !_cache.tags.includes(tagName)) {
-      _cache = { ..._cache, tags: [..._cache.tags, tagName] };
+    // 同步更新模块级缓存（作为唯一真相）
+    if (!_cache.tags.includes(tagName)) {
+      _cache = {
+        host: _cache.host || '',
+        tags: [..._cache.tags, tagName],
+        time: _cache.time || Date.now(),
+      };
     }
+    // [GlobalTagSync] 广播给所有订阅者（含本实例自身）
+    _notify();
   }, []);
 
   return { globalTags, isLoading, refresh, removeTag, addTag };

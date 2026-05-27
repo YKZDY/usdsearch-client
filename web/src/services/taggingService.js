@@ -231,9 +231,12 @@ async function call(serverUrl, authToken, method, params, meta = {}) {
 
   // [TagFailureSurface] 入口诊断日志：非 production 完整 wsUrl；production 只 host+method
   // token 一律 head4 截断，绝不打印完整 token
+  // === LM CUSTOMIZATION: ReduceConsoleNoise START ===
+  // 原因：console.info 在开发环境下刷屏严重（每个资产卡片都会触发），改为 console.debug
+  // 合入英伟达新版时：保留本块
   const isProd = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production');
   if (!isProd) {
-    console.info('[TaggingService] dialing', {
+    console.debug('[TaggingService] dialing', {
       host,
       method,
       tokenSource,
@@ -241,6 +244,7 @@ async function call(serverUrl, authToken, method, params, meta = {}) {
       tokenHead4: tokenHead4(authToken),
     });
   }
+  // === LM CUSTOMIZATION: ReduceConsoleNoise END ===
 
   const wsUrl = `wss://${host}${ENDPOINT}?access_token=${encodeURIComponent(authToken)}`;
 
