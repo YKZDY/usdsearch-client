@@ -58,6 +58,9 @@ import { useTranslation } from "../i18n/LanguageContext";
 import CardSelectCheckbox from "./shared/CardSelectCheckbox";
 import EmptySearchHint from "./EmptySearchHint";
 import { useDragSelect } from "../hooks/useDragSelect";
+// === LM CUSTOMIZATION: ImageStateStore START ===
+import { getImageState } from "../utils/imageStateStore";
+// === LM CUSTOMIZATION: ImageStateStore END ===
 // === LM CUSTOMIZATION: ClickHandlerUnify START ===
 // 卡片点击事件统一入口：SINGLE_CLICK_DRAWER 模式下走轻量直通路径，避免与
 // useDragSelect 双重消费 mousemove。详见 hooks/useDrawerCardHandlers.js 头部注释。
@@ -315,6 +318,19 @@ const VirtualizedResultGridItem = memo(({
   const { t } = useTranslation();
   const baseKey = result.source?.base_key || result.source?.url || result.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
+  // === LM CUSTOMIZATION: SimilarSearchOffset START ===
+  // 通过回调 prop 实时同步 NavigableAssetImage 的当前 offset 和 imageData
+  // 注意：useImperativeHandle + ref 在虚拟列表 + React.memo 环境下不可靠（ref.current 始终为 null），
+  // 因此改用 useRef 存储回调传来的最新状态，handleFindSimilar 直接读取。
+  // 同时保留 DOM 兜底方案：如果回调未触发，直接从 <img> 元素获取当前 src。
+  const imageStateRef = useRef({ currentOffset: 0, imageData: null });
+  const handleOffsetChange = useCallback((offset) => {
+    imageStateRef.current.currentOffset = offset;
+  }, []);
+  const handleCurrentImageChange = useCallback((imgData) => {
+    imageStateRef.current.imageData = imgData;
+  }, []);
+  // === LM CUSTOMIZATION: SimilarSearchOffset END ===
 
   // V2 Q1-A: 识别 tag 命中
   const isTagHit = useMemo(() => {
@@ -338,11 +354,48 @@ const VirtualizedResultGridItem = memo(({
     copyToClipboard?.(baseKey);
   }, [copyToClipboard, baseKey]);
 
+  // === LM CUSTOMIZATION: SimilarSearchOffset START ===
+  // 从 DOM 直接获取当前展示的图片 base64（最可靠的方案）
+  // 不依赖 React state/ref 传递，因为在虚拟列表 + React.memo 环境下回调不可靠
+  const cardRef = useRef(null);
   const handleFindSimilar = useCallback((e) => {
     e.stopPropagation();
-    onFindSimilar?.(baseKey);
-  }, [onFindSimilar, baseKey]);
+    
+    let imageData = null;
+    let currentOffset = 0;
 
+    // 方式 1（最可靠）：从全局 Map 读取
+    const globalState = getImageState(baseKey);
+    if (globalState?.imageData) {
+      imageData = globalState.imageData;
+      currentOffset = globalState.currentOffset || 0;
+    }
+
+    // 方式 2（兆底）：从 DOM 获取
+    if (!imageData) {
+      const cardEl = cardRef.current;
+      if (cardEl) {
+        const img = cardEl.querySelector('img[alt="Asset thumbnail"]');
+        if (img && img.src && img.src.startsWith('data:')) {
+          imageData = img.src;
+        }
+      }
+    }
+
+    // 方式 3（最后兆底）：从事件冒泡路径获取
+    if (!imageData) {
+      const card = e.target?.closest?.('[data-card-index]');
+      if (card) {
+        const img = card.querySelector('img[alt="Asset thumbnail"]');
+        if (img && img.src && img.src.startsWith('data:')) {
+          imageData = img.src;
+        }
+      }
+    }
+    
+    onFindSimilar?.(baseKey, currentOffset, imageData);
+  }, [onFindSimilar, baseKey]);
+  // === LM CUSTOMIZATION: SimilarSearchOffset END ===
   // === LM CUSTOMIZATION: ClickHandlerUnify START ===
   // 卡片点击事件统一入口（替换原 useClickOrDoubleClick 直接挂载）。
   // SINGLE_CLICK_DRAWER=true：走轻量直通，仅记 mousedown 起点；不监听 mousemove，让
@@ -391,6 +444,7 @@ const VirtualizedResultGridItem = memo(({
           2) 拖拽框选无法识别卡片 → 框选体验异常。
         合入英伟达新版时：data-card-index 是无害扩展属性，可保留。 */}
     <Card 
+      ref={cardRef}
       data-card-index={index}
       bg={isSelected ? "#2a2b1e" : "rgba(255, 255, 255, 0.05)"} 
       borderColor={isSelected ? "#FFD230" : defaultBorderColor} 
@@ -464,6 +518,9 @@ const VirtualizedResultGridItem = memo(({
               width="100%"
               height="auto"
               borderRadius="md"
+              onOffsetChange={handleOffsetChange}
+              onCurrentImageChange={handleCurrentImageChange}
+              onFindSimilar={onFindSimilar}
               style={{ aspectRatio: "16/9", objectFit: "cover", backgroundColor: "rgb(40, 40, 44)" }}
             />
             {/* Hover overlay — Fab: white bg, opacity 0→0.1 */}
@@ -726,6 +783,16 @@ const VirtualizedResultListItem = memo(({
   
   const baseKey = result.source?.base_key || result.source?.url || result.id;
   const filename = baseKey?.split('/').pop() || 'Unknown';
+  // === LM CUSTOMIZATION: SimilarSearchOffset START ===
+  // 通过回调 prop 实时同步 NavigableAssetImage 的当前 offset 和 imageData
+  const imageStateRef = useRef({ currentOffset: 0, imageData: null });
+  const handleOffsetChange = useCallback((offset) => {
+    imageStateRef.current.currentOffset = offset;
+  }, []);
+  const handleCurrentImageChange = useCallback((imgData) => {
+    imageStateRef.current.imageData = imgData;
+  }, []);
+  // === LM CUSTOMIZATION: SimilarSearchOffset END ===
 
   const handleToggleSelect = useCallback((e) => {
     onSelectionChange?.(result, e, index);
@@ -740,10 +807,46 @@ const VirtualizedResultListItem = memo(({
     copyToClipboard?.(baseKey);
   }, [copyToClipboard, baseKey]);
 
+  // === LM CUSTOMIZATION: SimilarSearchOffset START ===
+  const listCardRef = useRef(null);
   const handleFindSimilar = useCallback((e) => {
     e.stopPropagation();
-    onFindSimilar?.(baseKey);
+    
+    let imageData = null;
+    let currentOffset = 0;
+
+    // 方式 1（最可靠）：从全局 Map 读取
+    const globalState = getImageState(baseKey);
+    if (globalState?.imageData) {
+      imageData = globalState.imageData;
+      currentOffset = globalState.currentOffset || 0;
+    }
+
+    // 方式 2（兆底）：从 DOM 获取
+    if (!imageData) {
+      const cardEl = listCardRef.current;
+      if (cardEl) {
+        const img = cardEl.querySelector('img[alt="Asset thumbnail"]');
+        if (img && img.src && img.src.startsWith('data:')) {
+          imageData = img.src;
+        }
+      }
+    }
+
+    // 方式 3（最后兆底）：从事件冒泡路径获取
+    if (!imageData) {
+      const card = e.target?.closest?.('[data-card-index]');
+      if (card) {
+        const img = card.querySelector('img[alt="Asset thumbnail"]');
+        if (img && img.src && img.src.startsWith('data:')) {
+          imageData = img.src;
+        }
+      }
+    }
+    
+    onFindSimilar?.(baseKey, currentOffset, imageData);
   }, [onFindSimilar, baseKey]);
+  // === LM CUSTOMIZATION: SimilarSearchOffset END ===
 
   const handleToggle = useCallback((e) => {
     e.stopPropagation();
@@ -855,6 +958,8 @@ const VirtualizedResultListItem = memo(({
               width="200px"
               height="150px"
               borderRadius="md"
+              onOffsetChange={handleOffsetChange}
+              onCurrentImageChange={handleCurrentImageChange}
             />
           </GridItem>
 
@@ -1334,8 +1439,8 @@ const VirtualizedHybridSearchResults = ({
         const showLoadMoreBtn =
           !isLoadingMore && !loadMoreError && hasMore && isResultShortage
           && typeof onTriggerBackendLoadMore === 'function';
-        const showNoMore =
-          !isLoadingMore && !loadMoreError && !hasMore && results.length > 0;
+        // [DISABLED] 暂时禁用"已经到底了"终态文案 — 与"加载更多"功能一起暂停
+        const showNoMore = false;
         const isFooterVisible = isLoadingMore || !!loadMoreError || showLoadMoreBtn || showNoMore;
         if (!isFooterVisible) return null;
         return (

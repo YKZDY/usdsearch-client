@@ -46,6 +46,7 @@ import {
   MinusIcon,
 } from '@chakra-ui/icons';
 import { useTranslation } from '../i18n/LanguageContext';
+import { DEFAULT_SEARCH_PARAMS } from '../config';
 import './FabToolbar.css';
 
 // === LM CUSTOMIZATION: v3 modular filter components ===
@@ -200,13 +201,16 @@ function FabToolbar({
 
 
   // ── 清空工具 ──
+  // [LM 2026-05-26 R2] 不再硬编码 'usd,usda,usdc,usdz,jpg,png'；
+  //   统一使用 DEFAULT_SEARCH_PARAMS.file_extension_exclude（已在 config.jsx 移除 USD 系列），
+  //   保证 "清空格式" 与 "恢复默认" 按钮行为一致，避免再次出现 include/exclude 双向硬编码漂移。
   const clearFormat = useCallback(() => {
     setSearchParams(prev => ({
       ...prev,
       file_name: '',
       exclude_file_name: '',
       file_extension_include: '',
-      file_extension_exclude: 'usd,usda,usdc,usdz,jpg,png',
+      file_extension_exclude: DEFAULT_SEARCH_PARAMS.file_extension_exclude,
     }));
   }, [setSearchParams]);
 

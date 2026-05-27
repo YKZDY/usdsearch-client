@@ -82,7 +82,11 @@ const TagEditPopover = function TagEditPopover({
   const inputRef = useRef(null);
 
   // 懒加载候选库：仅 isOpen=true 时才传 serverUrl，避免无意义网络
-  const { globalTags, isLoading } = useGlobalTags(
+  // [GlobalTagSync] 拿出 addTag 用于在本地创建后广播到所有挂载中的
+  // useGlobalTags 实例，修复"A 卡创建 zxc 后 B 卡 popover 看不到"的 bug。
+  // 注意：不消费 removeTag —— 用户在 popover 删的是"资产↔tag 关联"，
+  // 不是"全局 tag 真删"，候选池不应该因此消失。
+  const { globalTags, isLoading, addTag: addGlobalTag } = useGlobalTags(
     isOpen ? { serverUrl, getHeaders } : { serverUrl: '', getHeaders },
   );
 
@@ -134,8 +138,12 @@ const TagEditPopover = function TagEditPopover({
       onRemoveTag?.(trimmed);
     } else {
       onAddTag?.(trimmed);
+      // [GlobalTagSync] 同步上报到全局候选池，
+      // 让其他卡片 / 其他 popover 实例立刻看到这个新 tag。
+      // （addGlobalTag 内部会去重，重复调用安全）
+      addGlobalTag?.(trimmed);
     }
-  }, [selectedTags, onAddTag, onRemoveTag]);
+  }, [selectedTags, onAddTag, onRemoveTag, addGlobalTag]);
 
   const handleEnter = useCallback(() => {
     if (highlightIdx >= 0 && candidates[highlightIdx]) {

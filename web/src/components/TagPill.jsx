@@ -21,17 +21,32 @@ import React, { memo } from 'react';
 import { Tag, TagLabel, TagCloseButton, Tooltip, Box } from '@chakra-ui/react';
 import { brandColors, fabColors, fabRadius, fabSpacing } from '../theme/fabTokens';
 
+// v1.1.1 修正：为防止小写字母 descender (g/y/p/q/j) 被截断，
+// 高度加1-2px、lineHeight 不再用 1（严重挤压下伸部）改为具体 px。
+// 原则：lineHeight ≈ fontSize × 1.45，且 ≤ height - 2 避免裁切。
 const SIZE_PRESETS = {
+  // 抽屉场景专用紧凑 chip
+  xs: {
+    height: '24px',          // 原 20 → 24，留出 descender 空间
+    px: fabSpacing['2'],     // 8px
+    fontSize: '12px',        // 原 11 → 12，提升可读性
+    lineHeight: '16px',
+    closeBtnSize: '14px',
+  },
+  // 卡片场景默认 chip
+  // v1.1.2：26 → 24px，避免占据卡片图片区高度；lineHeight 14px 仍留 descender 缓冲
   sm: {
-    height: '22px',
-    px: fabSpacing['2'],   // 8px
-    fontSize: '11px',
+    height: '24px',
+    px: fabSpacing['2'],     // 8px
+    fontSize: '12px',
+    lineHeight: '14px',
     closeBtnSize: '14px',
   },
   md: {
-    height: '26px',
-    px: fabSpacing['2.5'], // 10px
-    fontSize: '12px',
+    height: '30px',
+    px: fabSpacing['2.5'],   // 10px
+    fontSize: '13px',
+    lineHeight: '18px',
     closeBtnSize: '16px',
   },
 };
@@ -43,7 +58,7 @@ const SIZE_PRESETS = {
  * @param {boolean} [props.removable=false] - 是否显示 × 按钮（hover 才显示）
  * @param {Function} [props.onRemove] - 点击 × 时触发
  * @param {Function} [props.onClick] - 点击 chip 本体时触发（用于 toggle）
- * @param {'sm'|'md'} [props.size='sm']
+ * @param {'xs'|'sm'|'md'} [props.size='sm']
  * @param {'normal'|'pending'|'failed'} [props.status='normal']
  * @param {string} [props.maxW='160px'] - 最大宽度（超长截断）
  * @param {string} [props.ariaLabel] - 可选 aria-label 覆盖
@@ -124,7 +139,7 @@ const TagPill = memo(function TagPill({
       px={preset.px}
       fontSize={preset.fontSize}
       fontWeight="600"
-      lineHeight="1"
+      lineHeight={preset.lineHeight}
       opacity={opacity}
       cursor={isClickable ? 'pointer' : 'default'}
       transition="background 0.12s ease, opacity 0.12s ease, border-color 0.12s ease"

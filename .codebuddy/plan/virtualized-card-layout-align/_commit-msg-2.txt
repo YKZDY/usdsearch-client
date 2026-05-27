@@ -1,0 +1,20 @@
+fix(virtualized): itemHeight 320→335 修正卡片底部按钮挤压
+
+第一轮 320 错把 chakra-stack 内容高(317)当作卡片高,实际 chakra-card
+真实自然高度是 335px(含 card padding 和 body padding)。
+
+精准用 `.chakra-card` 选择器实测确认:
+- 非虚拟化 chakra-card.h = 335
+- chakra-card__body.h = 333(被 320 容器压缩 14px → 内容溢出)
+- VirtualizedResults.jsx:77 用 rowHeight = itemHeight + gap,itemHeight 不含 gap
+
+修复:
+- 默认 grid itemHeight 320→335(贴 chakra-card 真实高度)
+- gridSize='S' 188 不变(已实测对齐)
+
+视觉验证:
+- 卡片底部按钮(复制+查找)正常显示,呼吸空间恢复
+- 滚到底视口黑带 16px(=vGap,合理留白)
+- limit=50/100 卡片高度完全一致
+
+证据:.codebuddy/plan/virtualized-card-layout-align/EVIDENCE.md

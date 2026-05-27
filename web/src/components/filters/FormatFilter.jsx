@@ -7,6 +7,7 @@ import MemoryChip from './MemoryChip';
 import { useLocalFilterState } from '../shared/useLocalFilterState';
 import { useFilterMemory } from '../../hooks/useFilterMemory';
 import { DEFAULT_SEARCH_PARAMS } from '../../config';
+import { parseExtListForUI as parseExtList } from '../../utils/extNormalize';
 
 const FORMAT_KEYS = ['file_extension_include', 'file_extension_exclude', 'exclude_file_name'];
 const DEFAULT_EXCLUDE = DEFAULT_SEARCH_PARAMS.file_extension_exclude || '';
@@ -99,23 +100,6 @@ const BanIcon = () => (
     <line x1="3.8" y1="3.8" x2="12.2" y2="12.2" />
   </svg>
 );
-
-function normalizeExt(ext) {
-  if (!ext) return '';
-  const trimmed = String(ext).trim().toLowerCase();
-  if (!trimmed) return '';
-  return trimmed.startsWith('.') ? trimmed : `.${trimmed}`;
-}
-
-function parseExtList(str) {
-  const seen = new Set();
-  const out = [];
-  String(str || '').split(',').forEach(s => {
-    const n = normalizeExt(s);
-    if (n && !seen.has(n)) { seen.add(n); out.push(n); }
-  });
-  return out;
-}
 
 /**
  * FormatFilter - v4 极致紧凑版

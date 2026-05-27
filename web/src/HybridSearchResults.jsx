@@ -72,6 +72,9 @@ import FailedBadge from "./components/FailedBadge";
 // 合入英伟达新版时：保留本 import。
 import CardTagBar from "./components/CardTagBar";
 // === LM CUSTOMIZATION: CardTagBar END ===
+// === LM CUSTOMIZATION: ImageStateStore START ===
+import { getImageState } from "./utils/imageStateStore";
+// === LM CUSTOMIZATION: ImageStateStore END ===
 
 const HighlightedText = ({ text, matchedTerms = [], isValue = false, noOfLines, isTruncated = false }) => {
   const truncateProps = {};
@@ -681,7 +684,12 @@ const HybridSearchResultGridItem = memo(({
                       icon={<SearchIcon />}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onFindSimilar?.(baseKey);
+                        // === LM CUSTOMIZATION: ImageStateStore START ===
+                        const globalState = getImageState(baseKey);
+                        const imgData = globalState?.imageData || null;
+                        const imgOffset = globalState?.currentOffset || 0;
+                        onFindSimilar?.(baseKey, imgOffset, imgData);
+                        // === LM CUSTOMIZATION: ImageStateStore END ===
                       }}
                       aria-label={t('findSimilarAssets')}
                       colorScheme="purple"
@@ -727,7 +735,12 @@ const HybridSearchResultGridItem = memo(({
                         icon={<SearchIcon />}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onFindSimilar?.(baseKey);
+                          // === LM CUSTOMIZATION: ImageStateStore START ===
+                          const globalState = getImageState(baseKey);
+                          const imgData = globalState?.imageData || null;
+                          const imgOffset = globalState?.currentOffset || 0;
+                          onFindSimilar?.(baseKey, imgOffset, imgData);
+                          // === LM CUSTOMIZATION: ImageStateStore END ===
                         }}
                         aria-label={t('findSimilarAssets')}
                         colorScheme="purple"
@@ -949,7 +962,12 @@ const HybridSearchResultItem = memo(({
                       icon={<SearchIcon />}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onFindSimilar?.(baseKey);
+                        // === LM CUSTOMIZATION: ImageStateStore START ===
+                        const globalState = getImageState(baseKey);
+                        const imgData = globalState?.imageData || null;
+                        const imgOffset = globalState?.currentOffset || 0;
+                        onFindSimilar?.(baseKey, imgOffset, imgData);
+                        // === LM CUSTOMIZATION: ImageStateStore END ===
                       }}
                       aria-label={t('findSimilarAssets')}
                       colorScheme="purple"
