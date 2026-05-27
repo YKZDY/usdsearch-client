@@ -63,6 +63,7 @@ import {
 } from "@chakra-ui/icons";
 
 import { apiUrl as defaultApiUrl, defaultEmbeddingConfig, AUTH_CONFIG, FEATURE_FLAGS, SERVER_MAPPING, SEARCH_DEFAULTS, DEFAULT_SEARCH_PARAMS, resolveNucleusHost, getDefaultServerKey } from "./config";
+import { normalizeExtListForBackend } from "./utils/extNormalize";
 // === LM CUSTOMIZATION: i18n START ===
 import { useTranslation } from "./i18n/LanguageContext";
 // === LM CUSTOMIZATION: i18n END ===
@@ -597,11 +598,12 @@ const HybridDeepSearchUI = () => {
   //   usePolyfillNoSelectPrefixes(isDraggingForPolyfill);
 
   // hasMore 判定：只要 isResultShortage=false 或底层还有数据就认为还能加载
-  // 简化处理：只要有当前结果且未达到软上限 (默认 1000、5 页”) 认为 hasMore。
+  // 简化处理：只要有当前结果且未达到软上限 (默认 1000、5 页") 认为 hasMore。
   // 后端返回的总计数（data.total）未入库进状态不能精准判断，用软上限打底免得无限加载。
   const HARD_LIMIT_USER_LIMIT = 1000;
-  const hasMore = userLimit < HARD_LIMIT_USER_LIMIT && (visibleResults.length > 0 || isResultShortage);
-  // === LM CUSTOMIZATION: InfinitePagination END ===
+  // [DISABLED] 暂时禁用"加载更多"功能 — 用户反馈当前阶段不需要此功能
+  // 原逻辑：const hasMore = userLimit < HARD_LIMIT_USER_LIMIT && (visibleResults.length > 0 || isResultShortage);
+  const hasMore = false;  // === LM CUSTOMIZATION: InfinitePagination END ===
 
   // pathTree 用 visibleResults 聚合，确保节点徽章数字 == 该路径下实际可见卡片数
   const { tree: pathTree } = usePathSuggestions(visibleResults, { liveTree });
@@ -1932,7 +1934,64 @@ const HybridDeepSearchUI = () => {
   const embeddingConfigRef = useRef(embeddingConfig);
   embeddingConfigRef.current = embeddingConfig;
 
-  const handleFindSimilar = useCallback(async (assetUrl) => {
+  // === LM CUSTOMIZATION: SimilarSearchOffset START ===
+  // 原因：支持带 img_offset 的相似搜索，使用当前卡片展示的预览图而非固定 offset=0
+  // 合入英伟达新版时：保留本块，如果上游修改了 handleFindSimilar 签名需要合并
+  // currentImageData: 当前展示的预览图 data URL（如果非 offset=0，用它做 base64 搜索）
+  const handleFindSimilar = useCallback(async (assetUrl, imgOffset = 0, currentImageData = null) => {
+  // === LM CUSTOMIZATION: SimilarSearchOffset END ===
+    // === LM CUSTOMIZATION: BlackImageGuard START ===
+    // 原因：检测当前 offset 的预览图是否为黑图，如果是则自动回退到第一张有效图
+    // 合入英伟达新版时：保留本块（NVIDIA 原版无黑图防护）
+    let effectiveOffset = imgOffset;
+    let effectiveImageData = currentImageData; // 用户当前看到的图片 data URL
+    
+    // 只有在没有 currentImageData 时才做黑图检测（说明用户看的是默认 offset=0 的图）
+    if (!effectiveImageData && imgOffset === 0) {
+      try {
+        const { isBlackImage } = await import('./utils/blackImageDetector');
+        const { loadImage: loadImg, getCachedOffsets } = await import('./utils/imageLoader');
+        const effectiveApiUrl = apiUrl || '';
+        
+        // 尝试加载 offset=0 的图片并检测是否为黑图
+        const cachedOffsets = getCachedOffsets(assetUrl, effectiveApiUrl);
+        if (cachedOffsets.length > 0) {
+          const img0 = await loadImg(assetUrl, getHeaders, effectiveApiUrl, false, 0).catch(() => null);
+          if (img0 && await isBlackImage(img0)) {
+            // offset=0 是黑图，尝试找第一张有效图
+            for (let i = 1; i <= Math.max(...cachedOffsets); i++) {
+              if (!cachedOffsets.includes(i)) continue;
+              const img = await loadImg(assetUrl, getHeaders, effectiveApiUrl, false, i).catch(() => null);
+              if (img && !(await isBlackImage(img))) {
+                effectiveOffset = i;
+                effectiveImageData = img;
+                toast({
+                  title: t('autoSelectedBestPreview') || '已自动选择最佳预览图进行搜索',
+                  status: "info",
+                  duration: 3000,
+                  isClosable: true,
+                });
+                break;
+              }
+            }
+            // 如果所有图都是黑图
+            if (!effectiveImageData && effectiveOffset === 0) {
+              toast({
+                title: t('noValidPreviewForSimilar') || '该资产无有效预览图，无法进行相似搜索',
+                status: "warning",
+                duration: 5000,
+                isClosable: true,
+              });
+              return; // 中止搜索
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('BlackImageGuard: 检测失败，使用原始 offset', err);
+      }
+    }
+    // === LM CUSTOMIZATION: BlackImageGuard END ===
+
     // Clear text search and set up image search using the asset URL
     setSearchQuery("");
     setLastSearchQuery(""); // Clear the last search query since this is a similarity search
@@ -1942,7 +2001,12 @@ const HybridDeepSearchUI = () => {
     const filename = assetUrl?.split('/').pop() || 'Unknown Asset';
     setSimilarSearchAsset({
       url: assetUrl,
-      filename: filename
+      filename: filename,
+      // === LM CUSTOMIZATION: SimilarSearchOffset START ===
+      imgOffset: effectiveOffset || 0,
+      // 存储当前展示的预览图 base64，用于摘要条展示（避免重新加载 offset=0 的黑图）
+      previewImageData: effectiveImageData || null,
+      // === LM CUSTOMIZATION: SimilarSearchOffset END ===
     });
     
     // Read from refs to avoid dependency on frequently-changing values
@@ -1971,11 +2035,35 @@ const HybridDeepSearchUI = () => {
       scoring_config: currentHybridConfig,
       
       // Vector queries using asset URL for image similarity
-      vector_queries: [{
-        field_name: currentEmbeddingConfig.field_name,
-        query_type: "image",
-        query: assetUrl
-      }],
+      // === LM CUSTOMIZATION: SimilarSearchOffset START ===
+      // 当有用户当前看到的预览图 base64 时，直接用它做相似搜索
+      // 否则使用 asset URL（后端会用该资产的默认 embedding）
+      vector_queries: await (async () => {
+        let queryValue = assetUrl;
+        
+        if (effectiveImageData) {
+          // 使用当前展示的预览图 base64（无论 offset 是什么）
+          queryValue = effectiveImageData.replace(/^data:image\/[^;]+;base64,/, '');
+        } else if (effectiveOffset > 0) {
+          // 回退：从 imageLoader 缓存中获取
+          try {
+            const { loadImage: loadImg } = await import('./utils/imageLoader');
+            const imgData = await loadImg(assetUrl, getHeaders, apiUrl || '', false, effectiveOffset);
+            if (imgData) {
+              queryValue = imgData.replace(/^data:image\/[^;]+;base64,/, '');
+            }
+          } catch (_) {
+            // 获取失败，回退到 asset URL
+          }
+        }
+        
+        return [{
+          field_name: currentEmbeddingConfig.field_name,
+          query_type: "image",
+          query: queryValue
+        }];
+      })(),
+      // === LM CUSTOMIZATION: SimilarSearchOffset END ===
       
       // Legacy filters
       ...Object.fromEntries(
@@ -2077,12 +2165,21 @@ const HybridDeepSearchUI = () => {
       .catch(error => {
         if (error.message === '__auth_required__' || error.message === '__no_results__') return;
         console.error("Similar search error:", error);
+        // === LM CUSTOMIZATION: SimilarSearchErrorUX START ===
+        // 原因：当 HTTP 500 且是图片相关错误时，展示友好提示而非通用错误
+        // 合入英伟达新版时：保留本块
+        const isServerError = error.message?.includes('500');
+        const errorDescription = isServerError
+          ? (t('similarSearchImageError') || '该预览图无法用于相似搜索，请尝试切换到其他预览图后重试')
+          : error.message;
         toast({
           title: t('similarSearchFailed'),
-          description: error.message,
+          description: errorDescription,
           status: "error",
           duration: 5000,
+          isClosable: true,
         });
+        // === LM CUSTOMIZATION: SimilarSearchErrorUX END ===
       })
       .finally(() => {
         setIsLoading(false);
@@ -2434,6 +2531,42 @@ const HybridDeepSearchUI = () => {
         delete requestBody.file_extension_exclude;
       }
 
+      // === LM CUSTOMIZATION: FormatFilter START ===
+      // 原因（R4 / 2026-05-26）：FormatFilter 内部 chip 用带前导点形式（".usd" / ".png"）表示扩展名，
+      //   方便 UI 显示与冲突检测；但后端 ext 字段存的是不带点的小写值（如 "usd" / "png"），
+      //   按字符串字面比较 → ".usd" ≠ "usd" → 0 hit。
+      //   症状（用户提报）：勾选 .usd / .png / 多扩展组合 → 0 条结果。
+      //   修复策略：在请求体最后一公里统一标准化 — 去前导点、转小写、去空、去重。
+      //   同时保留 R2 的 include/exclude 冲突消解逻辑。
+      //   注意：保留上面"浏览模式删 exclude"逻辑不动（该分支更激进，符合需求 2.4）。
+      // 合入英伟达新版时：保留本块；如英伟达升级后端到 OR 语义或自动归一化，可整体移除。
+      // normalizeExtListForBackend 已抽到 utils/extNormalize.js（顶部 import）
+      // 标准化 include
+      if (requestBody.file_extension_include) {
+        const incList = normalizeExtListForBackend(requestBody.file_extension_include);
+        if (incList.length === 0) {
+          delete requestBody.file_extension_include;
+        } else {
+          requestBody.file_extension_include = incList.join(',');
+        }
+      }
+      // 标准化 exclude，并消解与 include 的冲突
+      if (requestBody.file_extension_exclude) {
+        const excList = normalizeExtListForBackend(requestBody.file_extension_exclude);
+        const incSet = new Set(
+          requestBody.file_extension_include
+            ? normalizeExtListForBackend(requestBody.file_extension_include)
+            : []
+        );
+        const cleaned = excList.filter(ext => !incSet.has(ext));
+        if (cleaned.length === 0) {
+          delete requestBody.file_extension_exclude;
+        } else {
+          requestBody.file_extension_exclude = cleaned.join(',');
+        }
+      }
+      // === LM CUSTOMIZATION: FormatFilter END ===
+
       // === [calvingu 2026-05-13] limit 鲁棒覆盖 (位置无关) ===
       // 防御 spread 顺序 / clientOnlyFields 漏项 / webpack 缓存等历史踩坑：
       // 在 fetch 前最后一次显式赋值，确保 requestBody.limit === 过采样后的 apiLimit。
@@ -2537,10 +2670,16 @@ const HybridDeepSearchUI = () => {
               if (!ext) return true; // 没有扩展名的保留
               return !exts.some(e => {
                 if (e.includes('*')) {
+                  // === LM CUSTOMIZATION: FormatFilter START ===
+                  // 原因（R3 / 2026-05-26）：移除原本针对 usd* 通配符的 hack 保护
+                  //   `if (e.startsWith('usd') && (ext === 'uasset' || ext === 'fbx')) return false;`
+                  //   该保护在"USD 已是主资产"的新业务语义下不再需要；
+                  //   include/exclude 冲突已在请求体构造处（约第 2440 行）统一消解，
+                  //   通用通配符语义对 client 端二次过滤即可。
+                  // 合入英伟达新版时：保持本块；如英伟达自己加了类似 hack，按通用语义合并即可。
                   const re = new RegExp('^' + e.replace(/\*/g, '.*') + '$');
-                  // 保护 uasset/fbx 等主要 3D 资产格式不被 usd* 等通配符误杀
-                  if (e.startsWith('usd') && (ext === 'uasset' || ext === 'fbx')) return false;
                   return re.test(ext);
+                  // === LM CUSTOMIZATION: FormatFilter END ===
                 }
                 return ext === e;
               });
@@ -3204,14 +3343,28 @@ const HybridDeepSearchUI = () => {
                   boxShadow="0 2px 8px rgba(0,0,0,0.4)"
                   bg="gray.900"
                 >
-                  <AssetImage
-                    result={{ source: { base_key: similarSearchAsset.url } }}
-                    getHeaders={getHeaders}
-                    apiUrl={apiUrl}
-                    width="120px"
-                    height="90px"
-                    borderRadius="0"
-                  />
+                  {/* === LM CUSTOMIZATION: SimilarSearchPreview START === */}
+                  {/* 优先使用存储的预览图 base64（避免重新加载 offset=0 的黑图） */}
+                  {similarSearchAsset.previewImageData ? (
+                    <Box
+                      as="img"
+                      src={similarSearchAsset.previewImageData}
+                      alt="Similar search preview"
+                      width="120px"
+                      height="90px"
+                      objectFit="cover"
+                    />
+                  ) : (
+                    <AssetImage
+                      result={{ source: { base_key: similarSearchAsset.url } }}
+                      getHeaders={getHeaders}
+                      apiUrl={apiUrl}
+                      width="120px"
+                      height="90px"
+                      borderRadius="0"
+                    />
+                  )}
+                  {/* === LM CUSTOMIZATION: SimilarSearchPreview END === */}
                   {/* Subtle gradient overlay */}
                   <Box
                     position="absolute"

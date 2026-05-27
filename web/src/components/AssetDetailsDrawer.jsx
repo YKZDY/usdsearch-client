@@ -51,7 +51,11 @@ import {
 import { useTranslation } from '../i18n/LanguageContext';
 import { fabColors, fabRadius, fabSpacing, brandColors, fabTypo } from '../theme/fabTokens';
 import AssetImage from './AssetImage';
+import NavigableAssetImage from './NavigableAssetImage';
 import { formatFileSize, formatDate } from '../utils/formatUtils';
+// === LM CUSTOMIZATION: MultiImageDrawer START ===
+import { findFirstValidImageIndex } from '../utils/blackImageDetector';
+// === LM CUSTOMIZATION: MultiImageDrawer END ===
 
 // === LM CUSTOMIZATION: detail-modal-revamp START ===
 // 需求 6.4：时间戳根据当前语言格式化（中文：2026年5月22日 / 英文：May 22, 2026）
@@ -209,6 +213,10 @@ const AssetDetailsDrawer = ({
   const { t, language } = useTranslation();
   const [collapsed, setCollapsed] = useState(readCollapsedState);
   const [drawerWidth, setDrawerWidth] = useState(readDrawerWidth);
+  // === LM CUSTOMIZATION: MultiImageDrawer START ===
+  // 黑图检测后自动跳转到第一张有效图的 offset
+  const [drawerInitialOffset, setDrawerInitialOffset] = useState(0);
+  // === LM CUSTOMIZATION: MultiImageDrawer END ===
   const triggerElementRef = useRef(null);
   const toast = useToast();
 
@@ -229,6 +237,17 @@ const AssetDetailsDrawer = ({
   }
   // 抽屉打开但 asset 暂时为 null：保留 ref 不变（防闪烁）
   const displayAsset = asset || lastNonNullAssetRef.current;
+  // === LM CUSTOMIZATION: MultiImageDrawer START ===
+  // 当切换到不同资产时，重置 initialOffset（需求 2.4）
+  const prevAssetIdRef = useRef(null);
+  useEffect(() => {
+    const currentId = displayAsset?.id || displayAsset?.source?.base_key || null;
+    if (currentId && currentId !== prevAssetIdRef.current) {
+      prevAssetIdRef.current = currentId;
+      setDrawerInitialOffset(0);
+    }
+  }, [displayAsset]);
+  // === LM CUSTOMIZATION: MultiImageDrawer END ===
   // === LM CUSTOMIZATION: SelectionDrawer END ===
 
   // 移动端强制全屏宽度
@@ -565,10 +584,10 @@ const AssetDetailsDrawer = ({
                 borderColor={fabColors.borderFaint}
                 bg="rgb(40, 40, 44)"
               >
-                {/* === LM CUSTOMIZATION: detail-modal-revamp START === */}
-                {/* v3.3：直接用 cover 撑满预览容器，与 VirtualizedHybridSearchResults 行 429 一致。
-                    资产 PNG 自带的棋盘格作为质感纹理保留（与卡片视觉统一）。 */}
-                <AssetImage
+              {/* === LM CUSTOMIZATION: MultiImageDrawer START === */}
+                {/* 多图预览：使用 NavigableAssetImage 替代 AssetImage，支持 hover 分区切换 + 圆点指示器。
+                    合入英伟达新版时：保留本块（NVIDIA 原版无多图预览功能）。 */}
+                <NavigableAssetImage
                   result={displayAsset}
                   getHeaders={getHeaders}
                   apiUrl={apiUrl}
@@ -576,8 +595,29 @@ const AssetDetailsDrawer = ({
                   height="100%"
                   borderRadius="0"
                   objectFit="cover"
+                  onProgressiveLoadComplete={(images, maxOff) => {
+                    // 自动跳转到第一张有效（非黑）图
+                    if (images && images.size > 1) {
+                      const urls = [];
+                      for (let i = 0; i <= maxOff; i++) {
+                        urls.push(images.get(i) || null);
+                      }
+                      findFirstValidImageIndex(urls).then(validIdx => {
+                        // 通过 ref 或 state 设置 initialOffset 不太方便，
+                        // 这里通过 onOffsetChange 的反向通知来实现
+                        // 实际上 NavigableAssetImage 内部会在 progressive load 完成后
+                        // 自动使用 offset 0，如果 0 是黑图则需要外部干预
+                        // 但由于组件已挂载，我们通过 key 强制重新渲染来设置 initialOffset
+                        if (validIdx > 0) {
+                          setDrawerInitialOffset(validIdx);
+                        }
+                      });
+                    }
+                  }}
+                  initialOffset={drawerInitialOffset}
+                  key={`${displayAsset?.id || displayAsset?.source?.base_key}-${drawerInitialOffset}`}
                 />
-                {/* === LM CUSTOMIZATION: detail-modal-revamp END === */}
+                {/* === LM CUSTOMIZATION: MultiImageDrawer END === */}
               </Box>
               {/* 区块 2：标题 = 资产文件名（不再显示完整 url 占两行）+ 路径副信息。
                   v3 TC-A8：路径行右侧紧贴一个复制路径 IconButton（hover 金色）。 */}
